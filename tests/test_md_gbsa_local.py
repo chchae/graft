@@ -19,7 +19,7 @@ def write(path, data):
 
 
 @pytest.fixture
-def task(tmp_path):
+def task(tmp_path, monkeypatch):
     root = tmp_path/'share/graft-run/CMPID_1/replica01'
     files = {'prime/frames.maegz': b'frames', 'frames.json': [dict(frame=0,time_ps=1000,ligand_rmsd=.2)],
              'identity.json': dict(id=1), 'md/md.job.json': dict(job_id='upstream',downloaded=True)}
@@ -30,11 +30,12 @@ def task(tmp_path):
                                 prime_flexgroup='residue'),
                   files={name:local.digest(root/name) for name in files})
     write(root/'input.json',config)
+    monkeypatch.setattr(calculator, 'frame_count', lambda path: config['protocol']['snapshots'])
     return root, config
 
 
 @pytest.mark.parametrize('key,value', [('local-compute',1),('local-compute','true'),
-    ('local-cpus',17),('local-cpus',0),('local-cpus',True),('local-cpus',2.5),
+    ('local-cpus',193),('local-cpus',0),('local-cpus',True),('local-cpus',2.5),
     ('local-host','-adam'),('local-work-dir','relative'),('local-schrodinger','relative')])
 def test_config_rejects_invalid_local_settings(key,value):
     with pytest.raises(ValueError, match='md-gbsa'):
@@ -327,3 +328,68 @@ def test_prepare_checks_same_shared_mount_and_preserves_frozen_helpers(tmp_path,
     helper.write_text('modified')
     with pytest.raises(RuntimeError,match='helper changed'):
         local.prepare(settings)
+
+
+@pytest.mark.parametrize('slots', [1, 16, 180, 192])
+def test_local_cpu_budget_reaches_native_command(task, monkeypatch, slots):
+    root, config = task
+    config['slots'] = slots
+    write(root/'input.json', config)
+    assert md_gbsa_settings({'md-gbsa-local-cpus': slots})['md_gbsa_local_cpus'] == slots
+    commands = []
+    monkeypatch.setattr(native, 'active_jobs', lambda *a: [])
+    monkeypatch.setattr(native, 'poll_job', lambda folder, phase, cmd, suite:
+                        commands.append(cmd) or dict(status='running'))
+    calculator.poll(root, Path('/suite'))
+    assert commands[0][commands[0].index('-HOST')+1] == f'localhost:{slots}'
+
+
+def test_actual_frame_count_mismatch_blocks_submission(task, monkeypatch):
+    root, config = task
+    monkeypatch.setattr(calculator, 'frame_count', lambda path: 7)
+    monkeypatch.setattr(native, 'poll_job', lambda *a: pytest.fail('mismatched frames submitted'))
+    with pytest.raises(RuntimeError, match='MAEGZ frame count'):
+        calculator.poll(root, Path('/suite'))
+
+
+@pytest.mark.parametrize('slots', [0, 193, True, 1.5])
+def test_remote_cpu_validation_rejects_invalid_budget(task, slots):
+    root, config = task
+    config['slots'] = slots
+    write(root/'input.json', config)
+    with pytest.raises(RuntimeError, match='Invalid Adam Prime request'):
+        calculator.validate_input(root)
+
+
+@pytest.mark.parametrize('count', [1, 7, 20, 33])
+def test_frame_count_reads_actual_maegz_entries(tmp_path, monkeypatch, count):
+    import sys
+    seen = []
+    def reader(path):
+        seen.append(path)
+        return iter(range(count))
+    monkeypatch.setitem(sys.modules, 'schrodinger', SimpleNamespace(
+        structure=SimpleNamespace(StructureReader=reader)))
+    path = tmp_path/'frames.maegz'
+    assert calculator.frame_count(path) == count
+    assert seen == [str(path)]
+
+
+def test_empty_frame_maegz_is_rejected(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, 'schrodinger', SimpleNamespace(
+        structure=SimpleNamespace(StructureReader=lambda path: iter(()))))
+    with pytest.raises(RuntimeError, match='Empty Prime snapshot MAEGZ'):
+        calculator.frame_count(tmp_path/'frames.maegz')
+
+
+def test_single_molecule_recovery_keeps_saved_command(task, monkeypatch):
+    root, config = task
+    command = ['/suite/prime_mmgbsa', 'frames.maegz', '-HOST', 'localhost:16', '-NJOBS', '1']
+    write(root/'prime/prime.job.json', dict(command=command, job_id='saved'))
+    monkeypatch.setattr(calculator, 'frame_count', lambda *a: pytest.fail('recounted submitted input'))
+    commands = []
+    monkeypatch.setattr(native, 'poll_job', lambda folder, phase, cmd, suite:
+                        commands.append(cmd) or dict(status='running'))
+    calculator.poll(root, Path('/new-suite'))
+    assert commands == [command]

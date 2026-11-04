@@ -18,7 +18,7 @@ else:
 def validate_input(root):
     config = json.loads((root/'input.json').read_text())
     if (config['mode'] != 'adam_prime_v1' or type(config['slots']) is not int
-            or not 1 <= config['slots'] <= 16):
+            or not 1 <= config['slots'] <= 192):
         raise RuntimeError('Invalid Adam Prime request')
     if set(config['files']) != {'prime/frames.maegz', 'frames.json', 'identity.json', 'md/md.job.json'}:
         raise RuntimeError('Unexpected Adam input manifest')
@@ -58,16 +58,34 @@ def journal_jobs(root, suite):
     return jobs
 
 
+def frame_count(path):
+    """Count calculation entries in the actual snapshot MAEGZ."""
+    from schrodinger import structure
+    count = sum(1 for _ in structure.StructureReader(str(path)))
+    if count < 1:
+        raise RuntimeError('Empty Prime snapshot MAEGZ')
+    return count
+
+
 def poll(root, suite):
     config = validate_input(root)
     protocol = config['protocol']
+    journal = root/'prime/prime.job.json'
+    count = protocol['snapshots']
+    if not journal.exists():
+        count = frame_count(root/'prime/frames.maegz')
+        if count != protocol['snapshots']:
+            raise RuntimeError('Prime MAEGZ frame count differs from saved protocol')
     command = [str(suite/'prime_mmgbsa'), 'frames.maegz', '-JOBNAME', 'prime_mmgbsa',
-               '-HOST', 'localhost:'+str(config['slots']), '-NJOBS', str(protocol['snapshots']),
+               '-HOST', 'localhost:'+str(config['slots']), '-NJOBS', str(count),
                '-ligand', 'atom.'+native.LIGAND+' 1', '-job_type', 'REAL_MIN',
                '-rflexdist', '6.0', '-rflexgroup', 'residue', '-out_type', 'COMPLEX',
                '-report_prime_log', 'yes', '-OVERWRITE']
-    # Serialize native parents across projects on Adam. Each parent has at most
-    # sixteen single-core Prime subjobs; live/uncertain work blocks another parent.
+    if journal.exists():
+        # Recover the exact command frozen before submission.
+        command = json.loads(journal.read_text())['command']
+    # Serialize native parents across projects on this host. The saved slot budget
+    # bounds single-core subjobs; live/uncertain work blocks another parent.
     path = Path(tempfile.gettempdir())/f'graft-schrodinger-submit-{os.getuid()}.lock'
     with path.open('a') as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)

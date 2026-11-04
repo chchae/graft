@@ -1,5 +1,34 @@
 # Independent Graft reconstruction prompt
 
+## Configurable 192-core local Prime host (2026-11-04)
+
+**Confirmed user request:** the `prime` host has 192 CPU cores; support that
+capacity and derive `-NJOBS` from the actual input MAEGZ frame count rather than
+assuming twenty frames per molecule.
+
+**Implementation choice:** local ordinary Prime and MD-GBSA accept integer slot
+budgets 1..192, retaining the default 16 and default `adam` host. This supersedes
+the 1..16 validation limit below for new requests. Single-host parent exclusion,
+cross-project submission guards and durable recovery remain unchanged. The EGFR
+TOML selects `prime` and 180 slots for both local backends, reserving twelve cores
+for operational headroom; MD snapshot selection is twenty. This is a starting
+recommendation, not measured optimal throughput or a license/memory guarantee.
+Ordinary Prime still has one subjob per original compound, whereas MD-GBSA pools
+ready frames from multiple original compounds into one native queue.
+
+Count the actual per-molecule MAEGZ entries before admitting new MD Prime work;
+reject empty inputs and disagreement with the pinned scientific snapshot count.
+Set pooled `-NJOBS` from these counts and verify it against every frame written
+to the combined MAEGZ before publication/submission. Keep `-HOST localhost:<slots>`
+independent of the number of frames. Recover saved native commands and frozen
+helpers without rewriting host, resources, protocol or JobId. A saved `adam`
+submission cannot be migrated merely because the current TOML selects `prime`;
+an unreachable saved host remains pending and must be reconciled separately.
+No production jobs, claims or scientific results are reset by this change.
+Regression tests use mocked structures/native jobs, not scientific calculations
+or a 192-core throughput benchmark.
+
+
 ## Project rename (2026-11-04)
 
 **Confirmed user request:** rename the software to Graft throughout project

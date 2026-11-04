@@ -12,22 +12,23 @@ from graft import md_gbsa_jobcontrol as adapter, md_gbsa_native as native
 
 
 @pytest.fixture
-def pool(tmp_path,monkeypatch):
+def pool(tmp_path,monkeypatch,request):
     base=tmp_path/'share/graft-test'
+    slots, snapshots, molecules = getattr(request, 'param', (16, 2, 2))
     roots=[]
-    for cid in (1,2):
+    for cid in range(1, molecules+1):
         root=base/f'CMPID_{cid}/replica01'
         (root/'prime').mkdir(parents=True)
         (root/'md').mkdir()
-        config=dict(id=cid,slots=16,protocol=dict(snapshots=2,seed=1,prime_job_type='REAL_MIN',
+        config=dict(id=cid,slots=slots,protocol=dict(snapshots=snapshots,seed=1,prime_job_type='REAL_MIN',
                                               prime_flexdist=6.,prime_flexgroup='residue'))
         native.save(root/'input.json',config)
         native.save(root/'identity.json',dict(id=cid))
-        native.save(root/'frames.json',[dict(frame=i,time_ps=i,ligand_rmsd=.2) for i in range(2)])
+        native.save(root/'frames.json',[dict(frame=i,time_ps=i,ligand_rmsd=.2) for i in range(snapshots)])
         native.save(root/'md/md.job.json',dict(job_id='md-'+str(cid)))
         native.save(root/'prime/frames.maegz',[
             dict(title=f'CMPID_{cid}_FRAME_{i:04d}',property={'r_psp_MMGBSA_dG_Bind':-float(cid*10+i)})
-            for i in range(2)])
+            for i in range(snapshots)])
         roots.append(root)
     class Writer:
         def __init__(self,path):self.path=Path(path);self.entries=[]
@@ -174,3 +175,42 @@ def test_unjournaled_old_launch_cannot_be_admitted_as_new_pooled_work(pool):
     with pytest.raises(RuntimeError,match='Unjournaled Adam calculation artifacts'):
         helper.poll(roots[0],Path('/suite'))
     assert not state['commands']
+
+
+@pytest.mark.parametrize('pool', [(180, 20, 20), (192, 7, 3)], indirect=True)
+def test_pool_uses_actual_maegz_frame_count_and_requested_budget(pool):
+    base, roots, state, helper = pool
+    helper.poll(roots[0], Path('/suite'))
+    batch = adapter.pool_binding(roots[0])
+    entries = json.loads((batch/'prime/frames.maegz').read_text())
+    command = state['commands'][0]
+    config = helper.validate_input(roots[0])
+    assert int(command[command.index('-NJOBS')+1]) == len(entries)
+    assert len(entries) == config['protocol']['snapshots'] * len(roots)
+    assert command[command.index('-HOST')+1] == 'localhost:'+str(config['slots'])
+    helper.poll(roots[-1], Path('/suite'))
+    assert len(state['commands']) == 1
+
+
+def test_input_maegz_count_mismatch_blocks_pool_submission(pool):
+    base, roots, state, helper = pool
+    path = roots[0]/'prime/frames.maegz'
+    entries = json.loads(path.read_text())
+    native.save(path, entries[:-1])
+    with pytest.raises(RuntimeError, match='MAEGZ frame count'):
+        helper.poll(roots[0], Path('/suite'))
+    assert not state['commands']
+
+
+
+def test_combined_maegz_count_must_match_frozen_njobs_before_submission(pool):
+    base, roots, state, helper = pool
+    members = adapter.pool_members(base, helper)
+    batch = base/'pools'/('batch-'+'b'*32)
+    (batch/'prime').mkdir(parents=True)
+    native.save(batch/'request.json', dict(mode='pooled_frames_v1', members=members, slots=16,
+        command=adapter.pool_command(Path('/suite'), 16, 20)))
+    with pytest.raises(RuntimeError, match='NJOBS differs from actual MAEGZ'):
+        helper.poll(roots[0], Path('/suite'))
+    assert not state['commands']
+    assert not (batch/'prime/frames.maegz').exists()

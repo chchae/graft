@@ -302,7 +302,7 @@ def md_gbsa_settings(config: dict[str, Any]) -> dict[str, Any]:
     for suffix, default, minimum, maximum in [
         ('snapshots', 20, 1, None), ('replicates', 1, 1, 100),
         ('gpus', 20, 1, 20), ('cpus', 384, 1, 384), ('seed', 20261021, 1, 2147483647),
-        ('local-cpus', 16, 1, 16),
+        ('local-cpus', 16, 1, 192),
     ]:
         key = 'md-gbsa-' + suffix
         value = config.get(key, default)
@@ -367,8 +367,8 @@ def prime_gbsa_local_settings(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(enabled,bool):
         raise ValueError('prime-gbsa-local-compute must be a boolean')
     cpus=config.get('prime-gbsa-local-cpus',16)
-    if isinstance(cpus,bool) or not isinstance(cpus,int) or not 1<=cpus<=16:
-        raise ValueError('prime-gbsa-local-cpus must be an integer between 1 and 16')
+    if isinstance(cpus,bool) or not isinstance(cpus,int) or not 1<=cpus<=192:
+        raise ValueError('prime-gbsa-local-cpus must be an integer between 1 and 192')
     host=config.get('prime-gbsa-local-host','adam')
     if not isinstance(host,str) or not host or host.startswith('-') or ':' in host or any(c.isspace() for c in host):
         raise ValueError('Invalid prime-gbsa-local-host')

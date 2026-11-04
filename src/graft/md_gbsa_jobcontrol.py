@@ -170,6 +170,7 @@ def pool_binding(root):
 
 
 def pool_members(base, helper):
+    from schrodinger import structure
     members = []
     for marker in sorted(base.glob('CMPID_*/replica*/input.json')):
         root = marker.parent
@@ -178,8 +179,11 @@ def pool_members(base, helper):
         if (root/'prime/prime.launch.log').exists() or (root/'result.json').exists():
             raise RuntimeError('Unjournaled Adam calculation artifacts; no pooled resubmission')
         config = helper.validate_input(root)
+        count = sum(1 for _ in structure.StructureReader(str(root/'prime/frames.maegz')))
+        if count < 1 or count != config['protocol']['snapshots']:
+            raise RuntimeError('Prime MAEGZ frame count differs from saved protocol')
         members.append(dict(path=str(root.relative_to(base)), id=config['id'],
-                            snapshots=config['protocol']['snapshots'],
+                            snapshots=count,
                             input_sha256=hashlib.sha256(marker.read_bytes()).hexdigest()))
     return members
 
@@ -221,6 +225,7 @@ def prepare_pool(batch, helper):
     if (batch/'prime/prime.job.json').exists():
         raise RuntimeError('Missing submitted pooled frames; no rewrite')
     pending=target.with_name('frames.pending.maegz')
+    frame_count = 0
     with structure.StructureWriter(str(pending)) as writer:
         for root,config in members:
             seen=set()
@@ -230,8 +235,12 @@ def prepare_pool(batch, helper):
                     raise RuntimeError('Invalid/duplicate pooled input snapshot identity')
                 seen.add(int(match[1]))
                 writer.append(st)
+                frame_count += 1
             if seen!=set(range(config['protocol']['snapshots'])):
                 raise RuntimeError('Incomplete pooled input snapshots')
+    command = request['command']
+    if int(command[command.index('-NJOBS')+1]) != frame_count:
+        raise RuntimeError('Pooled NJOBS differs from actual MAEGZ frame count')
     # Metadata precedes publication, so a stop between writes can safely finish.
     native.save(batch/'input.json',dict(frames_sha256=hashlib.sha256(pending.read_bytes()).hexdigest()))
     os.replace(pending,target)

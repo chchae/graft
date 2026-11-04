@@ -83,31 +83,31 @@ amber-ssh-config = "/home1/chchae/.ssh/config"
 # 진행 중·복구 대기·재시도 가능 작업은 기다립니다. 서로 다른 score를 섞어 순위를 만들지 않습니다.
 # 유효 결과가 일부만 있으면 그 집합에서 최대 50개만 선택하며 다른 tier로 보충하지 않습니다.
 prime-gbsa-local-compute = true
-prime-gbsa-local-host = "adam"
+prime-gbsa-local-host = "prime"
 prime-gbsa-local-work-dir = "/home1/prime_share"
 prime-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"
-prime-gbsa-local-cpus = 16
+prime-gbsa-local-cpus = 180  # 192코어 중 12코어는 관리·입출력 여유
 
 prime-gbsa-input-count = 100
 prime-gbsa-flexdist = 6.0
 prime-gbsa-license-retry-seconds = 300
 prime-gbsa-license-retries = 3
-# Prime은 선택한 화합물 전체를 한 batch로 제출하고 JobDJ가 최대 7개 subjob을 동시에 실행합니다.
+# 로컬 Prime은 화합물당 한 subjob; 동시 실행은 local-cpus와 화합물 수 중 작은 값.
 # 유연한 receptor는 화합물별 complex 입력으로 처리하여 각 ligand 주변 6 Å 설정을 유지합니다.
 # Iteration 0은 입력 reference 전체를 평가하므로 500/50 제한을 적용하지 않습니다.
 
 
 md-gbsa = true
 md-gbsa-input-count = 20  # Prime 점수 상위 20개; 비율 설정보다 우선
-md-gbsa-snapshots = 10
+md-gbsa-snapshots = 20  # 추출 목표; NJOBS는 실제 입력 MAEGZ 프레임 수로 결정
 md-gbsa-production-ns = 5.0
 md-gbsa-schrodinger = "/share/opt/schrodinger/2026-1"
 
 md-gbsa-local-compute = true
-md-gbsa-local-host = "adam"
+md-gbsa-local-host = "prime"
 md-gbsa-local-work-dir = "/home1/prime_share"
 md-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"
-md-gbsa-local-cpus = 16
+md-gbsa-local-cpus = 180  # 준비된 여러 분자의 프레임을 공통 큐에서 처리
 
 
 # 7. FEP 후보 export / 결과 import; 실제 FEP 계산은 외부 protocol로 별도 수행

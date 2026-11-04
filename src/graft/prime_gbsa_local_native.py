@@ -21,7 +21,7 @@ else:
 
 def validate(root):
     config=json.loads((root/'owner.json').read_text())
-    if config['mode']!='adam_prime_batch_v1' or type(config['slots']) is not int or not 1<=config['slots']<=16:
+    if config['mode']!='adam_prime_batch_v1' or type(config['slots']) is not int or not 1<=config['slots']<=192:
         raise RuntimeError('Invalid Adam Prime batch ownership/budget')
     if hashlib.sha256((root/'input/prime_gbsa.maegz').read_bytes()).hexdigest()!=config['input_sha256']:
         raise RuntimeError('Frozen Adam Prime input changed')

@@ -17,7 +17,7 @@ from graft.md_gbsa_local import digest
 prepare_batch_inputs=local.prepare
 
 
-@pytest.mark.parametrize('key,value', [('compute','true'),('cpus',17),('cpus',0),('cpus',True),
+@pytest.mark.parametrize('key,value', [('compute','true'),('cpus',193),('cpus',0),('cpus',True),
     ('cpus',1.5),('host','-adam'),('host','adam:16'),('work-dir','relative'),('schrodinger','relative')])
 def test_local_prime_config_is_strict(key,value):
     with pytest.raises(ValueError,match='prime-gbsa-local'):
@@ -269,3 +269,27 @@ def test_only_verified_completed_legacy_child_outputs_are_streamed(project,monke
     outputs=calculator.subjobs(root,record['owner'],state,Path('/suite'))
     assert len(outputs)==expected
     assert (root/'subjobs'/child/'result.maegz').exists()==bool(expected)
+
+
+@pytest.mark.parametrize('slots', [1, 16, 180, 192])
+def test_local_prime_cpu_budget_is_pinned_and_remotely_accepted(project, slots):
+    args, directory, record, root, state = project
+    prime.job_file(directory).unlink()
+    args.prime_gbsa_local_cpus = prime_gbsa_local_settings(
+        {'prime-gbsa-local-cpus': slots})['prime_gbsa_local_cpus']
+    saved = local.create_batch(args, directory, [1, 2])
+    assert saved['command'][saved['command'].index('-HOST')+1] == f'localhost:{slots}'
+    save(root/'owner.json', saved['owner'])
+    assert calculator.validate(root)['slots'] == slots
+    # The earlier manifest retains its own resources and host for recovery.
+    assert record['owner']['slots'] == 16
+    assert record['backend']['ssh_host'] == 'adam'
+
+
+@pytest.mark.parametrize('slots', [0, 193, True, 1.5])
+def test_remote_prime_rejects_invalid_cpu_budget(project, slots):
+    args, directory, record, root, state = project
+    owner = dict(record['owner'], slots=slots)
+    save(root/'owner.json', owner)
+    with pytest.raises(RuntimeError, match='ownership/budget'):
+        calculator.validate(root)
