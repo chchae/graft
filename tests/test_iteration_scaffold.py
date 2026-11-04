@@ -219,11 +219,11 @@ def test_mcs_failure_does_not_save_core_or_change_results(project, monkeypatch, 
     elif failure == 'single_input':
         project.prime_gbsa_elite_count = 1
         elites = elites[:1]
-        message = 'At least two input ligands'
+        message = 'no saved scaffold'
     else:
         elites = [(100, 'A', 'c1ccccc1', 1, -10, -40),
                   (101, 'B', 'c1ccccc1', 1, -9, -30)]
-        message = 'Fewer than two variable positions'
+        message = 'no saved scaffold'
     with pytest.raises(RuntimeError, match=message):
         prepare_iteration_scaffold(project, 2, elites, create=True)
     assert database.iteration_scaffold(project.db_path, 2) is None
@@ -253,41 +253,25 @@ def fallback_project(project):
 
 
 @pytest.mark.parametrize('identical', [False, True])
-def test_insufficient_automatic_attachments_reuse_previous_scaffold_and_resume(
-        fallback_project, monkeypatch, capsys, identical):
+def test_insufficient_automatic_attachments_reuse_same_sites_when_no_alternative_exists(
+        fallback_project, identical):
     project, elites, previous = fallback_project
     if identical:
         elites[1] = (*elites[1][:2], elites[0][2], *elites[1][3:])
     prepare_iteration_scaffold(project, 2, elites, create=True)
-    snapshot = database.iteration_scaffold(project.db_path, 2)
-    assert snapshot['source'] == 'previous_iteration_scaffold_fallback'
-    assert snapshot['source_ids'] == [100, 101]
-    assert snapshot['fallback_from_iteration'] == 1
-    assert snapshot['fallback_reason'] == 'insufficient_attachment_sites'
-    assert snapshot['mcs_smarts'] == previous['mcs_smarts']
-    assert snapshot['scaffold_smiles'] == previous['scaffold_smiles']
-    assert snapshot['attempted_mcs_smarts'] != previous['mcs_smarts']
-    assert snapshot['docking_mcs_smarts'] == project.initial_mcs_smarts
-    assert 'supplied_elite_mcs' not in snapshot
+    saved = database.iteration_scaffold(project.db_path, 2)
+    assert saved['source'] == 'previous_mcs_reused_attachments'
+    assert saved['scaffold_smiles'] == previous['scaffold_smiles']
+    assert saved['mcs_smarts'] == previous['mcs_smarts']
+    assert saved['fallback_reason'] == 'no_alternate_attachment_points'
     assert database.iteration_scaffold(project.db_path, 1) == previous
-    assert 'reusing validated scaffold from iteration 1' in capsys.readouterr().out
-    assert all(_core.decompose_elite_for_libinvent(row[2], snapshot['scaffold_smiles']) for row in elites)
     with database.connect(project.db_path) as conn:
         assert conn.execute("SELECT prime_gbsa_score,state FROM compound WHERE name='E1'").fetchone() == (-40, 'prime_gbsa_done')
-
-    project.libinvent_scaffold_file.unlink()
-    project.elite_mcs_smarts = '[*:0]Nc1ccc([*:1])cc1'
-    monkeypatch.setattr(_core, 'prepare_libinvent_scaffold', lambda *a, **k: pytest.fail('recomputed on resume'))
-    monkeypatch.setattr(_core, 'decompose_elite_for_libinvent', lambda *a: pytest.fail('revalidated on resume'))
-    prepare_iteration_scaffold(project, 2, create=True)
-    assert database.iteration_scaffold(project.db_path, 2) == snapshot
-    assert project.libinvent_scaffold_file.read_text().strip() == previous['scaffold_smiles']
-    assert 'previous scaffold fallback from iteration 1' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize('problem, message', [
     ('missing', 'no saved scaffold'),
-    ('incompatible', 'cannot decompose selected elite IDs'),
+    ('incompatible', 'No chemically different valid attachment points'),
     ('docking_core', 'does not contain the fixed docking core'),
     ('attachments', 'exactly two terminal single-bond attachments'),
     ('invalid', 'Invalid saved MCS/scaffold'),
@@ -337,8 +321,12 @@ def test_fallback_does_not_mask_other_errors_or_replace_supplied_core(fallback_p
     assert database.iteration_scaffold(project.db_path, 2) is None
 
 
-def test_fallback_training_uses_current_elites_and_original_prior(fallback_project, monkeypatch):
+@pytest.mark.parametrize('reuse', [False, True])
+def test_attachment_fallback_training_uses_current_elites_and_original_prior(fallback_project, monkeypatch, reuse):
     project, elites, previous = fallback_project
+    if not reuse:
+        elites = [(row[0], row[1], smiles, *row[3:])
+                  for row, smiles in zip(elites, ['COc1ccccc1Cl', 'COc1ccccc1F'])]
     with database.connect(project.db_path) as conn:
         for name, smiles in [('E1', elites[0][2]), ('E2', elites[1][2])]:
             conn.execute('UPDATE compound SET smiles=? WHERE name=?', (smiles, name))
@@ -347,7 +335,7 @@ def test_fallback_training_uses_current_elites_and_original_prior(fallback_proje
 
     def training(rows, scaffold, directory, **kwargs):
         assert rows == selected
-        assert scaffold == previous['scaffold_smiles']
+        assert (scaffold == previous['scaffold_smiles']) == reuse
         assert kwargs['prior_file'] == project.libinvent_prior
         calls.append('pairs')
         return None, 'train', 'valid', 2
@@ -359,7 +347,7 @@ def test_fallback_training_uses_current_elites_and_original_prior(fallback_proje
 
     def sample(**kwargs):
         assert kwargs['libinvent_prior'] == 'new-model'
-        assert kwargs['scaffold_file'].read_text().strip() == previous['scaffold_smiles']
+        assert (kwargs['scaffold_file'].read_text().strip() == previous['scaffold_smiles']) == reuse
         calls.append('sampling')
         return 'generated.csv'
 
@@ -529,8 +517,9 @@ def test_reference_fallback_is_not_reapplied_to_existing_project(project):
     saved = database.iteration_scaffold(project.db_path, 3)
     assert saved['source'] == 'previous_iteration_elites'
     assert saved['mcs_smarts'] != project.initial_mcs_smarts
-    prepare_iteration_scaffold(project, 4, [(*r[:3], 3, *r[4:]) for r in elites], create=True)
-    assert database.iteration_scaffold(project.db_path, 4)['source'] == 'previous_iteration_elites'
+    with pytest.raises(RuntimeError, match='No chemically different valid attachment points'):
+        prepare_iteration_scaffold(project, 4, [(*r[:3], 3, *r[4:]) for r in elites], create=True)
+    assert database.iteration_scaffold(project.db_path, 4) is None
     assert project.mcs_smarts == project.initial_mcs_smarts
 
 

@@ -995,12 +995,12 @@ def test_single_elite_does_not_bypass_configured_elite_count(project):
     assert database.iteration_scaffold(project.db_path, 2) is None
 
 
-def test_single_elite_reinvent_retains_automatic_mcs_error(project):
+def test_single_elite_reinvent_stops_when_no_alternate_attachment_exists(project):
     prepare_iteration_scaffold(project, 1, create=True)
     project.sidechain_library = None
     project.elite_mcs_smarts = None
     project.prime_gbsa_elite_count = 1
-    with pytest.raises(RuntimeError, match='At least two input ligands'):
+    with pytest.raises(RuntimeError, match='No chemically different valid attachment points'):
         prepare_iteration_scaffold(project, 2, [(100, 'A', 'CCc1ccc(CC)cc1', 1, -10, -40)], create=True)
     assert database.iteration_scaffold(project.db_path, 2) is None
 

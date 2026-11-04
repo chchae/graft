@@ -410,6 +410,11 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
                                                         'Existing Prime claims still running')))
             report = progress if routine_prime_gbsa_poll else print
             timing = ''
+            if stage == 'md-gbsa':
+                from graft.stages._summary import md_pending_summary
+                summary = md_pending_summary(args, iteration)
+                if summary:
+                    reason += '; ' + summary
             if stage in {'amber-gbsa', 'md-gbsa'}:
                 elapsed = database.stage_elapsed(args.db_path, iteration, stage)
                 if elapsed is not None:

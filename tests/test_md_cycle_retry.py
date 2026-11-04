@@ -67,6 +67,12 @@ def test_retry_resolves_inside_cycle_and_never_reopens_on_restart(project, monke
     monkeypatch.setattr(md_gbsa, 'ssh', lambda *a, **kw: resets.append(a) or '{"status":"ready"}')
     def poll(config, action, root):
         cid = int(root.split('/CMPID_')[1].split('/')[0])
+        if action == 'md-status':
+            if cid == 1 and (polls[cid] == 0 or not retry_success):
+                polls[cid] += 1
+                return 'GRAFT_MD='+json.dumps(dict(status='failed', phase='md',
+                                                      error='verified terminal native failure'))
+            return 'GRAFT_MD='+json.dumps(dict(status='pending', phase='frames'))
         polls[cid] += 1
         if cid == 1 and (polls[cid] == 1 or not retry_success):
             answer = dict(status='failed', phase='md', error='verified terminal native failure')
@@ -123,6 +129,8 @@ def test_one_driver_invocation_waits_for_retry_before_finishing_and_exporting(pr
     monkeypatch.setattr(md_gbsa, 'ssh', lambda *a, **kw: '{"status":"ready"}')
     def poll(config, action, root):
         cid = int(root.split('/CMPID_')[1].split('/')[0])
+        if action == 'md-status' and cid != 1:
+            return 'GRAFT_MD='+json.dumps(dict(status='pending', phase='frames'))
         md_polls.append(cid)
         if cid == 1:
             answer = dict(status='failed', phase='md', error='verified terminal failure')

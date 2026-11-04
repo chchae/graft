@@ -143,16 +143,16 @@ def test_new_iteration_adjusts_and_resume_keeps_choice(project, monkeypatch, cap
     assert json.loads((project.output / 'iter02/01-scaffold/scaffold_info.json').read_text()) == saved
 
 
-def test_real_iteration8_elites_reuse_previous_before_the_three_way_branch(project, capsys):
+def test_real_iteration8_elites_reuse_previous_when_only_previous_sites_are_valid(project, capsys):
     elites, previous = seed(project, EGFR_ELITES, EGFR_PREVIOUS)
     prepare_iteration_scaffold(project, 2, elites, create=True)
     saved = database.iteration_scaffold(project.db_path, 2)
-    assert saved['source'] == 'previous_iteration_scaffold_fallback'
-    assert saved['fallback_reason'] == 'excess_attachment_sites'
-    assert saved['scaffold_smiles'] == EGFR_PREVIOUS
+    assert saved['source'] == 'previous_mcs_reused_attachments'
+    assert saved['scaffold_smiles'] == previous['scaffold_smiles']
     assert saved['mcs_smarts'] == previous['mcs_smarts']
-    assert 'exceeded two attachment boundaries' in capsys.readouterr().out
     assert_round_trips(EGFR_ELITES, saved['scaffold_smiles'])
+    assert database.iteration_scaffold(project.db_path, 1) == previous
+    assert 'trying highest-ranked 1' in capsys.readouterr().out
 
 
 def test_supplied_core_is_not_automatically_reduced(project, monkeypatch):

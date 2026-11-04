@@ -7,6 +7,7 @@ import statistics
 
 from graft.paths import iteration_directory, stage_in_iteration
 from graft import database
+from graft.states import CompoundState as State
 
 
 def _read_json(path):
@@ -14,6 +15,51 @@ def _read_json(path):
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return None
+
+
+def md_pending_summary(args, iteration):
+    """Last worker snapshot, counted per molecule rather than frame/replica.
+
+    Calculated includes committed molecules; only a finite SQLite score proves
+    DB persistence. MD-only completion remains part of the running ensemble.
+    """
+    selected = database.md_gbsa_selection(args.db_path, iteration)
+    if selected is None:
+        return ''
+    rows = database.md_gbsa_rows(args.db_path, iteration)
+    root = stage_in_iteration(iteration_directory(Path(args.output), iteration), 'md_gbsa')
+    path = root/'progress.json'
+    progress = _read_json(path) if path.exists() else {}
+    counts = dict(queued=0, running=0, calculated=0, db_committed=0, failed=0, unknown=0)
+    replicas = selected['settings'].get('replicates')
+    valid_replicas = isinstance(replicas, int) and not isinstance(replicas, bool) and replicas > 0
+    for cid in selected['ids']:
+        row = rows.get(cid)
+        if row and row[1] is not None and math.isfinite(row[1]):
+            counts['db_committed'] += 1
+            counts['calculated'] += 1
+            continue
+        if row and row[2:] == (State.FAILED, 'md_gbsa'):
+            counts['failed'] += 1
+            continue
+        if row is None or not isinstance(progress, dict) or not valid_replicas:
+            counts['unknown'] += 1
+            continue
+        records = [progress.get(str((cid, r)), {}) for r in range(replicas)]
+        if not all(isinstance(v, dict) for v in records):
+            counts['unknown'] += 1
+        elif all(v.get('status') == 'done' for v in records):
+            counts['calculated'] += 1
+        elif all(v.get('status') in ('done', 'failed') for v in records):
+            counts['failed'] += 1
+        elif all(not v or v.get('status') == 'unstarted' for v in records):
+            counts['queued'] += 1
+        else:
+            counts['running'] += 1
+    fields = [f'{key}={counts[key]}' for key in ('queued', 'running', 'calculated', 'db_committed')]
+    fields.append(f"db_pending={counts['calculated'] - counts['db_committed']}")
+    fields.extend(f'{key}={counts[key]}' for key in ('failed', 'unknown') if counts[key])
+    return f"compounds={len(selected['ids'])} (" + ', '.join(fields) + ')'
 
 
 def _native_times(output, iteration, stage, successful):

@@ -11,6 +11,8 @@ from graft import database
 from graft.paths import stage_directory
 from graft.states import CompoundState as State
 
+_dispatch_uploaded = set()
+
 
 def ssh(host, command, *, input=None, timeout=240):
     result = subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=15',host,command],
@@ -40,10 +42,69 @@ def response(text):
 
 def remote_call(settings, action, root, *extra):
     helper = settings['helper']
-    if Path(helper).name == 'md_gbsa_local_native.py':
+    if action in ('md-status', 'md-start'):
+        source = Path(__file__).with_name('md_gbsa_dispatch.py')
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        helper = settings['root']+'/control/md-dispatch-'+digest+'.py'
+        key = (settings['ssh_host'], helper)
+        if key not in _dispatch_uploaded:
+            ssh(settings['ssh_host'], 'mkdir -p '+shlex.quote(settings['root']+'/control'))
+            upload(settings['ssh_host'], source, helper)
+            _dispatch_uploaded.add(key)
+    elif Path(helper).name == 'md_gbsa_local_native.py':
         from graft.md_gbsa_local import control_helper
         helper = str(control_helper(settings))
     return ssh(settings['ssh_host'],shlex.join([settings['suite']+'/run',helper,action,root,*extra]))
+
+
+def admit_md(settings, tasks, progress, status_file):
+    """Reconcile GPU owners and fill vacancies before any CPU postprocessing."""
+    from graft.md_gbsa_native import save
+
+    def poll(action, root):
+        result = response(remote_call(settings, action, root))
+        valid = (result.get('phase') == 'frames' and result.get('status') == 'pending' or
+                 result.get('phase') == 'md' and result.get('status') in
+                 (('running', 'pending', 'failed', 'unstarted') if action == 'md-status'
+                  else ('running', 'pending', 'failed')))
+        if not valid:
+            raise RuntimeError('Invalid MD admission response; GPU ownership retained')
+        return result
+
+    for cid, replica, root in tasks:
+        key = str((cid, replica))
+        prior = progress.get(key, {})
+        if prior and (prior.get('phase') != 'md' or prior.get('status') == 'failed'):
+            continue
+        result = poll('md-status', root)
+        progress[key] = result
+        save(status_file, progress)
+    # Unknown launch intents own capacity too. Reconcile them without admitting
+    # another job into their slot; native journals prevent duplicate submission.
+    for cid, replica, root in tasks:
+        key = str((cid, replica))
+        prior = progress.get(key, {})
+        if prior.get('phase') == 'md' and prior.get('status') == 'pending':
+            progress[key] = poll('md-start', root)
+            save(status_file, progress)
+    active = sum(progress[str((cid, replica))].get('phase') == 'md' and
+                 progress[str((cid, replica))].get('status') in ('running', 'pending')
+                 for cid, replica, root in tasks)
+    for cid, replica, root in tasks:
+        key = str((cid, replica))
+        prior = progress.get(key, {})
+        if prior.get('status') != 'unstarted' or active >= settings['gpus']:
+            continue
+        # An unstarted reservation is written before SSH. On a lost reply the
+        # next poll consults the remote journal before freeing or reusing it.
+        progress[key] = dict(phase='md', status='pending', reason='MD admission in progress')
+        save(status_file, progress)
+        result = poll('md-start', root)
+        progress[key] = result
+        save(status_file, progress)
+        if result.get('phase') == 'md' and result.get('status') in ('running', 'pending'):
+            active += 1
+        print(f"CMPID_{cid} replica {replica+1}: {result.get('phase','md')} {result['status']}")
 
 
 def settings_for(args, iteration):
@@ -162,18 +223,20 @@ def run(args, iteration):
            for cid in saved['ids'] for r in range(settings['replicates'])
            if rows[cid][1] is None and rows[cid][2:]!=(State.FAILED,'md_gbsa')]
     tasks.sort(key=lambda t: str((t[0],t[1])) not in progress)
+    admit_md(settings, tasks, progress, status_file)
     if settings.get('local_compute'):
         # Make every ready molecule available before admitting a new native
         # batch. Existing parent commands/jobs are never repartitioned.
         for cid,replica,root in tasks:
             if not (md_gbsa_local.task_root(settings,cid,replica)/'input.json').exists():
                 prior=progress.get(str((cid,replica)),{})
-                if prior.get('phase')=='prime':
+                if prior.get('phase') in ('frames', 'prime'):
                     md_gbsa_local.poll(settings,cid,replica,root,directory/'adam-results',prepare_only=True)
-    active=sum(v.get('phase')=='md' and v.get('status') in ('running','pending') for v in progress.values())
     for cid,replica,root in tasks:
         key=str((cid,replica)); prior=progress.get(key)
-        if prior is None and active>=settings['gpus']:
+        # Running/uncertain MDs were already polled in the admission pass.
+        # Unstarted tasks stay queued; only terminal MD work enters GBSA.
+        if prior.get('phase') == 'md':
             continue
         # Local cross-project lock and registry bridge local/remote JobServers.
         # Native Prime parents are serialized (legacy: 7 slots; local: up to 192).
@@ -197,10 +260,6 @@ def run(args, iteration):
             print(str(exc)); return
         progress[key]=result
         save(status_file,progress)
-        if prior is None and result.get('phase')=='md' and result['status'] in ('running','pending'):
-            active+=1
-        if prior and prior.get('phase')=='md' and result.get('phase')!='md':
-            active=max(0,active-1)
         print(f"CMPID_{cid} replica {replica+1}: {result.get('phase','ensemble')} {result['status']}")
         if result['status']=='failed':
             # Keep the selected compound owned until every submitted replica retires.

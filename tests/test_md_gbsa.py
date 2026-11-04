@@ -371,6 +371,8 @@ def test_controller_recovers_disabled_flag_and_publishes_complete_ensembles(db,m
     monkeypatch.setattr(guard,'submission_guard',lambda *a,**kw:nullcontext())
     monkeypatch.setattr(guard,'active_jobs',lambda *a:[])
     def poll(config,action,root):
+        if action == 'md-status':
+            return 'GRAFT_MD='+json.dumps(dict(status='pending', phase='frames'))
         cid=int(root.split('/CMPID_')[1].split('/')[0])
         data=result(cid, -50.0 if cid==1 else -80.0)
         data['snapshots']=[dict(frame=i,score=data['mean']) for i in range(count)]

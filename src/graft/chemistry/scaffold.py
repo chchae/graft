@@ -188,9 +188,14 @@ def log_iteration_mcs(args, iteration, snapshot=None, *, include_generation=True
             source = f"two-site MCS adjustment from iteration {snapshot['attachment_from_iteration']}"
         elif source == 'ranked_elite_subset_mcs':
             source = f"top-{len(snapshot['source_ids'])} preceding elites after MCS subset reduction"
+        elif source == 'previous_mcs_alternate_attachments':
+            source = f"unchanged MCS with different attachment positions from iteration {snapshot['attachment_from_iteration']}"
+        elif source == 'previous_mcs_reused_attachments':
+            source = (f"unchanged MCS and attachment positions from iteration {snapshot['attachment_from_iteration']}; "
+                      'no valid alternative sites; continuing with new decorations')
         if snapshot.get('elite_mcs_attempts'):
             attempts = snapshot['elite_mcs_attempts']
-            print(f"[MCS] Iteration {iteration} combichem elite subsets: "
+            print(f"[MCS] Iteration {iteration} elite subsets: "
                   + ' -> '.join(str(attempt['elite_count']) for attempt in attempts)
                   + f"; result={attempts[-1]['status']}.", flush=True)
             for attempt in attempts:
@@ -287,6 +292,20 @@ def prepare_iteration_scaffold(args, iteration, elites=None, *, create=False, in
             )
             if snapshot['source'] == 'single_elite_sidechain_replacement':
                 snapshot['replacement_from_iteration'] = iteration - 1
+            if fixed:
+                snapshot['fixed_from_iteration'] = iteration
+        elif iteration > 1 and not use_supplied:
+            from graft.chemistry.elite_scaffold import prepare_ranked_scaffold
+            inputs = [ref for row, ref in sorted(zip(elites, inputs),
+                      key=lambda pair: (pair[0][5], pair[0][4], pair[0][0]))]
+            previous = database.iteration_scaffold(args.db_path, iteration - 1)
+            snapshot = prepare_ranked_scaffold(
+                inputs, previous, initial['mcs_smarts'], mcs_timeout=args.mcs_timeout,
+            )
+            if snapshot['source'] in ('previous_mcs_alternate_attachments', 'previous_mcs_reused_attachments'):
+                snapshot['attachment_from_iteration'] = iteration - 1
+            elif snapshot['source'] == 'previous_attachment_guided_mcs':
+                snapshot['attachment_from_iteration'] = iteration - 1
             if fixed:
                 snapshot['fixed_from_iteration'] = iteration
         else:

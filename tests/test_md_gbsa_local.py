@@ -286,6 +286,8 @@ def test_worker_transfers_collects_commits_then_cleans_and_recovers_commit_failu
     monkeypatch.setattr(guard,'submission_guard',lambda *a,**kw:nullcontext())
     monkeypatch.setattr(guard,'active_jobs',lambda *a:[])
     def remote(config_,action,path,*extra):
+        if action == 'md-status':
+            return 'GRAFT_MD='+json.dumps(dict(status='pending', phase='frames'))
         if action=='frames':
             return 'GRAFT_MD='+json.dumps(dict(status='frames',files=config['files']))
         assert action in ('poll','verify')

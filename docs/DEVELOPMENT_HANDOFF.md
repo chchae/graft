@@ -2736,3 +2736,107 @@ checks native checkpoint mechanics, not ranking accuracy or equivalent scientifi
 quality of truncated versus fully minimized structures. The one-hour hard limit
 can still fail exceptionally long preparation/scoring; those failures retain
 their diagnostics and do not supply fabricated energies.
+
+
+## Adaptive LibInvent elite MCS and alternate sites (2026-11-04)
+
+**Confirmed user requirement:** for new automatic LibInvent generation snapshots
+in adaptive mode, try a score-ranked prefix of the configured elites (EGFR: 10),
+halving with integer division, e.g. 10 -> 5 -> 2 -> 1, when the MCS is unchanged.
+Compare chemical retained-core graphs, independent of SMARTS spelling, atom order
+and dummy labels. Keep explicit supplied inputs, pinned fixed cores, bootstrap
+iteration 1 and all existing immutable snapshots under their existing rules.
+At one elite, retain exactly the immediately preceding generation core and choose
+chemically different attachment positions; do not adopt the whole elite or extend
+its core by terminal-sidechain replacement. A dummy-bearing supplied core retains
+its non-dummy MCS; attachment markers are replaced. Label swaps and molecular
+symmetry alone do not establish different positions. If no valid alternative
+exists, stop without creating a generation snapshot or changing scientific results.
+This supersedes unchanged-scaffold fallback for new adaptive LibInvent snapshots.
+Existing combichem/3D grow protocols and saved plans remain unchanged.
+
+Implementation: enumerate actual single-bond, acyclic external boundaries of the
+top-ranked elite's embeddings of the saved concrete retained core. Keep exactly
+two terminal attachment markers, preserve the fixed docking core and retained
+stereochemistry, reject undeclared branches, and require exact decomposition and
+reassembly of the top elite plus at least two of the original selected elites.
+Choose deterministically by canonical scaffold SMILES and freeze the result,
+ranked IDs and attempt history in SQLite. No hydrogen decorators are invented.
+If an automatic MCS has invalid attachment counts, reject the attempt and halve;
+retain the validated conservative two-boundary extension for excess attachments
+when it produces a different core. LibInvent MCS timeouts/invalid chemistry still
+stop. TL uses the original selected population and original prior with its existing
+minimum-two-pairs and vocabulary gates; reducing MCS inputs does not reduce the
+configured elite count or duplicate a singleton for training. Tests establish
+molecular graph behavior and restart recovery, not production TL or affinity.
+
+
+## Fill MD GPU vacancies before GBSA postprocessing (2026-11-04)
+
+**Confirmed user requirement:** for 24 selected molecules and 20 available MD
+GPU slots, admit the remaining four MDs as soon as completed native MDs free
+slots, before frame extraction/transfer or Prime GBSA processing. GPU MD and
+CPU GBSA may overlap within the same independently supervised MD-GBSA worker.
+The driver and its single-iteration sequential supervision are unchanged.
+
+The worker first queries MD-only native status for all unresolved GPU owners
+and jobs missing from progress.json, including lost-response recovery; it then
+fills available GPU capacity. Running and uncertain launches reserve slots;
+terminal native parent plus terminal children are required before returning a
+slot. MD completion never publishes an ensemble score. New MD intent is saved
+before SSH; unknown replies, unavailable status and orphaned launch artifacts
+never authorize duplicate submission. A failed terminal MD also releases its
+GPU slot while the existing ensemble failure/retry rules remain in force.
+Only after admission does the worker extract/transfer all ready local-Prime
+frames, submit/recover native Prime batches and commit validated full ensembles.
+Cross-project Glide/Prime fences still govern CPU Prime submission, independently
+of MD admission. Existing CPU budgets, GPU caps and scientific protocols remain.
+
+Use a checksummed operational adapter under the frozen remote run's control/
+directory. It verifies and imports that run's original native.py and uses its
+exact workflow and native command; never overwrite frozen scientific helpers,
+input settings, JobIds or protocol hashes to apply the scheduling change.
+MD-only queries avoid downloading trajectories or extracting frames. Existing
+runs can use the adapter at the next worker invocation. Tests cover 24/20
+admission order, uncertainty reservations, lost progress/replies, exact command
+recovery, parent/child completion and GBSA result/cleanup gates. Mock tests do
+not measure production throughput or validate scientific MD/GBSA accuracy.
+
+
+## MD-GBSA pending progress counts (2026-11-04)
+
+**Confirmed user requirement:** driver MD-GBSA pending lines include original
+compound counts for queued, running, calculated and db_committed, with db_pending
+for calculated results not yet persisted. Counts read the frozen selection,
+last worker progress snapshot and finite SQLite scores; no native jobs are queried
+or launched by the driver. Calculated includes committed molecules and requires
+all requested replicas to report complete MD+GBSA ensembles. MD-only completion,
+frame transfer and pending/running Prime remain running. Missing submission
+records count as queued (not a native JobServer assertion); corrupt snapshots or
+missing selected rows are unknown. Failures have a separate optional count.
+Committed SQLite results override stale/missing progress. Preserve the pending
+reason and elapsed time, including nonzero worker exits. Logging changes never
+commit scientific results or change workflow completion gates.
+
+
+## Reuse existing LibInvent attachment positions when alternatives exhaust (2026-11-04, latest choice)
+
+**Confirmed user requirement:** keep the ranked 10 -> 5 -> 2 -> 1 MCS policy
+and first prefer chemically different valid attachment positions at the terminal
+fallback. When no valid different positions exist, reuse exactly N-1's saved
+MCS and attachment-bearing scaffold and continue new decoration generation.
+This supersedes the earlier stop-on-no-alternative rule for new adaptive
+LibInvent snapshots. Never use the singleton's full structure as a new MCS.
+Validate the saved core, its two labelled single-bond attachments and fixed
+docking core. Require exact decomposition/reassembly of the top elite and at
+least two of the originally selected elites before site reuse; missing, invalid
+or incompatible preceding scaffolds still stop. Preserve the original selected
+training population, vocabulary checks, minimum-two usable TL pairs and TL from
+the original configured prior; no synthetic singleton training duplication.
+Save source=previous_mcs_reused_attachments, fallback_reason=
+no_alternate_attachment_points, compatible elite IDs, previous scaffold and
+ranked attempt history (terminal status=reused_attachments). Logs explicitly
+identify the reused positions and continued decoration generation. New snapshots
+use ranked_halving_alternate_attachments_v2 and freeze the choice on restart.
+Existing snapshots/results/jobs and the independent combichem protocols remain
+unchanged. RDKit structure validation is not a production TL/sampling validation.
