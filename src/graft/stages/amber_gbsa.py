@@ -1,5 +1,6 @@
 """Independent Amber screening stage; Prime keeps its existing PRIME_GBSA worker."""
 import argparse
+import os
 from pathlib import Path
 
 from graft.paths import stage_directory, stage_manifests
@@ -56,9 +57,12 @@ def _run_stage(args, iteration):
         if ids:
             record = amber_gbsa.new_record(args, iteration, directory, ids)
     if record is not None:
-        work_started(f'Iteration {iteration}: Amber screening/recovery of {len(record["compound_ids"])} compounds on {args.amber_remote["host"]}.')
+        supervised = os.environ.get('GRAFT_SUPERVISED') == '1'
+        work_started(f'Iteration {iteration}: Amber screening/recovery of {len(record["compound_ids"])} compounds on {args.amber_remote["host"]}.',
+                     level=2 if supervised and saved is not None else 1)
         if not amber_gbsa.poll(args, iteration, directory, record):
-            print('Amber GBSA remote work pending; persisted results will be recovered on the next poll.')
+            if not supervised:
+                print('Amber GBSA remote work pending; persisted results will be recovered on the next poll.')
             return
     if not args.amber_gbsa_enabled:
         print('Amber GBSA disabled; saved submission recovered; no new candidates claimed.')

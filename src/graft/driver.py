@@ -369,6 +369,7 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
         cmd = [sys.executable, "-m", module, str(project_toml), "--iteration", str(iteration)]
         if stage == 'generate' and getattr(args, 'cli_elite_mcs', None) is not None:
             cmd += ['--elite-mcs', args.cli_elite_mcs]
+        previous_pending = None
         while not stop.is_set():
             rc = stream_process(stage, cmd, project_toml.parent, stop)
             if stop.is_set():
@@ -414,7 +415,10 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
                 if elapsed is not None:
                     timing = (f'; elapsed={format_elapsed(elapsed)} '
                               '(including waiting, polling and restart recovery)')
-            report(f"[driver  ] iteration {iteration}: {stage} pending: {reason}{timing}.", flush=True)
+            pending_key = (rc, reason)  # Elapsed time alone is not a progress change.
+            if stage != 'amber-gbsa' or rc != 0 or pending_key != previous_pending:
+                report(f"[driver  ] iteration {iteration}: {stage} pending: {reason}{timing}.", flush=True)
+            previous_pending = pending_key
             if once:
                 return False
             if (iteration > 0 and stage != 'generate'

@@ -1,5 +1,22 @@
 # Graft Development Handoff
 
+## Amber progress messages only on change (2026-11-04)
+
+**Confirmed user request:** suppress repeated Amber polling messages while the
+compound count remains unchanged.
+
+During supervision at normal log verbosity, show the initial Amber status and
+print another pending line only when the remaining count or waiting reason
+changes. Elapsed time alone does not trigger output. Keep the latest persisted
+elapsed time on displayed updates. Worker recovery banners are verbose-only for
+saved supervised runs; the redundant remote-work-pending sentence is omitted
+under supervision, while standalone worker diagnostics remain available. Keep
+work-start signals, every scientific/status/collection poll, result persistence,
+completion lines and nonzero worker failures unchanged. Pending comparison state
+is scoped to one supervised stage/iteration; a restarted driver reports its
+initial status again. No database/job/resource settings are changed.
+
+
 ## Slurm JobServer upgrade and optional MD installation override (2026-11-04)
 
 **Confirmed user report/request:** the Slurm JobServer is upgraded to 2026-3;

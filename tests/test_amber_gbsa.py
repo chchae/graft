@@ -512,3 +512,28 @@ def test_new_remote_run_bundles_normalizer_and_records_version(references, monke
     monkeypatch.setattr(amber_gbsa, 'ssh', ssh)
     amber_gbsa.prepare_remote(args, 0, directory, record)
     assert record['prepared'] and record['input_sha256']
+
+
+@pytest.mark.parametrize('supervised',[True,False])
+def test_saved_amber_poll_suppresses_routine_worker_messages_only_under_supervisor(project,monkeypatch,capsys,supervised):
+    from graft.stages._logging import set_log_level,WORK_STARTED
+    monkeypatch.setenv('GRAFT_SUPERVISED','1' if supervised else '0')
+    token=set_log_level(1)
+    folder=project.output/'iter01/07-amber_gbsa';folder.mkdir(parents=True)
+    record={'compound_ids':[1,2,3]}
+    monkeypatch.setattr(amber_gbsa,'load_job',lambda *a:record)
+    monkeypatch.setattr(stage,'load_prime',lambda *a:None)
+    monkeypatch.setattr(database,'docking_completion_reason',lambda *a:None)
+    monkeypatch.setattr(database,'stage_is_running',lambda *a:False)
+    monkeypatch.setattr(database,'has_running_prime_gbsa',lambda *a:False)
+    polls=[]
+    monkeypatch.setattr(amber_gbsa,'poll',lambda *a:polls.append(1) or False)
+    try:stage._run_stage(project,1)
+    finally:
+        from graft.stages._logging import _log_level
+        _log_level.reset(token)
+    output=capsys.readouterr().out
+    assert ('screening/recovery of 3 compounds' in output)==(not supervised)
+    assert ('remote work pending' in output)==(not supervised)
+    if supervised:assert WORK_STARTED in output
+    assert len(polls)==1

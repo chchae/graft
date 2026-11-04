@@ -369,3 +369,37 @@ def test_md_enabled_during_fep_poll_returns_to_prerequisite(tmp_path, monkeypatc
             self.set()
     assert not driver.supervise_iteration(args,config,3,[('fep','graft.stages.fep')],30,Stop())
     assert calls==['fep','md-gbsa']
+
+
+def test_amber_pending_prints_only_when_remaining_count_or_reason_changes(tmp_path,monkeypatch,capsys):
+    args=project(tmp_path,State.DOCKED,iteration=1)
+    reasons=iter(['500 compounds still running Amber GBSA screening',
+                  '500 compounds still running Amber GBSA screening',
+                  '498 compounds still running Amber GBSA screening',
+                  '498 compounds still running Amber GBSA screening'])
+    calls=[]
+    class Stop(driver.StopFlag):
+        def wait(self,seconds):
+            if len(calls)==4:self.set()
+    monkeypatch.setattr(driver,'stream_process',lambda *a:calls.append(1) or 0)
+    monkeypatch.setattr(database,'stage_completion_reason',lambda *a:next(reasons))
+    elapsed=iter([10.,20.,30.,40.])
+    monkeypatch.setattr(database,'stage_elapsed',lambda *a:next(elapsed))
+    assert not driver.supervise_iteration(args,tmp_path/'p.toml',1,[('amber-gbsa','module')],30,Stop())
+    output=capsys.readouterr().out
+    assert output.count('500 compounds still running')==1
+    assert output.count('498 compounds still running')==1
+    assert 'elapsed=00:00:10.0' in output and 'elapsed=00:00:30.0' in output
+    assert 'elapsed=00:00:20.0' not in output and 'elapsed=00:00:40.0' not in output
+    assert len(calls)==4  # Silence does not skip scientific/recovery polls.
+
+
+def test_repeated_amber_worker_failures_are_still_visible(tmp_path,monkeypatch,capsys):
+    args=project(tmp_path,State.DOCKED,iteration=1)
+    calls=[]
+    class Stop(driver.StopFlag):
+        def wait(self,seconds):
+            if len(calls)==2:self.set()
+    monkeypatch.setattr(driver,'stream_process',lambda *a:calls.append(1) or 1)
+    assert not driver.supervise_iteration(args,tmp_path/'p.toml',1,[('amber-gbsa','module')],30,Stop())
+    assert capsys.readouterr().out.count('worker exited with status 1')==2
