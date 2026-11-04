@@ -147,9 +147,18 @@ def poll_batch(iteration,args,directory,record):
                 record.pop('recovery_token')
                 record.update(job_id=None,launching=False)
                 save(prime.job_file(directory),record)
-            if not (root/'prime/prime.job.json').exists() and any(
-                    guard.job_kind(j)=='prime_gbsa' for j in guard.active_jobs(args.schrodinger)):
-                return None
+            if not (root/'prime/prime.job.json').exists():
+                blockers = [j for j in guard.active_jobs(args.schrodinger)
+                            if guard.job_kind(j)=='prime_gbsa']
+                if blockers:
+                    identities = {j.get('jobId') for j in blockers if j.get('jobId')}
+                    parents = [j for j in blockers if j.get('parentJobId') not in identities]
+                    names = ', '.join(
+                        f"{j.get('jobName') or 'Prime'} ({j.get('jobId') or 'unknown'})"
+                        for j in parents)
+                    print(f'Iteration {iteration}: Prime waiting for other active Prime work: '
+                          f'{names}; this batch has not been submitted.', flush=True)
+                    return None
             state=md_gbsa.response(md_gbsa.remote_call(record['backend'],'poll',str(root)))
     except guard.SubmissionBlocked as exc:
         print(str(exc),flush=True)
@@ -170,7 +179,9 @@ def poll_batch(iteration,args,directory,record):
             return None
         raise prime.PrimeReconciliationPending('Adam Prime native batch failed; inputs, JobId and results retained')
     if state['status']!='done':
-        print(f'Iteration {iteration}: Adam Prime {state["status"]}; slots={record["owner"]["slots"]}.',flush=True)
+        reason = ': '+state['reason'] if state.get('reason') else ''
+        print(f'Iteration {iteration}: Prime {state["status"]}; '
+              f'slots={record["owner"]["slots"]}{reason}.',flush=True)
         return None
     collect(directory,record)
     if digest(directory/'prime_gbsa-out.maegz')!=state['output_sha256']:

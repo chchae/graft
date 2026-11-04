@@ -176,7 +176,7 @@ def run(args, iteration):
         if prior is None and active>=settings['gpus']:
             continue
         # Local cross-project lock and registry bridge local/remote JobServers.
-        # Native Prime parents are serialized (legacy: 7 slots; Adam: up to 16).
+        # Native Prime parents are serialized (legacy: 7 slots; local: up to 192).
         try:
             with guard.submission_guard(args.schrodinger,'prime_gbsa',md_controller=True):
                 local=guard.active_jobs(args.schrodinger)

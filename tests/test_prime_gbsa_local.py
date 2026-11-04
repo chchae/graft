@@ -293,3 +293,24 @@ def test_remote_prime_rejects_invalid_cpu_budget(project, slots):
     save(root/'owner.json', owner)
     with pytest.raises(RuntimeError, match='ownership/budget'):
         calculator.validate(root)
+
+
+
+def test_other_prime_job_is_reported_without_submitting_waiting_batch(project, monkeypatch, capsys):
+    args, directory, record, root, state = project
+    (root/'prime/prime.job.json').unlink()
+    monkeypatch.setattr(guard, 'active_jobs', lambda *a: [
+        dict(jobId='prime-0-external', jobName='prime_mmgbsa')])
+    monkeypatch.setattr(md_gbsa, 'remote_call', lambda *a: pytest.fail('submitted while blocked'))
+    assert local.poll_batch(0, args, directory, record) is None
+    message = capsys.readouterr().out
+    assert 'prime-0-external' in message
+    assert 'has not been submitted' in message
+    assert prime.load_job(directory)['job_id'] is None
+
+
+def test_pending_remote_reason_is_visible(project, monkeypatch, capsys):
+    args, directory, record, root, state = project
+    state.update(status='pending', reason='Remote CPU/license reservation')
+    assert local.poll_batch(0, args, directory, record) is None
+    assert 'Remote CPU/license reservation' in capsys.readouterr().out

@@ -10,9 +10,15 @@ assuming twenty frames per molecule.
 budgets 1..192, retaining the default 16 and default `adam` host. This supersedes
 the 1..16 validation limit below for new requests. Single-host parent exclusion,
 cross-project submission guards and durable recovery remain unchanged. The EGFR
-TOML selects `prime` and 180 slots for both local backends, reserving twelve cores
-for operational headroom; MD snapshot selection is twenty. This is a starting
-recommendation, not measured optimal throughput or a license/memory guarantee.
+TOML initially selected 180 slots for operational headroom. A subsequent confirmed
+user request to use all 192 cores raises both local slot settings to 192 for new
+work; MD snapshot selection remains twenty. This is a concurrency ceiling, not
+measured throughput or a license/memory guarantee. Folder count is not subjob
+count. More subjobs than frames/compounds cannot create useful parallel work.
+Report other active Prime jobs and remote pending reasons explicitly instead
+of silently returning a generic submitted/running message. Preserve external
+manually submitted jobs and frozen existing commands; do not stop or repartition
+them without explicit authorization.
 Ordinary Prime still has one subjob per original compound, whereas MD-GBSA pools
 ready frames from multiple original compounds into one native queue.
 

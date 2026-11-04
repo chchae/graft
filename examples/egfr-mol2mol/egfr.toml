@@ -86,7 +86,7 @@ prime-gbsa-local-compute = true
 prime-gbsa-local-host = "prime"
 prime-gbsa-local-work-dir = "/home1/prime_share"
 prime-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"
-prime-gbsa-local-cpus = 180  # 192코어 중 12코어는 관리·입출력 여유
+prime-gbsa-local-cpus = 192  # 준비된 계산이 충분하면 전체 코어 사용
 
 prime-gbsa-input-count = 100
 prime-gbsa-flexdist = 6.0
@@ -107,7 +107,7 @@ md-gbsa-local-compute = true
 md-gbsa-local-host = "prime"
 md-gbsa-local-work-dir = "/home1/prime_share"
 md-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"
-md-gbsa-local-cpus = 180  # 준비된 여러 분자의 프레임을 공통 큐에서 처리
+md-gbsa-local-cpus = 192  # 준비된 여러 분자의 프레임을 공통 큐에서 처리
 
 
 # 7. FEP 후보 export / 결과 import; 실제 FEP 계산은 외부 protocol로 별도 수행
