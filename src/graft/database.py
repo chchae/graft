@@ -2066,7 +2066,7 @@ def md_gbsa_completion_reason(path, iteration, minimum=0):
         rows = {r[0]:r for r in conn.execute('SELECT id,md_gbsa_score,state,failed_stage FROM compound WHERE iteration=?', (iteration,))}
         if selection['settings'].get('local_compute') and conn.execute(
                 'SELECT 1 FROM md_gbsa_local_cleanup WHERE iteration=? AND completed=0', (iteration,)).fetchone():
-            return 'MD-GBSA Adam result collection/cleanup pending'
+            return 'MD-GBSA Prime result collection/cleanup pending'
         policy = _md_retry_policy(conn, iteration)
         retried = ({r[0] for r in conn.execute("SELECT compound_id FROM score_restart_retry "
                     "WHERE iteration=? AND stage='md_gbsa' AND pending=0", (iteration,))}

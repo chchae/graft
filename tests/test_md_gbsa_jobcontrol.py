@@ -1,4 +1,4 @@
-"""Legacy Adam JobControl recovery; no scientific calculation in these tests."""
+"""Legacy Prime JobControl recovery; no scientific calculation in these tests."""
 import json
 from pathlib import Path
 import sys

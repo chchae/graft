@@ -1,4 +1,4 @@
-"""SQLite-owning worker adapter for shared-folder Adam Prime batches."""
+"""SQLite-owning worker adapter for shared-folder Prime batches."""
 import json
 from pathlib import Path
 import shutil
@@ -47,21 +47,21 @@ def create_batch(args,directory,compound_ids):
 def prepare(directory,record):
     root=Path(record['backend']['root'])
     if not root.exists() and (record.get('prepared') or record.get('job_id') or record.get('launching')):
-        raise RuntimeError('Saved Adam Prime folder is missing; no recreation/resubmission')
+        raise RuntimeError('Saved Prime folder is missing; no recreation/resubmission')
     root.mkdir(parents=True,exist_ok=True)
     marker=root/'owner.json'
     if marker.exists():
-        if json.loads(marker.read_text())!=record['owner']:raise RuntimeError('Foreign Adam Prime owner')
+        if json.loads(marker.read_text())!=record['owner']:raise RuntimeError('Foreign Prime owner')
     else:
-        if any(root.iterdir()):raise RuntimeError('Unowned Adam Prime folder; retained')
+        if any(root.iterdir()):raise RuntimeError('Unowned Prime folder; retained')
         save(marker,record['owner'])
     for name,expected in record['owner']['helpers'].items():
         target=root/name
         if not target.exists():
             source=Path(__file__).with_name(name)
-            if digest(source)!=expected:raise RuntimeError('Missing frozen Adam Prime helper; source changed')
+            if digest(source)!=expected:raise RuntimeError('Missing frozen Prime helper; source changed')
             atomic_copy(source,target)
-        if digest(target)!=expected:raise RuntimeError('Frozen Adam Prime helper changed')
+        if digest(target)!=expected:raise RuntimeError('Frozen Prime helper changed')
     target=root/'input/prime_gbsa.maegz'
     if not target.exists():
         source=Path(directory)/'prime_gbsa.maegz'
@@ -69,7 +69,7 @@ def prepare(directory,record):
         atomic_copy(source,target)
     if digest(target)!=record['owner']['input_sha256']:raise RuntimeError('Shared Prime input changed')
     response=md_gbsa.response(md_gbsa.remote_call(record['backend'],'check',str(root)))
-    if response.get('owner')!=record['owner']:raise RuntimeError('Adam cannot see the same shared Prime input')
+    if response.get('owner')!=record['owner']:raise RuntimeError('Prime cannot see the same shared Prime input')
     record['prepared']=True
     save(prime.job_file(directory),record)
 
@@ -91,9 +91,9 @@ def stream(directory,args,record,state):
         if identity in done:continue
         parent=record['job_id']
         if any(not re.fullmatch(r'[A-Za-z0-9_.-]+',value) or value in ('.','..') for value in (identity,parent)):
-            raise RuntimeError('Invalid Adam child output identity')
+            raise RuntimeError('Invalid Prime child output identity')
         source=Path(record['backend']['root'])/'subjobs'/identity/'result.maegz'
-        if digest(source)!=child['sha256']:raise RuntimeError('Adam child output checksum differs')
+        if digest(source)!=child['sha256']:raise RuntimeError('Prime child output checksum differs')
         folder=Path(directory)/'subjobs'/parent/identity
         atomic_copy(source,folder/'result.maegz')
         extractor=core.create_prime_gbsa_score_extractor(folder)
@@ -103,7 +103,7 @@ def stream(directory,args,record,state):
         done.add(identity)
         record['imported_subjobs']=sorted(done)
         save(prime.job_file(directory),record)
-        print(f'Adam Prime child {identity}: saved={updated}.',flush=True)
+        print(f'Prime child {identity}: saved={updated}.',flush=True)
 
 
 def cleanup(directory,record):
@@ -112,7 +112,7 @@ def cleanup(directory,record):
     tombstone=root.with_name(root.name+'.collected')
     receipt=Path(directory)/('adam-cleanup-'+root.name+'.json')
     if root.exists():
-        if json.loads((root/'owner.json').read_text())!=record['owner']:raise RuntimeError('Foreign Adam Prime cleanup')
+        if json.loads((root/'owner.json').read_text())!=record['owner']:raise RuntimeError('Foreign Prime cleanup')
         state=md_gbsa.response(md_gbsa.remote_call(record['backend'],'verify',str(root)))
         if state['output_sha256']!=digest(Path(directory)/'prime_gbsa-out.maegz'):
             raise RuntimeError('Collected Prime coordinates differ; shared work retained')
@@ -121,9 +121,9 @@ def cleanup(directory,record):
         root.rename(tombstone)
     if tombstone.exists():
         if not receipt.exists() or json.loads(receipt.read_text())['owner']!=record['owner']:
-            raise RuntimeError('Missing Adam Prime cleanup receipt')
+            raise RuntimeError('Missing Prime cleanup receipt')
         shutil.rmtree(tombstone)
-    if not receipt.exists():raise RuntimeError('Missing Adam Prime collection/cleanup evidence')
+    if not receipt.exists():raise RuntimeError('Missing Prime collection/cleanup evidence')
     guard.unregister_md_remote(record['backend'])
 
 
@@ -138,7 +138,7 @@ def poll_batch(iteration,args,directory,record):
     prepare(directory,record)
     guard.register_md_remote(record['backend'])
     if record.get('retry_at',0)>time.time():
-        print('Adam Prime: waiting for saved license retry time.',flush=True)
+        print('Prime: waiting for saved license retry time.',flush=True)
         return None
     try:
         with guard.submission_guard(args.schrodinger,'prime_gbsa',md_controller=True):
@@ -177,7 +177,7 @@ def poll_batch(iteration,args,directory,record):
                           recovery_token=uuid.uuid4().hex)
             save(prime.job_file(directory),record)
             return None
-        raise prime.PrimeReconciliationPending('Adam Prime native batch failed; inputs, JobId and results retained')
+        raise prime.PrimeReconciliationPending('Prime native batch failed; inputs, JobId and results retained')
     if state['status']!='done':
         reason = ': '+state['reason'] if state.get('reason') else ''
         print(f'Iteration {iteration}: Prime {state["status"]}; '
@@ -185,17 +185,17 @@ def poll_batch(iteration,args,directory,record):
         return None
     collect(directory,record)
     if digest(directory/'prime_gbsa-out.maegz')!=state['output_sha256']:
-        raise RuntimeError('Adam Prime output collection checksum differs')
+        raise RuntimeError('Prime output collection checksum differs')
     diagnostics='\n'.join(p.read_text(errors='replace') for p in directory.glob('*.log'))
     failed=sorted(set(prime.atomtyping_failed_ids(diagnostics,record['compound_ids'])) & set(state['missing_ids']))
     if set(state['missing_ids'])-set(failed):
-        raise prime.PrimeReconciliationPending('Missing Adam Prime compound results without confirmed atomtyping failures')
+        raise prime.PrimeReconciliationPending('Missing Prime compound results without confirmed atomtyping failures')
     updated=core.finish_iteration_prime_gbsa(iteration,args,directory,record['compound_ids'])
     if failed:database.mark_prime_gbsa_atomtyping_failures(args.db_path,failed,str(prime.PrimeAtomTypingError(failed)))
     publish_coordinates(args,directory,record['compound_ids'])
     scored=database.prime_gbsa_scored_ids(args.db_path,iteration)
     if set(record['compound_ids'])-set(scored)-set(failed):
-        raise prime.PrimeReconciliationPending('Adam scores not fully committed; shared inputs retained')
+        raise prime.PrimeReconciliationPending('Prime scores not fully committed; shared inputs retained')
     record['collected']=True
     record['atomtyping_failed_ids']=failed
     save(prime.job_file(directory),record)
@@ -208,5 +208,5 @@ def retire(directory,record,updated):
     record['finished_at']=time.time()
     save(prime.job_file(directory),record)
     prime.job_file(directory).replace(Path(directory)/f'adam-batch-{time.time_ns()}.completed.json')
-    print('Adam Prime batch: results collected and committed.',flush=True)
+    print('Prime batch: results collected and committed.',flush=True)
     return updated

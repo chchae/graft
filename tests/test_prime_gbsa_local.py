@@ -1,4 +1,4 @@
-"""Adam Prime batch ownership/recovery; mocks do not validate scientific scores."""
+"""Prime batch ownership/recovery; mocks do not validate scientific scores."""
 from contextlib import nullcontext
 import json
 from pathlib import Path
@@ -93,8 +93,8 @@ def test_local_prime_flexibility_keeps_sidechains_and_configured_distance(projec
 def test_saved_local_mode_recovers_even_when_flag_is_disabled(project,monkeypatch):
     args,directory,record,root,state=project
     args.prime_gbsa_local_compute=False
-    monkeypatch.setattr(local,'poll_batch',lambda *a:'recovered exact Adam batch')
-    assert _core.run_iteration_prime_gbsa(1,args,directory.parent,Path('/glide'))=='recovered exact Adam batch'
+    monkeypatch.setattr(local,'poll_batch',lambda *a:'recovered exact Prime batch')
+    assert _core.run_iteration_prime_gbsa(1,args,directory.parent,Path('/glide'))=='recovered exact Prime batch'
 
 
 def test_enabling_local_mode_does_not_move_existing_native_batch(project,monkeypatch):

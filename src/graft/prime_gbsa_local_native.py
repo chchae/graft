@@ -1,4 +1,4 @@
-"""Standalone Adam calculator for a native multi-compound Prime batch."""
+"""Standalone Prime calculator for a native multi-compound Prime batch."""
 import argparse
 import fcntl
 import hashlib
@@ -22,9 +22,9 @@ else:
 def validate(root):
     config=json.loads((root/'owner.json').read_text())
     if config['mode']!='adam_prime_batch_v1' or type(config['slots']) is not int or not 1<=config['slots']<=192:
-        raise RuntimeError('Invalid Adam Prime batch ownership/budget')
+        raise RuntimeError('Invalid Prime batch ownership/budget')
     if hashlib.sha256((root/'input/prime_gbsa.maegz').read_bytes()).hexdigest()!=config['input_sha256']:
-        raise RuntimeError('Frozen Adam Prime input changed')
+        raise RuntimeError('Frozen Prime input changed')
     return config
 
 
@@ -56,14 +56,14 @@ def read_scores(path,config):
         if not match:
             # Frozen-receptor PV output includes its unscored common receptor.
             if st.property.get('r_psp_MMGBSA_dG_Bind') is not None:
-                raise ValueError('Scored Adam output lacks compound identity')
+                raise ValueError('Scored Prime output lacks compound identity')
             continue
         cid=int(match[1])
         if cid not in config['compound_ids'] or cid in scores:
-            raise ValueError('Unexpected or duplicate Adam compound output')
+            raise ValueError('Unexpected or duplicate Prime compound output')
         value=st.property.get('r_psp_MMGBSA_dG_Bind',st.property.get('r_psp_MMGBSA_dG_Bind(NS)'))
         if not isinstance(value,(int,float)) or not math.isfinite(value):
-            raise ValueError('Missing/nonfinite Adam Prime score')
+            raise ValueError('Missing/nonfinite Prime score')
         scores[cid]=float(value)
     return scores
 
@@ -114,7 +114,7 @@ def poll(root,suite):
     if not target.exists():
         shutil.copy2(root/'input/prime_gbsa.maegz',target)
     elif hashlib.sha256(target.read_bytes()).hexdigest()!=config['input_sha256']:
-        raise RuntimeError('Adam working input changed')
+        raise RuntimeError('Prime working input changed')
     lockpath=Path(tempfile.gettempdir())/f'graft-schrodinger-submit-{os.getuid()}.lock'
     with lockpath.open('a') as lock:
         fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
@@ -125,15 +125,15 @@ def poll(root,suite):
                 launching=True,started_at=saved['started_at']))
         if not (prime/'prime.job.json').exists():
             if any(prime.glob('*.log')) or any(prime.glob('*-out.maegz')):
-                raise RuntimeError('Unjournaled Adam Prime outputs; no resubmission')
+                raise RuntimeError('Unjournaled Prime outputs; no resubmission')
             for peer in root.parent.glob('graft-*'):
                 if peer!=root and journals(peer,suite):
-                    return dict(status='pending',reason='Adam CPU/license reservation')
+                    return dict(status='pending',reason='Prime CPU/license reservation')
             if any('glide' in (j.get('commandLine','')+' '+j.get('jobName','')).lower()
                    or 'mmgbsa' in (j.get('commandLine','')+' '+j.get('jobName','')).lower()
                    or 'prime_gbsa' in (j.get('commandLine','')+' '+j.get('jobName','')).lower()
                    for j in native.active_jobs(suite)):
-                return dict(status='pending',reason='Adam Glide/Prime submission fence')
+                return dict(status='pending',reason='Glide/Prime submission fence')
             native.save(intent,dict(started_at=time.time(),command=config['command']))
         state=native.poll_job(prime,'prime',config['command'],suite)
     diagnostics='\n'.join(p.read_text(errors='replace') for p in prime.glob('*.log'))
@@ -156,7 +156,7 @@ def retry(root,suite,token):
         rows=native.native_rows(suite,record['job_id'])
         parent=next(j for j in rows if j['jobId']==record['job_id'])
         if parent['status']=='DONE' or any(j.get('status') not in native.TERMINAL for j in rows):
-            raise RuntimeError('Adam license retry has live/uncertain/successful work; retained')
+            raise RuntimeError('Prime license retry has live/uncertain/successful work; retained')
         history.mkdir(parents=True)
         native.save(history/'intent.json',dict(record=record,jobs=rows))
     if not (history/'prime').exists():(root/'prime').rename(history/'prime')

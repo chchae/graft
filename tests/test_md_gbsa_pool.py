@@ -172,7 +172,7 @@ def test_same_compound_replicas_are_not_mixed_in_a_batch(pool):
 def test_unjournaled_old_launch_cannot_be_admitted_as_new_pooled_work(pool):
     base,roots,state,helper=pool
     (roots[1]/'prime/prime.launch.log').write_text('JobId: unknown-prior-job\n')
-    with pytest.raises(RuntimeError,match='Unjournaled Adam calculation artifacts'):
+    with pytest.raises(RuntimeError,match='Unjournaled Prime calculation artifacts'):
         helper.poll(roots[0],Path('/suite'))
     assert not state['commands']
 

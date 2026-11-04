@@ -1,5 +1,14 @@
 # Graft Development Handoff
 
+## Prime display names (2026-11-04)
+
+**Confirmed user request:** replace the obsolete Adam name in runtime messages
+with Prime. This changes log, pending/error and completion wording only. Keep
+legacy mode/backend values, host defaults, artifact names and saved/frozen helper
+files intact for recovery compatibility. Scientific commands and scores do not
+change; historical logs and already submitted helpers are not rewritten.
+
+
 ## Configurable 192-core local Prime host (2026-11-04)
 
 **Confirmed user request:** the `prime` host has 192 CPU cores; support that

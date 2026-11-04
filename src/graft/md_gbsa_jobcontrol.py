@@ -1,4 +1,4 @@
-"""Operational JobControl adapter around a frozen Adam scientific helper.
+"""Operational JobControl adapter around a frozen Prime scientific helper.
 
 Only submission journals, status and file-collection semantics are adapted.
 The saved Prime command, input, helper files and scientific protocol stay exact.
@@ -177,7 +177,7 @@ def pool_members(base, helper):
         if (root/'prime/prime.job.json').exists() or (root/'prime/pool.json').exists():
             continue
         if (root/'prime/prime.launch.log').exists() or (root/'result.json').exists():
-            raise RuntimeError('Unjournaled Adam calculation artifacts; no pooled resubmission')
+            raise RuntimeError('Unjournaled Prime calculation artifacts; no pooled resubmission')
         config = helper.validate_input(root)
         count = sum(1 for _ in structure.StructureReader(str(root/'prime/frames.maegz')))
         if count < 1 or count != config['protocol']['snapshots']:
@@ -336,11 +336,11 @@ def install_pool(helper):
             if batch is None:
                 for peer in base.parent.glob('graft-*'):
                     if journals(peer,suite):
-                        return dict(status='pending',phase='prime',reason='Adam pooled slot reservation')
+                        return dict(status='pending',phase='prime',reason='Prime pooled slot reservation')
                 if any('glide' in (j.get('commandLine','')+' '+j.get('jobName','')).lower()
                        or 'mmgbsa' in (j.get('commandLine','')+' '+j.get('jobName','')).lower()
                        for j in native.active_jobs(suite)):
-                    return dict(status='pending',phase='prime',reason='Adam Glide/Prime fence')
+                    return dict(status='pending',phase='prime',reason='Glide/Prime submission fence')
                 # Put this molecule first, then admit distinct other originals.
                 members=pool_members(base,helper)
                 members.sort(key=lambda m:m['path']!=str(root.relative_to(base)))

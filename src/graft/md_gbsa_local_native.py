@@ -1,4 +1,4 @@
-"""Standalone Adam Prime calculator. No SQLite, Slurm or workflow workers."""
+"""Standalone Prime calculator. No SQLite, Slurm or workflow workers."""
 import argparse
 import fcntl
 import hashlib
@@ -19,15 +19,15 @@ def validate_input(root):
     config = json.loads((root/'input.json').read_text())
     if (config['mode'] != 'adam_prime_v1' or type(config['slots']) is not int
             or not 1 <= config['slots'] <= 192):
-        raise RuntimeError('Invalid Adam Prime request')
+        raise RuntimeError('Invalid Prime request')
     if set(config['files']) != {'prime/frames.maegz', 'frames.json', 'identity.json', 'md/md.job.json'}:
-        raise RuntimeError('Unexpected Adam input manifest')
+        raise RuntimeError('Unexpected Prime input manifest')
     if (config['protocol'].get('prime_job_type'), config['protocol'].get('prime_flexdist'),
             config['protocol'].get('prime_flexgroup')) != ('REAL_MIN', 6.0, 'residue'):
-        raise RuntimeError('Unexpected Adam scientific protocol')
+        raise RuntimeError('Unexpected Prime scientific protocol')
     for name, digest in config['files'].items():
         if hashlib.sha256((root/name).read_bytes()).hexdigest() != digest:
-            raise RuntimeError('Frozen Adam input changed: '+name)
+            raise RuntimeError('Frozen Prime input changed: '+name)
     return config
 
 
@@ -37,10 +37,10 @@ def verify(root, suite):
     rows = native.native_rows(suite, record['job_id'])
     if (next(r for r in rows if r['jobId'] == record['job_id'])['status'] != 'DONE'
             or any(r.get('status') not in native.TERMINAL for r in rows)):
-        raise RuntimeError('Adam Prime is active, failed or uncertain; inputs retained')
+        raise RuntimeError('Prime is active, failed or uncertain; inputs retained')
     result = json.loads((root/'result.json').read_text())
     if result['protocol'] != config['protocol'] or result['id'] != config['id']:
-        raise RuntimeError('Adam result identity mismatch')
+        raise RuntimeError('Prime result identity mismatch')
     return result
 
 
@@ -94,12 +94,12 @@ def poll(root, suite):
             # Durable intent from any run on this share still reserves the host.
             for peer in root.parents[2].glob('graft-*'):
                 if journal_jobs(peer, suite):
-                    return dict(status='pending', phase='prime', reason='Uncertain Adam launch')
+                    return dict(status='pending', phase='prime', reason='Uncertain Prime launch')
             jobs = native.active_jobs(suite)
             if any('glide' in (j.get('commandLine','')+' '+j.get('jobName','')).lower()
                    or 'mmgbsa' in (j.get('commandLine','')+' '+j.get('jobName','')).lower()
                    for j in jobs):
-                return dict(status='pending', phase='prime', reason='Adam Glide/Prime fence')
+                return dict(status='pending', phase='prime', reason='Glide/Prime submission fence')
         state = native.poll_job(root/'prime', 'prime', command, suite)
     if state['status'] != 'done':
         return dict(phase='prime', **state)
@@ -114,7 +114,7 @@ def poll(root, suite):
 
 def retry(root, suite, token):
     if not re.fullmatch(r'[a-f0-9]{32}', token):
-        raise RuntimeError('Invalid Adam retry identity')
+        raise RuntimeError('Invalid Prime retry identity')
     history = root/'retry_history'/token
     plan = history/'plan.json'
     if not plan.exists():
@@ -122,14 +122,14 @@ def retry(root, suite, token):
         path = root/'prime/prime.job.json'
         if not path.exists():
             if any((root/'prime').glob('*.launch.log')):
-                raise RuntimeError('Adam launch has no journal; no retry')
+                raise RuntimeError('Prime launch has no journal; no retry')
             return dict(status='ready')
         record = json.loads(path.read_text())
         if not record.get('job_id'):
-            raise RuntimeError('Adam launch has no JobId; no retry')
+            raise RuntimeError('Prime launch has no JobId; no retry')
         rows = native.native_rows(suite, record['job_id'])
         if any(r.get('status') not in native.TERMINAL for r in rows):
-            raise RuntimeError('Adam Prime is active or uncertain; no retry')
+            raise RuntimeError('Prime is active or uncertain; no retry')
         if (root/'result.json').exists():
             verify(root, suite)
             return dict(status='recover')

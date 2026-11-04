@@ -1,4 +1,4 @@
-"""Adam transport/recovery regressions; mocked energies do not validate science."""
+"""Prime transport/recovery regressions; mocked energies do not validate science."""
 from contextlib import nullcontext
 import hashlib
 import json
@@ -73,7 +73,7 @@ def test_changed_frames_cannot_launch(task,monkeypatch):
     root,_ = task
     (root/'prime/frames.maegz').write_bytes(b'changed')
     monkeypatch.setattr(native,'poll_job',lambda *a:pytest.fail('invalid input submitted'))
-    with pytest.raises(RuntimeError,match='Frozen Adam input changed'):
+    with pytest.raises(RuntimeError,match='Frozen Prime input changed'):
         calculator.poll(root,Path('/suite'))
 
 
@@ -90,7 +90,7 @@ def test_uncertain_other_project_reserves_adam_without_registered_native_job(tas
     write(root.parents[2]/'graft-other/CMPID_8/replica01/prime/prime.job.json',dict(job_id=None,launching=True))
     monkeypatch.setattr(native,'active_jobs',lambda *a:[])
     monkeypatch.setattr(native,'poll_job',lambda *a:pytest.fail('uncertain launch ignored'))
-    assert calculator.poll(root,Path('/suite'))['reason'] == 'Uncertain Adam launch'
+    assert calculator.poll(root,Path('/suite'))['reason'] == 'Uncertain Prime launch'
 
 
 def test_saved_active_parent_reserves_slots_even_when_absent_from_active_list(task,monkeypatch):
@@ -357,7 +357,7 @@ def test_remote_cpu_validation_rejects_invalid_budget(task, slots):
     root, config = task
     config['slots'] = slots
     write(root/'input.json', config)
-    with pytest.raises(RuntimeError, match='Invalid Adam Prime request'):
+    with pytest.raises(RuntimeError, match='Invalid Prime request'):
         calculator.validate_input(root)
 
 

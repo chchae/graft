@@ -47,7 +47,7 @@ def recover_md(args, iteration, saved):
                     result = md_gbsa.response(md_gbsa.remote_call(settings['local_compute'],
                         'retry', str(local_root), '--ids', token))
                     if result['status'] not in ('ready','recover'):
-                        raise RuntimeError('Unexpected Adam retry response')
+                        raise RuntimeError('Unexpected Prime retry response')
             progress.pop(key,None)
         save(status_file,progress)
         database.finish_score_retry(args.db_path,iteration,'md_gbsa',cid,token)
@@ -83,10 +83,10 @@ def recover_prime(args, iteration, directory):
                 from graft import md_gbsa
                 backend=record['backend']
                 if not (Path(backend['root'])/'prime/prime.job.json').exists():
-                    raise RuntimeError('Missing saved Adam native journal; reconcile before retry')
+                    raise RuntimeError('Missing saved Prime native journal; reconcile before retry')
                 result=md_gbsa.response(md_gbsa.remote_call(backend,'poll',backend['root']))
                 if result.get('status') not in ('done','failed') or result.get('native',{}).get('job_id')!=record['job_id']:
-                    raise RuntimeError('Adam Prime is active/uncertain; no automatic reset')
+                    raise RuntimeError('Prime is active/uncertain; no automatic reset')
                 jobs=result['jobs']
             else:
                 jobs = prime._job_details(record,path.parent)

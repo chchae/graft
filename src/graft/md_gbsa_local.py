@@ -1,4 +1,4 @@
-"""Worker-owned shared-frame transport, Adam submission and committed cleanup."""
+"""Worker-owned shared-frame transport, Prime submission and committed cleanup."""
 import hashlib
 import json
 import os
@@ -39,14 +39,14 @@ def control_helper(settings):
     marker = json.loads((root/'owner.json').read_text())
     local = marker.get('local', {})
     if any(local.get(key) != settings.get(key) for key in ('root','helper','suite','ssh_host')):
-        raise RuntimeError('Adam control adapter ownership mismatch')
+        raise RuntimeError('Prime control adapter ownership mismatch')
     source = Path(__file__).with_name('md_gbsa_jobcontrol.py')
     expected = digest(source)
     target = root/'control'/('jobcontrol-'+expected+'.py')
     if not target.exists():
         atomic_copy(source, target)
     if digest(target) != expected:
-        raise RuntimeError('Adam operational adapter checksum differs')
+        raise RuntimeError('Prime operational adapter checksum differs')
     return target
 
 
@@ -58,24 +58,24 @@ def prepare(settings):
     marker = root/'owner.json'
     if marker.exists():
         if json.loads(marker.read_text()) != owner(settings):
-            raise RuntimeError('Shared Adam directory belongs to another request')
+            raise RuntimeError('Shared Prime directory belongs to another request')
     else:
         if any(root.iterdir()):
-            raise RuntimeError('Unowned shared Adam directory; retained')
+            raise RuntimeError('Unowned shared Prime directory; retained')
         save(marker, owner(settings))
     for name, expected in local['files'].items():
         target = root/name
         if target.exists():
             if digest(target) != expected:
-                raise RuntimeError('Frozen Adam helper changed')
+                raise RuntimeError('Frozen Prime helper changed')
         else:
             source = Path(__file__).with_name(name)
             if digest(source) != expected:
-                raise RuntimeError('Cannot recover missing frozen Adam helper with changed source')
+                raise RuntimeError('Cannot recover missing frozen Prime helper with changed source')
             atomic_copy(source, target)
     result = md_gbsa.response(md_gbsa.remote_call(local, 'check', str(root)))
     if result.get('owner') != owner(settings):
-        raise RuntimeError('Adam does not see the configured shared directory')
+        raise RuntimeError('Prime does not see the configured shared directory')
 
 
 def atomic_copy(source, target):
@@ -107,7 +107,7 @@ def download(host, source, target, expected):
             output.flush()
             os.fsync(output.fileno())
         if result.returncode or digest(temporary) != expected:
-            raise RuntimeError('MD frame transfer failed or checksum differs; no Adam submission')
+            raise RuntimeError('MD frame transfer failed or checksum differs; no Prime submission')
         os.replace(temporary, target)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -131,7 +131,7 @@ def poll(settings, cid, replica, remote_root, archive, *, allow_submit=True, pre
                   files=result['files'], source_root=remote_root)
     marker = root/'input.json'
     if marker.exists() and json.loads(marker.read_text()) != config:
-        raise RuntimeError('Frozen Adam request differs; no resubmission')
+        raise RuntimeError('Frozen Prime request differs; no resubmission')
     required = {'prime/frames.maegz', 'frames.json', 'identity.json', 'md/md.job.json'}
     if set(config['files']) != required:
         raise RuntimeError('Unexpected MD snapshot transfer manifest')
@@ -144,7 +144,7 @@ def poll(settings, cid, replica, remote_root, archive, *, allow_submit=True, pre
     result = md_gbsa.response(md_gbsa.remote_call(local, 'poll', str(root)))
     if result['status'] == 'done':
         if result['id'] != cid or result['protocol'] != protocol:
-            raise RuntimeError('Adam result identity/protocol mismatch')
+            raise RuntimeError('Prime result identity/protocol mismatch')
         # Collect coordinates and launch evidence before the database can commit.
         destination = Path(archive)/f'CMPID_{cid}'/f'replica{replica+1:02d}'
         for name in ('prime/prime_mmgbsa-out.maegz', 'prime/prime.job.json',
@@ -153,7 +153,7 @@ def poll(settings, cid, replica, remote_root, archive, *, allow_submit=True, pre
             if source.is_file():
                 atomic_copy(source, destination/name)
         if not (destination/'prime/prime_mmgbsa-out.maegz').is_file():
-            raise RuntimeError('Adam output coordinates not collected; inputs retained')
+            raise RuntimeError('Prime output coordinates not collected; inputs retained')
         save(destination/'collected.json', dict(output_sha256=digest(destination/'prime/prime_mmgbsa-out.maegz'),
                                                 result=result))
     return result
@@ -166,10 +166,10 @@ def cleanup_committed(args, iteration, settings, directory):
     pending = database.pending_md_local_cleanup_ids(args.db_path, iteration)
     if not base.exists():
         if pending:
-            raise RuntimeError('Adam shared inputs disappeared before verified cleanup; reconcile collected results')
+            raise RuntimeError('Prime shared inputs disappeared before verified cleanup; reconcile collected results')
         return
     if json.loads((base/'owner.json').read_text()) != owner(settings):
-        raise RuntimeError('Refusing cleanup of unowned Adam directory')
+        raise RuntimeError('Refusing cleanup of unowned Prime directory')
     for cid in pending:
         target = base/f'CMPID_{cid}'
         tombstone = base/f'.collected-CMPID_{cid}'
@@ -180,10 +180,10 @@ def cleanup_committed(args, iteration, settings, directory):
                 archive = receipt.parent/f'replica{replica+1:02d}'
                 collected = json.loads((archive/'collected.json').read_text())
                 if digest(archive/'prime/prime_mmgbsa-out.maegz') != collected['output_sha256']:
-                    raise RuntimeError('Collected Adam coordinates changed; shared files retained')
+                    raise RuntimeError('Collected Prime coordinates changed; shared files retained')
                 verified = md_gbsa.response(md_gbsa.remote_call(local, 'verify', str(task_root(settings,cid,replica))))
                 if verified != collected['result']:
-                    raise RuntimeError('Adam result differs from collected result; shared files retained')
+                    raise RuntimeError('Prime result differs from collected result; shared files retained')
                 results.append(verified)
             save(receipt, dict(owner=owner(settings), id=cid, results=results))
             target.rename(tombstone)
@@ -193,10 +193,10 @@ def cleanup_committed(args, iteration, settings, directory):
             shutil.rmtree(tombstone)
         if receipt.exists():
             if json.loads(receipt.read_text())['owner'] != owner(settings):
-                raise RuntimeError('Adam cleanup receipt belongs to another request')
+                raise RuntimeError('Prime cleanup receipt belongs to another request')
             database.finish_md_local_cleanup(args.db_path, iteration, cid)
         else:
-            raise RuntimeError('Missing Adam cleanup receipt; shared inputs retained')
+            raise RuntimeError('Missing Prime cleanup receipt; shared inputs retained')
     cleanup_pools(args, iteration, settings, directory)
 
 
@@ -241,7 +241,7 @@ def finish_cleanup(settings, ids):
     if not base.exists():
         return
     if json.loads((base/'owner.json').read_text()) != owner(settings):
-        raise RuntimeError('Refusing cleanup of unowned Adam run')
+        raise RuntimeError('Refusing cleanup of unowned Prime run')
     if any((base/f'CMPID_{cid}').exists() or (base/f'.collected-CMPID_{cid}').exists() for cid in ids):
         return  # Failed calculations retain their inputs, logs and checkpoints.
     shutil.rmtree(base)
