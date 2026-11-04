@@ -1,5 +1,25 @@
 # Graft specification
 
+## Explicit reference MD completion (2026-11-04)
+
+**Confirmed user request:** begin with MD-GBSA for iteration 0's four references
+omitted by the original Prime top-20 selection, retaining the twenty completed
+scores. Separately, stop and preserve iteration 1's old calculations and start
+that deleted population afresh after reference work is complete.
+
+**Scoped maintenance implementation:** after native retirement, collection and
+cleanup are verified, extend the completed reference selection explicitly with
+unscored eligible reference IDs. Require unchanged source fingerprint, protocol
+and replicate count, compare the old selection in the claiming transaction, and
+use fresh remote/shared run directories. Preserve old selection/settings in
+`md_gbsa_selection_history`; append IDs and claim only the added compounds.
+Original scores and per-compound provenance remain unchanged. Ordinary polling
+does not expand frozen selections or retry resolved work. Stage locks and SQLite
+backups protect the operator action. Iteration 1 reset continues to require
+verified terminal native jobs, released remote locks, a complete archive and the
+existing non-destructive deleted-population reset; reference compounds are kept.
+
+
 ## Prime display names (2026-11-04)
 
 **Confirmed user request:** replace the obsolete Adam name in runtime messages

@@ -2056,6 +2056,62 @@ def freeze_md_gbsa_selection(path, iteration, settings, *, count=None, ratio=.5,
         return dict(ids=ids,settings=settings)
 
 
+
+def extend_reference_md_gbsa_selection(path, expected, settings, ids):
+    """Explicit operator extension after completion; never rerank/recompute scores.
+
+    Caller holds generate/MD stage locks, verifies native retirement and backs up
+    the database. New inputs use a fresh run; the old selection remains in history.
+    This maintenance operation is never invoked by ordinary stage polling.
+    """
+    import json
+    ids = list(ids)
+    if not ids or any(type(cid) is not int for cid in ids) or len(set(ids)) != len(ids):
+        raise ValueError('Additional reference IDs must be nonempty unique integers')
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        ensure_md_gbsa_schema(conn)
+        row = conn.execute('SELECT candidates,settings FROM iteration_md_gbsa_selection WHERE iteration=0').fetchone()
+        saved = dict(ids=json.loads(row[0]), settings=json.loads(row[1])) if row else None
+        if saved is None or saved != expected:
+            raise RuntimeError('Reference MD selection changed; extension blocked')
+        old = saved['settings']
+        for key in ('protocol', 'replicates', 'source_sha256'):
+            if old.get(key) != settings.get(key):
+                raise RuntimeError('Reference MD scientific inputs/settings changed; extension blocked')
+        if old['root'] == settings['root']:
+            raise RuntimeError('Reference MD extension requires a fresh run directory')
+        if old.get('local_compute') and (not settings.get('local_compute') or
+                old['local_compute']['root'] == settings['local_compute']['root']):
+            raise RuntimeError('Reference MD extension requires a fresh local run directory')
+        if conn.execute('SELECT 1 FROM md_gbsa_local_cleanup WHERE iteration=0 AND completed=0').fetchone():
+            raise RuntimeError('Reference MD cleanup is pending; extension blocked')
+        rows = {r[0]: r for r in conn.execute(
+            'SELECT id,md_gbsa_score,state,prime_gbsa_score FROM compound WHERE iteration=0')}
+        for cid in saved['ids']:
+            value = rows.get(cid)
+            if (value is None or value[1] is None or not math.isfinite(value[1])
+                    or value[2] not in (State.MD_GBSA_DONE, State.FEP_DONE)):
+                raise RuntimeError('Original reference MD work is incomplete; extension blocked')
+        for cid in ids:
+            value = rows.get(cid)
+            if (cid in saved['ids'] or value is None or value[1] is not None
+                    or value[2] not in (State.REFERENCE, State.PRIME_GBSA_DONE)
+                    or value[3] is None or not math.isfinite(value[3])):
+                raise RuntimeError('Additional reference is already scored, active or ineligible')
+        conn.execute('CREATE TABLE IF NOT EXISTS md_gbsa_selection_history ('
+                     'id INTEGER PRIMARY KEY, iteration INTEGER NOT NULL, '
+                     'candidates TEXT NOT NULL, settings TEXT NOT NULL, added_ids TEXT NOT NULL, '
+                     'created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)')
+        conn.execute('INSERT INTO md_gbsa_selection_history(iteration,candidates,settings,added_ids) VALUES (0,?,?,?)',
+                     (row[0], row[1], json.dumps(ids)))
+        combined = saved['ids'] + ids
+        conn.execute('UPDATE iteration_md_gbsa_selection SET candidates=?,settings=? WHERE iteration=0',
+                     (json.dumps(combined), json.dumps(settings, sort_keys=True)))
+        conn.executemany('UPDATE compound SET state=?,modified_at=CURRENT_TIMESTAMP WHERE id=?',
+                         ((State.MD_GBSA_RUNNING, cid) for cid in ids))
+        return dict(ids=combined, settings=settings)
+
 def md_gbsa_completion_reason(path, iteration, minimum=0):
     if score_retry_requests(path, iteration, 'md_gbsa'):
         return 'MD-GBSA restart recovery pending'
