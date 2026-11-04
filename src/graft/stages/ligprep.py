@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 from graft.paths import stage_directory
-from graft.ligprep_recovery import load_job, job_file, prepare_new_calculation
+from graft.ligprep_recovery import load_job, job_file, prepare_new_calculation, LigPrepReconciliationPending
 from graft.states import CompoundState as State
 from graft import _core as c
 from graft import database
@@ -50,9 +50,21 @@ def _run_stage(args, requested_iteration):
 
     outdir.mkdir(parents=True, exist_ok=True)
     if active is None or not set(active['compound_ids']) & {row[0] for row in rows}:
-        active = prepare_new_calculation(args.schrodinger, outdir, [row[0] for row in rows])
+        try:
+            active = prepare_new_calculation(args.schrodinger, outdir, [row[0] for row in rows])
+        except LigPrepReconciliationPending as exc:
+            print(f'Iteration {iteration}: LigPrep waiting: {exc}', flush=True)
+            return
     if active is not None:
         rows = [row for row in rows if row[0] in active["compound_ids"]]
+
+    if active is None and getattr(args, 'use_slurm', False):
+        from graft.schrodinger_guard import verify_submission_host, SubmissionBlocked
+        try:
+            verify_submission_host(args.schrodinger, getattr(args, 'ligprep_host', args.host))
+        except SubmissionBlocked as exc:
+            print(f'Iteration {iteration}: LigPrep waiting: {exc}', flush=True)
+            return
 
     claimed_ids = set(
         database.claim_compounds(
@@ -82,7 +94,7 @@ def _run_stage(args, requested_iteration):
             schrodinger=args.schrodinger,
             input_file=input_file,
             glide_root=outdir,
-            host=args.host,
+            host=getattr(args, "ligprep_host", args.host),
             ph=args.ligprep_ph,
             pht=args.ligprep_pht,
             max_states=args.ligprep_max_states,
@@ -91,6 +103,9 @@ def _run_stage(args, requested_iteration):
             cpus=getattr(args, "ligprep_cpus", None),
             compound_ids=ids,
         )
+    except LigPrepReconciliationPending as exc:
+        print(f'Iteration {iteration}: LigPrep waiting: {exc}', flush=True)
+        return
     except Exception:
         if load_job(outdir) is not None:
             raise

@@ -61,7 +61,8 @@ glide-job-timeout = 1800          # 0이면 native Glide timeout 비활성화
 # 5. Amber GBSA: 모든 Glide 작업이 끝난 뒤 최종 Glide best 500 평가
 amber-gbsa = false
 amber-input-count = 500
-# true: Amber만 slurm:cpu로 제출. false 또는 생략: 아래 t41 설정 사용
+# true: LigPrep/Glide는 native slurm-cpu, Amber는 Slurm cpu 배열로 제출
+# false 또는 생략: LigPrep/Glide는 host, Amber는 아래 SSH 설정 사용
 use-slurm = true
 amber-slurm-host = "slurm"
 amber-slurm-partition = "cpu"

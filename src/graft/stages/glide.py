@@ -263,12 +263,13 @@ def _run_stage(args, ns):
     structure_counts = json.loads(counts_file.read_text()) if counts_file.exists() else {}
     counts = {job['reference_id']: structure_counts.get(str(job['reference_id']), job['input_count'])
               for job, _ in unsubmitted}
-    resources = glide_group_resources(getattr(args, 'host', ''),
+    resources = glide_group_resources(getattr(args, 'glide_host', getattr(args, 'host', '')),
                                       getattr(args, 'glide_cpus', None), counts, reserved)
     deferred = len(unsubmitted) - len(resources)
     if deferred:
         print(f'Glide: {deferred} reference groups waiting for the shared core budget.', flush=True)
 
+    submission_verified = False
     for job, ligand_file in unsubmitted:
         refid = job['reference_id']
         if refid not in resources:
@@ -296,6 +297,10 @@ def _run_stage(args, ns):
             args.mcs_smarts, core_atoms
         )
         try:
+            if getattr(args, 'use_slurm', False) and not submission_verified:
+                from graft.schrodinger_guard import verify_submission_host
+                verify_submission_host(args.schrodinger, host)
+                submission_verified = True
             submitted = c.submit_glide(
                 args.schrodinger, inp, gdir, host,
             )

@@ -65,6 +65,7 @@ def test_ligprep_splits_jobs_preserving_scientific_options(monkeypatch, tmp_path
 
 @pytest.mark.parametrize("source_host,cpus,host,njobs", [
     ("compute:128", None, "compute:128", "128"),
+    ("slurm-cpu", 124, "slurm-cpu:124", "124"),
     ("compute:128", 8, "compute:8", "8"),
     ("a:4 b:8", None, "a:4 b:8", "12"),
     ("localhost", None, "localhost", None),
@@ -90,3 +91,52 @@ def test_glide_splits_reference_groups_and_remains_asynchronous(monkeypatch, tmp
         assert calls[0][-3:] == ["-HOST", host, "-OVERWRITE"]
         assert "-NJOBS" not in calls[0]
     assert "-WAIT" not in calls[0]
+
+
+def test_ligprep_native_slurm_command_keeps_scientific_defaults(monkeypatch,tmp_path):
+    calls=[]
+    def run(command,cwd):
+        calls.append(command)
+        (cwd/'ligprep.maegz').write_text('prepared')
+    monkeypatch.setattr(_core,'run_command',run)
+    _core.run_ligprep_once(Path('/suite'),tmp_path/'input.smi',tmp_path,'slurm-cpu',cpus=124)
+    command=calls[0]
+    assert command[-5:]==['-HOST','slurm-cpu:124','-NJOBS','124','-WAIT']
+    assert '-We,-ph,7.4,-pht,1.0,-ms,2' in command
+    assert command[command.index('-s')+1]=='1'
+    assert '-r' not in command
+
+
+@pytest.mark.parametrize('child_status',['RUNNING','DONE'])
+def test_ligprep_recovers_original_host_after_enabling_slurm(tmp_path,monkeypatch,child_status):
+    import json
+    from graft import ligprep_recovery
+    old=['/old-suite/ligprep','-HOST','t41-cpu:8','-NJOBS','8','-WAIT']
+    saved=dict(command=old,compound_ids=[1],job_id='original')
+    ligprep_recovery._save(tmp_path,saved)
+    output=tmp_path/'ligprep.maegz'
+    calls=[]
+    def run(command,**kwargs):
+        calls.append(command)
+        assert command[0]=='/old-suite/jsc'
+        if command[1]=='info':
+            return SimpleNamespace(stdout='\n'.join(json.dumps(j) for j in [
+                dict(jobId='original',status='DONE'),dict(jobId='child',status=child_status)]))
+        assert command[1]=='download'
+        output.write_text('downloaded from original JobId')
+        return SimpleNamespace(stdout='')
+    monkeypatch.setattr(ligprep_recovery.subprocess,'run',run)
+    monkeypatch.setattr(ligprep_recovery.subprocess,'Popen',lambda *a,**k:pytest.fail('resubmitted pinned LigPrep'))
+    result=ligprep_recovery.run_or_recover(['/new-suite/ligprep','-HOST','slurm-cpu:124'],tmp_path,[1],output)
+    assert result==(child_status=='DONE')
+    assert ligprep_recovery.load_job(tmp_path)==saved
+    assert len(calls)==(2 if child_status=='DONE' else 1)
+
+
+def test_slurm_cpu_validation_uses_effective_stage_host():
+    settings=schrodinger_cpu_settings({'host':'old-a:4 old-b:4','use-slurm':True,
+                                       'ligprep-cpus':124,'glide-cpus':124})
+    assert settings['ligprep_cpus']==settings['glide_cpus']==124
+    with pytest.raises(ValueError,match='single compute host'):
+        schrodinger_cpu_settings({'host':'old:8','use-slurm':True,
+                                 'glide-host':'a:4 b:4','glide-cpus':8})

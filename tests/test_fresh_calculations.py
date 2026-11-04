@@ -49,7 +49,8 @@ def test_matching_ligprep_saved_submission_is_recovered_without_cleanup(tmp_path
     assert output.read_text() == 'current'
 
 
-def test_stage_retries_only_known_missing_ligprep_failure(tmp_path, monkeypatch):
+@pytest.mark.parametrize('stage_host', [None, 'slurm-cpu'])
+def test_stage_retries_only_known_missing_ligprep_failure(tmp_path, monkeypatch, stage_host):
     db = tmp_path / 'project.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)
@@ -62,6 +63,8 @@ def test_stage_retries_only_known_missing_ligprep_failure(tmp_path, monkeypatch)
                            synthetic_feasibility_enabled=False, host='compute:128',
                            ligprep_ph=7.4, ligprep_pht=1.0, ligprep_max_states=2,
                            ligprep_max_stereo=1, ligprep_ring_confs=1)
+    if stage_host is not None:
+        args.ligprep_host = stage_host
     folder = tmp_path / 'iter2/ligprep'
     folder.mkdir(parents=True)
     (folder / 'ligprep.log').write_text('JobId: old\n')
@@ -70,6 +73,7 @@ def test_stage_retries_only_known_missing_ligprep_failure(tmp_path, monkeypatch)
     monkeypatch.setattr(schrodinger_guard, 'job_details', lambda *a: [{'jobId': 'old', 'status': 'DONE'}])
     def calculate(**kw):
         assert kw['compound_ids'] == [1]
+        assert kw['host'] == (stage_host or 'compute:128')
         assert kw['input_file'].read_text() == 'CCO\tCMPID_1\n'
         out = kw['glide_root'] / 'ligprep.maegz'
         assert not out.exists()
@@ -187,3 +191,17 @@ def test_obsolete_queue_reconciles_interrupted_child_without_submitting(tmp_path
         assert not list(tmp_path.glob('prime_gbsa.stale-*'))
     with database.connect(db) as conn:
         assert conn.execute('SELECT state,docking_score,prime_gbsa_score FROM compound').fetchone() == ('docked', -9, None)
+
+
+@pytest.mark.parametrize('failed_query',['active','details'])
+def test_ligprep_lookup_failure_is_pending_without_clearing_work(tmp_path,monkeypatch,failed_query):
+    folder=tmp_path/'ligprep';folder.mkdir()
+    (folder/'ligprep.log').write_text('JobId: old\n')
+    (folder/'ligprep.maegz').write_text('native result retained')
+    def failed(*a):raise RuntimeError('MD remote operation failed: certificate verification failed')
+    monkeypatch.setattr(schrodinger_guard,'active_jobs',failed if failed_query=='active' else lambda *a:[])
+    monkeypatch.setattr(schrodinger_guard,'job_details',failed)
+    with pytest.raises(ligprep_recovery.LigPrepReconciliationPending,match='files retained'):
+        ligprep_recovery.prepare_new_calculation('/suite',folder,[1])
+    assert (folder/'ligprep.maegz').read_text()=='native result retained'
+    assert not list(tmp_path.glob('ligprep.previous-*'))

@@ -98,7 +98,8 @@ def test_local_tl_uses_reinvent_environment_and_shape_compatibility(tmp_path, mo
     assert valid.read_text() == "[*]C\t*N\n"
 
 
-def test_remote_failure_does_not_accept_stale_local_output(tmp_path, monkeypatch):
+@pytest.mark.parametrize('exit_code',[1,255])
+def test_remote_failure_does_not_accept_stale_local_output(tmp_path, monkeypatch, exit_code):
     scaffold = tmp_path / "scaffold.smi"
     scaffold.write_text("[*]C\n")
     stale = tmp_path / "generated.csv"
@@ -107,7 +108,7 @@ def test_remote_failure_does_not_accept_stale_local_output(tmp_path, monkeypatch
     def ssh(settings, command, **kwargs):
         if "export PATH=" in command:
             kwargs["stdout"].write(b"GPU failure\n")
-            raise subprocess.CalledProcessError(1, command)
+            raise subprocess.CalledProcessError(exit_code, command)
 
     monkeypatch.setattr(reinvent_remote, "_ssh", ssh)
     with pytest.raises(RuntimeError, match="sampling.ssh.log"):
@@ -117,6 +118,8 @@ def test_remote_failure_does_not_accept_stale_local_output(tmp_path, monkeypatch
         )
     assert stale.read_text() == "stale\n"
     assert (tmp_path / "sampling.ssh.log").read_text() == "GPU failure\n"
+    status = tmp_path / "sampling.remote-status.json"
+    assert status.exists() == (exit_code != 255)
 
 
 def test_ssh_uses_batch_mode_and_checks_exit_status(monkeypatch):
@@ -160,6 +163,10 @@ def test_remote_transport_roundtrip_and_sqlite_insertion(tmp_path, monkeypatch):
         remote=remote, remote_model=True,
     )
     assert (local / "sampling.log").read_text() == "finished\n"
+    import json
+    receipt=json.loads((local/"sampling.remote-status.json").read_text())
+    assert receipt["exit_code"]==0
+    assert receipt["remote"]==(local/"sampling.remote-dir.txt").read_text().strip()
     db = tmp_path / "project.sqlite"
     with _core.open_sqlite(db) as conn:
         _core.create_sqlite_schema(conn)

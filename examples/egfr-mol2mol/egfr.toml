@@ -49,7 +49,7 @@ aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 
 # 4. LigPrep → constrained Glide: Drug likeness 통과 화합물만 처리
-host = "t41-cpu:128"
+host = "t41-cpu:128"  # 일반 Prime 등의 기본 host; use-slurm=true이면 LigPrep/Glide는 slurm-cpu
 ligprep-cpus = 124
 ligprep-ph = 7.4
 ligprep-pht = 1.0
@@ -62,7 +62,8 @@ glide-job-timeout = 1800          # 0이면 native Glide timeout 비활성화
 # 5. Amber GBSA: 모든 Glide 작업이 끝난 뒤 최종 Glide best 500 평가
 amber_gbsa = true
 amber-input-count = 500
-# true: Amber만 slurm:cpu로 제출. false 또는 생략: 아래 t41 설정 사용
+# true: LigPrep/Glide는 native slurm-cpu, Amber는 Slurm cpu 배열로 제출
+# false 또는 생략: LigPrep/Glide는 host, Amber는 아래 SSH 설정 사용
 use-slurm = true
 amber-slurm-host = "slurm"
 amber-slurm-partition = "cpu"
@@ -98,10 +99,9 @@ prime-gbsa-license-retries = 3
 
 
 md-gbsa = true
-md-gbsa-input-count = 20  # Prime 점수 상위 20개; 비율 설정보다 우선
+md-gbsa-input-count = 24  # Prime 점수 상위 24개; 비율 설정보다 우선
 md-gbsa-snapshots = 20  # 추출 목표; NJOBS는 실제 입력 MAEGZ 프레임 수로 결정
 md-gbsa-production-ns = 5.0
-md-gbsa-schrodinger = "/share/opt/schrodinger/2026-1"
 
 md-gbsa-local-compute = true
 md-gbsa-local-host = "prime"
@@ -114,4 +114,4 @@ md-gbsa-local-cpus = 192  # 준비된 여러 분자의 프레임을 공통 큐�
 # Prime 결과가 있으면 Prime best 20, 없으면 Amber best 20, 둘 다 없으면 Glide best 20
 # 한 score source만 사용하며 후보 ID·source·순위를 저장하여 restart/import 시 유지합니다.
 fep-enabled = true
-fep-input-count = 20
+fep-input-count = 24

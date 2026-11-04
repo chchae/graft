@@ -847,9 +847,15 @@ Run `graft run egfr.toml --iteration 1` to supervise the full iteration, or
 The receptor path is local and relative to TOML; environment/work/init paths
 belong to t41. Optional `amber-ssh-config` points to a local SSH config.
 
-Set `use-slurm = true` to run **Amber only** on the `slurm` SSH host's `cpu`
-partition. Omission or false retains direct t41 execution. LigPrep, Glide and
-Prime keep their configured host. `amber-slurm-cpus` defaults to 384 (maximum
+Set `use-slurm = true` to submit new **LigPrep and Glide** jobs through native
+`slurm-cpu` and run **Amber** arrays on the `slurm` SSH host's `cpu` partition.
+LigPrep and Glide keep their `ligprep-cpus`/`glide-cpus` budgets; Glide divides
+its total budget across parallel reference groups. Optional `ligprep-host` and
+`glide-host` override the per-stage destination. The launch account must be
+registered with the Slurm JobServer and see `slurm-cpu` in `jsc hosts list`.
+Omission or false keeps LigPrep/Glide on `host` and Amber on direct SSH. Prime
+keeps its separate configuration, and saved native jobs retain their exact
+commands/hosts for recovery. `amber-slurm-cpus` defaults to 384 (maximum
 384 concurrent array tasks); each compound has its own one-CPU array task.
 The shared Amber
 environment defaults to `/share/opt/amber26/envs/AmberTools26`; override with

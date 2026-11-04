@@ -1,6 +1,7 @@
 """Project configuration API."""
 from pathlib import Path
 import math
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -331,7 +332,7 @@ def md_gbsa_settings(config: dict[str, Any]) -> dict[str, Any]:
                 or any(c.isspace() for c in value) or ':' in value):
             raise ValueError(f'Invalid md-gbsa-{suffix}')
         result['md_gbsa_' + suffix.replace('-', '_')] = value
-    for suffix, default in [('schrodinger', '/share/opt/schrodinger/2026-3'),
+    for suffix, default in [('schrodinger', '/share/opt/schrodinger/default'),
                             ('remote-work-dir', f'/homes1/{getpass.getuser()}/graft-md-gbsa-runs'),
                             ('local-work-dir', '/home1/prime_share'),
                             ('local-schrodinger', '/home/schrodinger/2025-3-IL')]:
@@ -546,15 +547,34 @@ def glide_job_timeout(config: dict[str, Any]) -> int:
     return value
 
 
+def schrodinger_stage_hosts(config: dict[str, Any]) -> dict[str, str]:
+    """Route new preparation/docking jobs; saved native commands stay pinned."""
+    slurm = config.get('use-slurm', False)
+    if not isinstance(slurm, bool):
+        raise ValueError('use-slurm must be a boolean')
+    settings = {}
+    for stage in ('ligprep', 'glide'):
+        key = stage + '-host'
+        host = config.get(key, 'slurm-cpu' if slurm else config['host'])
+        if key in config and (not isinstance(host, str) or not host.strip()
+                or any(c in host for c in '\n\r\t')
+                or any(not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*(?::[1-9][0-9]*)?', entry)
+                       for entry in host.split())):
+            raise ValueError(f'{key} must contain native host entries with optional positive slot counts')
+        settings[stage + '_host'] = host
+    return settings
+
+
 def schrodinger_cpu_settings(config: dict[str, Any]) -> dict[str, int | None]:
     settings = {}
+    stage_hosts = schrodinger_stage_hosts(config)
     for stage in ("ligprep", "glide", "prime_gbsa"):
         key = f"{stage.replace('_', '-')}-cpus"
         value = config.get(key)
         if value is not None:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{key} must be a positive integer")
-            if len(str(config["host"]).split()) != 1:
+            if len(stage_hosts.get(stage + "_host", str(config["host"])).split()) != 1:
                 raise ValueError(f"{key} requires a single compute host")
         settings[key.replace("-", "_")] = value
     return settings

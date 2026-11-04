@@ -1,6 +1,7 @@
 """Serialize submissions and fence live Glide/Prime jobs using JobServer."""
 import fcntl
 import json
+import re
 import os
 import subprocess
 import tempfile
@@ -12,6 +13,35 @@ TERMINAL = {'DONE', 'FAILED', 'CANCELED', 'STOPPED'}
 
 class SubmissionBlocked(RuntimeError):
     pass
+
+
+def verify_submission_host(suite, host):
+    """Read-only compatibility preflight before making a new native launch intent."""
+    executable = str(Path(suite)/'jsc')
+    result = subprocess.run([executable,'hosts','list','--verbose'], check=True,
+                            capture_output=True,text=True,timeout=30)
+    names = {entry.split(':',1)[0] for entry in host.split()}
+    headers = list(re.finditer(r'^  (\S+:\d+)\s*$',result.stdout,re.M))
+    found = set()
+    for index, header in enumerate(headers):
+        body = result.stdout[header.end():headers[index+1].start() if index+1<len(headers) else len(result.stdout)]
+        matching = {name for name in names if re.search(r'^\s+(?:Name:\s*)?'+re.escape(name)+r'\s*$',body,re.M)}
+        if not matching:
+            continue
+        found.update(matching)
+        server = header[1]
+        info = subprocess.run([executable,'server-info',server],check=True,
+                              capture_output=True,text=True,timeout=30).stdout
+        versions = {key:tuple(map(int,value.split('.'))) for key,value in
+                    re.findall(r'(Server|Client) API version:\s+v([0-9.]+)',info)}
+        if set(versions) != {'Server','Client'}:
+            raise SubmissionBlocked(f'Cannot verify native API compatibility for {server}; no job submitted')
+        if versions['Client'] > versions['Server']:
+            version = lambda key: '.'.join(map(str,versions[key]))
+            raise SubmissionBlocked(f"Host {host}: JobServer {server} API {version('Server')} is older "
+                                    f"than client API {version('Client')}; upgrade the server before new submissions")
+    if found != names:
+        raise SubmissionBlocked(f'Native hosts not available through registered JobServers: {sorted(names-found)}')
 
 
 def job_details(suite, job_id, directory=None):

@@ -1,5 +1,117 @@
 # Independent Graft reconstruction prompt
 
+## Slurm JobServer upgrade and optional MD installation override (2026-11-04)
+
+**Confirmed user report/request:** the Slurm JobServer is upgraded to 2026-3;
+remove the EGFR `md-gbsa-schrodinger` entry when unnecessary.
+
+The override remains optional, and the EGFR TOML omits the key. A subsequent
+**confirmed user request** changes the MD-GBSA remote installation default to
+`/share/opt/schrodinger/default`. Keep that path remote; do not resolve it on the
+local launch host. Explicit overrides retain their configured values.
+Do not replace pinned old MD scientific commands/helpers merely because a server
+was upgraded; old selections retain their recorded installation and protocol.
+
+Runtime checks verified server and current client API v1.21.2. The Slurm user's
+previous TLS certificate was stale after upgrade; reauthentication restored job
+queries with both the current and older clients. Do not treat inaccessible-server
+errors as an empty queue or remove protected remote registrations to bypass them.
+LigPrep preparation now reports native/remote discovery failures as pending,
+retaining files and claims rather than printing repeated tracebacks. It never
+submits while prior-work status is uncertain. The already running supervisor
+subsequently completed LigPrep and submitted native Glide groups to `slurm-cpu`.
+This is routing/recovery evidence, not scientific accuracy validation.
+
+
+## Automatic retirement of old iteration workspaces (2026-11-04)
+
+**Confirmed user request:** stop repeated Generate tracebacks from stale remote
+sampling markers and start with a clean calculation folder when prior data exists.
+
+**Implementation choice:** retain scientific data by archiving the entire old
+iteration under `output/.previous/`, then use the existing transactional deleted-
+population reset and SQLite/WAL backup. Do not delete iteration 0, saved nonempty
+populations, resumable zero-row plans, live jobs or uncertain submissions.
+
+A REINVENT marker alone no longer blocks cleanup. Verify its exact saved remote
+configuration and inspect remote same-user processes, including children retaining
+the remote working directory. New SSH invocations save an atomic host/run/config
+exit receipt; SSH transport exit 255 is uncertain. A receipt alone never retires
+live work. For legacy runs without a receipt, require the native final log line,
+matching config, nonempty output, matching local output when present and absence
+of related remote processes. The installed REINVENT terminal line follows its
+runner/controlled shutdown; this verifies retirement, not scientific validity.
+Only known non-dumpable credential/session daemons are excluded from cwd checks;
+an inaccessible unknown/scientific process remains uncertain.
+
+For supported saved Slurm Amber arrays/single jobs, require complete native
+terminal evidence and released remote worker locks before archiving. Preserve the
+remote trees and write reconciliation evidence inside the local archive. Unknown
+remote types, incomplete evidence and transport failures retain all work. Expected
+workspace reconciliation/lock waits print a concise pending reason and return
+without sampling, rather than producing a traceback on every supervisor poll.
+All native LigPrep/Glide/Prime retirement checks and ownership/reset constraints
+remain in force. Cached output or a zero local worker exit alone is insufficient.
+
+New Slurm LigPrep/Glide submissions also perform a read-only native host/server
+API check before launching; LigPrep checks before claiming new compounds or
+writing a launch record. An older JobServer API produces a pending message,
+never an automatic client downgrade, server restart or duplicate submission.
+Existing LigPrep launches lacking a recoverable JobId remain pending without
+repeated tracebacks. The observed Slurm server API 1.19.4 is older than the
+2026-3 launch client's API 1.21.2 and must be upgraded separately before new
+Slurm scientific submissions can succeed. A verified API-rejected LigPrep intent
+was archived only after successful native history queries found no matching
+command; all older jobs at the reused directory were terminal. No live job or
+compound score was reset.
+
+**Verification:** 234 affected tests passed. The full suite passed 1,841 tests
+with seven skips and the same previously observed 3D combichem collision-test
+failure. Editable installation, compileall, imports and diff checks passed.
+The current deleted iteration was automatically archived and regenerated to
+10,000 compounds; all 24 reference rows matched the pre-reset SQLite backup.
+Remote verification was read-only; scientific validity/throughput is not inferred
+from these workflow and mocked-program tests.
+
+
+## LigPrep and Glide through Slurm CPU hosts (2026-11-04)
+
+**Confirmed user request:** submit LigPrep and Glide to `slurm-cpu`, alongside
+Amber's existing Slurm execution.
+
+**Implementation choice:** `use-slurm=true` now selects native host entry
+`slurm-cpu` for new LigPrep and Glide jobs, including the legacy combined docking
+entry point. False/omission keeps `host`. Optional `ligprep-host` and `glide-host`
+override these per-stage destinations. `host` continues to control the ordinary
+Prime fallback; local Prime and MD backend settings retain their separate roles.
+Keep `ligprep-cpus` and `glide-cpus`: EGFR uses 124 for LigPrep and a shared total
+124 budget across parallel Glide reference groups. Native JobDJ `-HOST`/`-NJOBS`
+perform submission through the registered Slurm JobServer; do not wrap these jobs
+in new unmanaged sbatch processes. Amber retains its existing Slurm arrays.
+
+Preserve LigPrep protonation/stereochemistry, constrained SP docking, CMPID title
+mapping, lowest-score pose selection, and immediate per-group persistence. Saved
+LigPrep/Glide native JobIds, commands and hosts remain authoritative after flags
+change. Live/uncertain old-host Glide reservations defer new-host submissions
+until those reservations retire. Do not cancel, relocate or reset existing work.
+
+The launch user's JobServer certificate collection must include the Slurm server
+and expose `slurm-cpu` for the matching installed release. Read-only installed
+2026-3 help verifies `-HOST`, `-NJOBS` and JobServer discovery; the current launch
+account was authenticated with the already running Slurm JobServer, which lists
+`slurm-cpu` and `/share/opt/schrodinger/2026-3`. No service startup is performed.
+Regression tests mock scientific calculations; no LigPrep/Glide accuracy or
+Slurm throughput validation is claimed by this routing change.
+
+**Verification:** 292 affected regressions passed, with 231 configuration/command
+and resource-allocation tests rerun after final compatibility refinement.
+Editable installation, compileall, package/CLI imports and diff whitespace checks
+passed. The full suite passed 1,814 tests with seven skips and one previously
+observed failure in `test_combichem_3d.py`'s real-fragment collision assertion;
+that implementation/test was not changed here. No new scientific jobs were
+submitted for this routing verification.
+
+
 ## Explicit reference MD completion (2026-11-04)
 
 **Confirmed user request:** begin with MD-GBSA for iteration 0's four references
@@ -2774,8 +2886,9 @@ sampling rather than resetting remaining results or silently accepting new IDs.
 
 Perform cleanup under the generate lock and all other stage locks. Verify saved
 native parents/children are terminal and no live jobs belong to the iteration.
-Unknown status, surviving remote work markers, active stages or uncertain launches
-block cleanup. Archive the original iteration folder under
+Unknown status, unreconciled remote work markers, active stages or uncertain launches
+block cleanup. Verified retired remote records may be archived under the
+2026-11-04 reconciliation policy above. Archive the original iteration folder under
 `output/.previous/iterN-<timestamp>/`; save a complete SQLite backup including
 committed WAL as `database-before-reset-*.sqlite` in the archive before deleting
 any metadata. The initial observed recovery used `database-before-reset.sqlite`.
@@ -2811,9 +2924,11 @@ This later user request supersedes earlier Prime population defaults: new Prime
 selection defaults to 50 original compounds, both with and without Amber. Explicit
 `prime-gbsa-input-count` still overrides it. The EGFR example uses Amber 500 → Prime 50.
 
-`use-slurm = true` applies **only to Amber**. Omission or false preserves the
-existing direct SSH worker (EGFR: t41); LigPrep, Glide and Prime host settings
-are unchanged. Amber SLURM defaults are SSH host `slurm`, partition `cpu`,
+`use-slurm = true` originally applied only to Amber. The confirmed 2026-11-04
+request above extends it to new native LigPrep/Glide jobs on `slurm-cpu`. Omission
+or false preserves direct Amber SSH execution (EGFR: t41) and the original
+LigPrep/Glide `host`; Prime configuration is unchanged. Amber Slurm defaults
+are SSH host `slurm`, partition `cpu`,
 `amber-slurm-cpus=384` (validated 1..384), environment
 `/share/opt/amber26/envs/AmberTools26`, and shared work directory
 `/homes1/<current-user>/graft-amber-slurm-runs`. Override these with

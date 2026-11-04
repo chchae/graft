@@ -4,11 +4,37 @@ from pathlib import Path
 import re
 import time
 import csv
+import shlex
 from contextlib import ExitStack
+import subprocess
 
 from graft.paths import iteration_directory, stage_in_iteration
 from graft import database
 from graft import schrodinger_guard as guard
+
+
+class WorkspaceReconciliationPending(RuntimeError):
+    """Retain old work until its native/remote retirement is established."""
+
+
+def reconcile_amber_job(path):
+    from graft import amber_gbsa as amber, amber_slurm
+    record = json.loads(path.read_text())
+    if record.get('mode') not in (amber_slurm.ARRAY, amber_slurm.SINGLE) or not record.get('slurm_job_id'):
+        raise RuntimeError('Unknown or uncertain Amber submission')
+    native = amber_slurm.job_state(path.parent, record)
+    if native['active']:
+        raise RuntimeError(f"Amber Slurm job {record['slurm_job_id']} is active")
+    remote = shlex.quote(record['remote_dir'])
+    helper = 'amber_array.py' if record['mode'] == amber_slurm.ARRAY else 'worker.py'
+    response = amber.ssh(record['settings'], f'python3 {remote}/{helper} collect {remote}',
+                         capture_output=True, text=True, timeout=120)
+    snapshot = json.loads(response.stdout)
+    if snapshot['active']:
+        raise RuntimeError('Amber remote execution locks remain held')
+    if record['mode'] == amber_slurm.ARRAY and len(snapshot['tasks']) != len(record['compound_ids']):
+        raise RuntimeError('Amber array task evidence is incomplete')
+    return dict(native=native, snapshot=snapshot)
 
 
 def prepare_iteration_directory(args, iteration):
@@ -21,7 +47,10 @@ def prepare_iteration_directory(args, iteration):
     with ExitStack() as locks:
         if deleted:
             for stage in ('druglike', 'synthetic_feasibility', 'ligprep', 'glide', 'amber_gbsa', 'prime_gbsa', 'md_gbsa', 'fep'):
-                locks.enter_context(database.stage_lock(args.db_path, stage))
+                try:
+                    locks.enter_context(database.stage_lock(args.db_path, stage))
+                except RuntimeError as exc:
+                    raise WorkspaceReconciliationPending(str(exc)) from exc
         return _prepare(args, iteration, deleted)
 
 
@@ -44,14 +73,27 @@ def _prepare(args, iteration, deleted):
     files = [path for path in paths if path.is_file()]
     jobs = {}
     unidentified_logs = []
+    remote_evidence = {}
     for path in files:
         if path.name == 'amber_job.json' or path.name.endswith('.remote-dir.txt'):
-            raise RuntimeError(f'Remote work requires reconciliation; files retained: {path}')
+            try:
+                if path.name == 'amber_job.json':
+                    proof = reconcile_amber_job(path)
+                else:
+                    from graft.reinvent_remote import reconcile_remote_run
+                    proof = reconcile_remote_run(path)
+                remote_evidence[str(path.relative_to(root))] = proof
+            except Exception as exc:
+                detail = str(exc)
+                if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+                    detail = str(exc.stderr)[-1000:]
+                raise WorkspaceReconciliationPending(
+                    f'Remote work requires reconciliation; files retained: {path}: {detail}') from exc
         if path.name in ('ligprep_job.json', 'glide_job.json', 'prime_gbsa_job.json',
                          'ligprep_job.tmp', 'glide_job.tmp', 'prime_gbsa_job.tmp'):
             record = json.loads(path.read_text())
             if not record.get('job_id'):
-                raise RuntimeError(f'Saved or uncertain submission requires recovery; files retained: {path}')
+                raise WorkspaceReconciliationPending(f'Saved or uncertain submission requires recovery; files retained: {path}')
             jobs[record['job_id']] = path.parent
         if path.suffix == '.log':
             ids = re.findall(r'^JobId\s*:\s*(\S+)', path.read_text(errors='replace'),
@@ -62,23 +104,23 @@ def _prepare(args, iteration, deleted):
                 unidentified_logs.append(path)
     for path in unidentified_logs:
         if path.parent not in jobs.values():
-            raise RuntimeError(f'Calculation log has no recoverable JobId; files retained: {path}')
+            raise WorkspaceReconciliationPending(f'Calculation log has no recoverable JobId; files retained: {path}')
 
     # Check all native jobs before moving a single file, including children of
     # terminal parents. A lookup failure propagates without changing anything.
     directories = {root, *(path for path in paths if path.is_dir())}
     live = guard.active_jobs(args.schrodinger)
     if any(guard.belongs_to_directory(job, folder) for job in live for folder in directories):
-        raise RuntimeError(f'Iteration has live external jobs; files retained: {root}')
+        raise WorkspaceReconciliationPending(f'Iteration has live external jobs; files retained: {root}')
     for job in live:
         launch = job.get('spec', {}).get('launchParams', {}).get('launchDirectory')
         if launch and Path(launch).resolve().is_relative_to(root.resolve()):
-            raise RuntimeError(f'Iteration has live external jobs; files retained: {root}')
+            raise WorkspaceReconciliationPending(f'Iteration has live external jobs; files retained: {root}')
     for job_id, folder in jobs.items():
         details = guard.job_details(args.schrodinger, job_id, folder)
         if (not any(job.get('jobId') == job_id for job in details)
                 or any(job.get('status') not in guard.TERMINAL for job in details)):
-            raise RuntimeError(f'Iteration job {job_id} is live or uncertain; files retained: {root}')
+            raise WorkspaceReconciliationPending(f'Iteration job {job_id} is live or uncertain; files retained: {root}')
 
     archive_root = Path(args.output) / '.previous'
     if archive_root.is_symlink():
@@ -97,6 +139,9 @@ def _prepare(args, iteration, deleted):
         archive.mkdir()
     root.mkdir(parents=True)
     try:
+        if remote_evidence:
+            (archive / 'workspace_remote_reconciliation.json').write_text(
+                json.dumps(remote_evidence, indent=2) + '\n')
         if deleted:
             database.reset_deleted_iteration(args.db_path, iteration,
                                              archive / f'database-before-reset-{time.time_ns()}.sqlite', report_ids)

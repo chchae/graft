@@ -68,8 +68,9 @@ def test_invalid_counts_are_rejected(bad):
 
 
 @pytest.mark.parametrize('legacy', [None, 'compute:5', 'compute:124', 'unknown'])
+@pytest.mark.parametrize('stage_host', [None, 'slurm-cpu'])
 def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands(
-        tmp_path, monkeypatch, capsys, legacy):
+        tmp_path, monkeypatch, capsys, legacy, stage_host):
     db = tmp_path / 'project.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)
@@ -81,6 +82,8 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
     args = SimpleNamespace(db_path=db, output=tmp_path, schrodinger=Path('/suite'),
                            host='compute:128', glide_cpus=12, mcs_smarts=None,
                            reference_poses=Path('refs.maegz'), grid=Path('grid.zip'))
+    if stage_host is not None:
+        args.glide_host = stage_host
     prepared = tmp_path / 'iter1/ligprep/ligprep.maegz'
     prepared.parent.mkdir(parents=True)
     prepared.write_text('input')
@@ -113,6 +116,7 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
         ref = int(directory.name.split('_')[1])
         assert not (legacy and ref == 1)
         assert kwargs.get('cpus') is None
+        assert host.startswith((stage_host or 'compute')+':')
         submitted[ref] = host
         options = schrodinger_job_options(host, split_jobs=True)
         assert int(options[options.index('-NJOBS') + 1]) == requested_slots(host)
@@ -127,7 +131,7 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
     monkeypatch.setattr(glide.time, 'sleep', lambda *a: None)
     glide._run_stage(args, SimpleNamespace(iteration=1, poll_interval=1,
                                            completion_fraction=0, tail_timeout=0))
-    if legacy in ('unknown', 'compute:124'):
+    if legacy in ('unknown', 'compute:124') or (stage_host and legacy):
         assert submitted == {}
     else:
         assert requested_slots(submitted[3]) > requested_slots(submitted[2])

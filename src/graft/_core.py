@@ -172,7 +172,7 @@ def load_project_toml(filename):
         raise RuntimeError("'aizynth-cli' must not be empty.")
 
     output = resolve_path(config["out-dir"])
-    from graft.config import prime_gbsa_license_retry_settings, schrodinger_cpu_settings, glide_job_timeout, amber_settings, log_level, prime_gbsa_flexdist, fep_settings, debug_settings, distribution_settings, md_gbsa_settings
+    from graft.config import prime_gbsa_license_retry_settings, schrodinger_cpu_settings, schrodinger_stage_hosts, glide_job_timeout, amber_settings, log_level, prime_gbsa_flexdist, fep_settings, debug_settings, distribution_settings, md_gbsa_settings
     from graft.config import prime_gbsa_local_settings
     return debug_settings(config, {
         **prime_gbsa_local_settings(config),
@@ -182,6 +182,7 @@ def load_project_toml(filename):
         **amber_settings(config, base),
         **prime_gbsa_license_retry_settings(config),
         **schrodinger_cpu_settings(config),
+        **schrodinger_stage_hosts(config),
         "toml_file": filename,
         "log_level": log_level(config),
         "project": project,
@@ -3656,7 +3657,7 @@ def run_reference_guided_docking(iteration, args, glide_root):
         schrodinger=args.schrodinger,
         input_file=all_input,
         glide_root=glide_root,
-        host=args.host,
+        host=getattr(args, "ligprep_host", args.host),
         ph=args.ligprep_ph,
         pht=args.ligprep_pht,
         max_states=args.ligprep_max_states,
@@ -3757,7 +3758,7 @@ def run_reference_guided_docking(iteration, args, glide_root):
             schrodinger=args.schrodinger,
             glide_input=glide_input,
             group_dir=group_dir,
-            host=args.host,
+            host=getattr(args, "glide_host", args.host),
             cpus=getattr(args, "glide_cpus", None),
         )
 

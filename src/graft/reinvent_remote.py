@@ -1,5 +1,7 @@
 """Run REINVENT via SSH while keeping the workflow and SQLite local."""
 import json
+import hashlib
+import time
 import os
 from pathlib import Path, PurePosixPath
 import shlex
@@ -28,6 +30,47 @@ def _toml(config):
             lines.append(f"\n[{key}]")
             lines.extend(f"{name} = {value(item)}" for name, item in table.items())
     return "\n".join(lines) + "\n"
+
+
+def reconcile_remote_run(marker):
+    """Verify a known remote REINVENT run ended before archiving local work."""
+    marker = Path(marker)
+    stem = marker.name.removesuffix('.remote-dir.txt')
+    if stem not in ('sampling', 'elite_transfer_learning', 'transfer_learning'):
+        raise RuntimeError('Unsupported remote work marker')
+    identity = marker.read_text().strip()
+    host, separator, remote = identity.partition(':')
+    if (not separator or not host or host.startswith('-') or any(c.isspace() for c in host)
+            or not remote.startswith('/') or any(c in remote for c in '\n\r')):
+        raise RuntimeError('Invalid remote REINVENT identity')
+    rendered = marker.with_name(stem+'.remote.toml').read_text()
+    config = tomllib.loads(rendered)
+    kind = config['run_type']
+    if kind not in ('sampling', 'transfer_learning'):
+        raise RuntimeError('Unsupported remote REINVENT run type')
+    output = config['parameters']['output_file' if kind == 'sampling' else 'output_model_file']
+    request = dict(root=remote, config_name=stem+'.toml',
+                   config_sha256=hashlib.sha256(rendered.encode()).hexdigest(),
+                   log_name='sampling.log' if kind == 'sampling' else 'elite_transfer_learning.log',
+                   output=output)
+    status_file = marker.with_name(stem+'.remote-status.json')
+    if status_file.exists():
+        receipt = json.loads(status_file.read_text())
+        if (receipt.get('remote') != identity or receipt.get('config_sha256') != request['config_sha256']
+                or type(receipt.get('exit_code')) is not int or not 0 <= receipt['exit_code'] < 255):
+            raise RuntimeError('Remote REINVENT exit receipt has uncertain identity/status')
+        request['receipt'] = receipt
+    script = Path(__file__).with_name('reinvent_remote_status.py').read_text()
+    response = _ssh({'host':host}, 'python3 - '+shlex.quote(json.dumps(request)),
+                    input=script, capture_output=True, text=True, timeout=30)
+    result = json.loads(response.stdout)
+    if result.get('terminal') is not True:
+        raise RuntimeError(result.get('reason') or 'Remote REINVENT termination is uncertain')
+    local_output = marker.with_name(Path(output).name)
+    if result.get('output_sha256') and local_output.exists():
+        if hashlib.sha256(local_output.read_bytes()).hexdigest() != result['output_sha256']:
+            raise RuntimeError('Local and remote legacy REINVENT outputs differ')
+    return dict(remote=identity, **result)
 
 
 def run_remote(config_file, output_file, settings, *, remote_model):
@@ -87,14 +130,27 @@ def run_remote(config_file, output_file, settings, *, remote_model):
     )
     execution_log = config_file.parent / f"{config_file.stem}.ssh.log"
     print(f"Running REINVENT on {settings['host']}:{remote_dir}", flush=True)
+    def save_exit(code):
+        if not 0 <= code < 255:
+            return  # SSH transport failure does not establish native termination.
+        status = dict(remote=f"{settings['host']}:{remote_dir}", exit_code=code,
+                      config_sha256=hashlib.sha256(rendered.encode()).hexdigest(), finished_at=time.time())
+        path = config_file.with_suffix('.remote-status.json')
+        temporary = path.with_suffix('.pending')
+        temporary.write_text(json.dumps(status))
+        temporary.replace(path)
+
     try:
         with execution_log.open("wb") as stream:
             _ssh(settings, command, stdout=stream, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as exc:
+        save_exit(exc.returncode)
         raise RuntimeError(
             f"Remote REINVENT failed (exit {exc.returncode}); see {execution_log}; "
             f"remote files: {settings['host']}:{remote_dir}"
         ) from exc
+
+    save_exit(0)
 
     def download(remote_path, local_path):
         temporary = local_path.with_name(local_path.name + ".download")

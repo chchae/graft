@@ -398,3 +398,33 @@ def test_log_level_rejects_invalid_configuration(settings):
     from graft.config import log_level
     with pytest.raises(ValueError, match='log.level'):
         log_level(settings)
+
+
+@pytest.mark.parametrize('extra, expected', [
+    ('', 'localhost'), ('use-slurm = false\n', 'localhost'),
+    ('use-slurm = true\n', 'slurm-cpu'),
+])
+def test_slurm_routes_only_new_ligprep_and_glide_hosts(tmp_path, extra, expected):
+    project=tmp_path/'route.toml'
+    project.write_text(PROJECT_TOML+extra+'ligprep-cpus = 124\nglide-cpus = 124\n')
+    settings=_core.load_project_toml(project)
+    assert settings['ligprep_host']==settings['glide_host']==expected
+    assert settings['host']=='localhost'
+    assert settings['ligprep_cpus']==settings['glide_cpus']==124
+
+
+def test_stage_host_overrides_do_not_change_other_stage_or_prime(tmp_path):
+    project=tmp_path/'route.toml'
+    project.write_text(PROJECT_TOML+'use-slurm = true\nligprep-host = "prep:12"\n')
+    settings=_core.load_project_toml(project)
+    assert settings['ligprep_host']=='prep:12'
+    assert settings['glide_host']=='slurm-cpu'
+    assert settings['host']=='localhost'
+
+
+@pytest.mark.parametrize('value', ['""','"-host"','"slurm-cpu:0"','"slurm-cpu:-1"','"slurm-cpu:1.5"','true','12'])
+@pytest.mark.parametrize('stage',['ligprep','glide'])
+def test_invalid_stage_host_is_rejected(tmp_path,stage,value):
+    project=tmp_path/'route.toml'
+    project.write_text(PROJECT_TOML+f'{stage}-host = {value}\n')
+    with pytest.raises(ValueError,match=stage+'-host'):_core.load_project_toml(project)

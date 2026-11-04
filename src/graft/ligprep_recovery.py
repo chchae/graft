@@ -8,6 +8,10 @@ from pathlib import Path
 from graft.stages._logging import job_elapsed, format_elapsed
 
 
+class LigPrepReconciliationPending(RuntimeError):
+    """An existing launch cannot safely be repeated yet."""
+
+
 def job_file(directory):
     return Path(directory) / 'ligprep_job.json'
 
@@ -31,9 +35,16 @@ def prepare_new_calculation(suite, directory, compound_ids):
     record = load_job(directory)
     if record is not None and set(record['compound_ids']) == set(compound_ids):
         return record  # The same submission still requires recovery/DB commit.
-    if any(directory.iterdir()) and any(
-            belongs_to_directory(job, directory) for job in active_jobs(suite)):
-        raise RuntimeError('Previous LigPrep job is still running; files retained for reconciliation.')
+    if any(directory.iterdir()):
+        try:
+            live = active_jobs(suite)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            lines = str(exc).strip().splitlines()
+            detail = lines[-1] if lines else type(exc).__name__
+            raise LigPrepReconciliationPending(
+                f'Cannot verify previous jobs; files retained for reconciliation: {detail}') from exc
+        if any(belongs_to_directory(job, directory) for job in live):
+            raise LigPrepReconciliationPending('Previous LigPrep job is still running; files retained for reconciliation.')
     job_ids = set()
     if record is not None:
         if not record.get('job_id'):
@@ -46,8 +57,15 @@ def prepare_new_calculation(suite, directory, compound_ids):
     if logs and not job_ids:
         raise RuntimeError('Legacy LigPrep logs have no JobId; files retained for reconciliation.')
     for job_id in job_ids:
-        if any(job.get('status') not in TERMINAL for job in job_details(suite, job_id, directory)):
-            raise RuntimeError('Previous LigPrep job is still running; files retained for reconciliation.')
+        try:
+            details = job_details(suite, job_id, directory)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            lines = str(exc).strip().splitlines()
+            detail = lines[-1] if lines else type(exc).__name__
+            raise LigPrepReconciliationPending(
+                f'Cannot verify LigPrep job {job_id}; files retained for reconciliation: {detail}') from exc
+        if any(job.get('status') not in TERMINAL for job in details):
+            raise LigPrepReconciliationPending('Previous LigPrep job is still running; files retained for reconciliation.')
     if any(directory.iterdir()):
         archived = directory.with_name(f'{directory.name}.previous-{time.time_ns()}')
         directory.rename(archived)
@@ -63,7 +81,7 @@ def run_or_recover(command, directory, compound_ids, output):
     elapsed = None
     if record is not None:
         if not record.get('job_id'):
-            raise RuntimeError('Interrupted LigPrep launch without saved JobId; '
+            raise LigPrepReconciliationPending('Interrupted LigPrep launch without saved JobId; '
                                'reconcile ligprep_job.json with JobServer before resubmitting.')
         jsc = Path(record['command'][0]).parent / 'jsc'
         result = subprocess.run([str(jsc), 'info', '--json', record['job_id']],
@@ -113,7 +131,7 @@ def run_or_recover(command, directory, compound_ids, output):
             # The external job may survive a failed local -WAIT client.
             if record['job_id']:
                 return False
-            raise RuntimeError('LigPrep failed without a saved JobId; reconcile submission before retrying.')
+            raise LigPrepReconciliationPending('LigPrep failed without a saved JobId; reconcile submission before retrying.')
     if not output.is_file() or not output.stat().st_size:
         job_file(directory).unlink()
         raise RuntimeError('Completed LigPrep job produced no output.')

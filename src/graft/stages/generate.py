@@ -6,6 +6,7 @@ import csv
 import os
 import tempfile
 import time
+import subprocess
 from graft.paths import stage_directory
 from graft import _core as c
 from graft import database
@@ -13,7 +14,16 @@ from graft.chemistry.scaffold import prepare_iteration_scaffold, log_iteration_m
 from graft.chemistry.descriptors import calculate_rdkit_descriptors_batch
 from graft.chemistry.druglike import filter_druglike
 from graft.stages._logging import work_started, timed_stage
-from graft.stages._workspace import prepare_iteration_directory
+from graft.stages._workspace import prepare_iteration_directory, WorkspaceReconciliationPending
+
+
+def prepare_workspace(args, iteration):
+    try:
+        prepare_iteration_directory(args, iteration)
+    except (WorkspaceReconciliationPending, OSError, subprocess.SubprocessError) as exc:
+        print(f'Iteration {iteration}: generation waiting for workspace reconciliation: {exc}', flush=True)
+        return False
+    return True
 
 
 def choose_iteration(args, requested):
@@ -189,7 +199,8 @@ def _run_stage(args, requested_iteration):
     combichem = getattr(args, 'sidechain_library', None) is not None
 
     if iteration == 1:
-        prepare_iteration_directory(args, iteration)
+        if not prepare_workspace(args, iteration):
+            return
         run_dir = stage_directory(args.output, iteration, 'combichem' if combichem else 'reinvent')
         database.validate_generation_population(args.db_path, iteration, args.target_count)
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -247,7 +258,8 @@ def _run_stage(args, requested_iteration):
             raise RuntimeError(
                 f"Need {args.prime_gbsa_elite_count} previous {score_source} elites; only {len(elites)} available."
             )
-        prepare_iteration_directory(args, iteration)
+        if not prepare_workspace(args, iteration):
+            return
         run_dir = stage_directory(args.output, iteration, 'combichem' if combichem else 'reinvent')
         database.validate_generation_population(args.db_path, iteration, args.target_count)
         run_dir.mkdir(parents=True, exist_ok=True)
