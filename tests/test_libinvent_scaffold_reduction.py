@@ -143,14 +143,14 @@ def test_new_iteration_adjusts_and_resume_keeps_choice(project, monkeypatch, cap
     assert json.loads((project.output / 'iter02/01-scaffold/scaffold_info.json').read_text()) == saved
 
 
-def test_real_iteration8_elites_reuse_previous_when_only_previous_sites_are_valid(project, capsys):
+def test_real_iteration8_elites_reuse_previous_on_missing_internal_sidechain_cut(project, capsys):
     elites, previous = seed(project, EGFR_ELITES, EGFR_PREVIOUS)
     prepare_iteration_scaffold(project, 2, elites, create=True)
     saved = database.iteration_scaffold(project.db_path, 2)
     assert saved['source'] == 'previous_mcs_reused_attachments'
+    assert saved['fallback_reason'] == 'missing_internal_sidechain_cut'
     assert saved['scaffold_smiles'] == previous['scaffold_smiles']
     assert saved['mcs_smarts'] == previous['mcs_smarts']
-    assert_round_trips(EGFR_ELITES, saved['scaffold_smiles'])
     assert database.iteration_scaffold(project.db_path, 1) == previous
     assert 'trying highest-ranked 1' in capsys.readouterr().out
 

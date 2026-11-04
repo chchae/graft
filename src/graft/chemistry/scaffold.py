@@ -191,8 +191,15 @@ def log_iteration_mcs(args, iteration, snapshot=None, *, include_generation=True
         elif source == 'previous_mcs_alternate_attachments':
             source = f"unchanged MCS with different attachment positions from iteration {snapshot['attachment_from_iteration']}"
         elif source == 'previous_mcs_reused_attachments':
+            reason = {
+                'insufficient_sidechain_training_elites': 'insufficient compatible training elites for internal-sidechain scaffolds',
+                'missing_internal_sidechain_cut': 'no internal single-bond attachment cut in a sidechain',
+            }.get(snapshot.get('fallback_reason'), 'no valid alternative sites')
             source = (f"unchanged MCS and attachment positions from iteration {snapshot['attachment_from_iteration']}; "
-                      'no valid alternative sites; continuing with new decorations')
+                      f'{reason}; continuing with new decorations')
+        elif source == 'single_elite_sidechain_mcs':
+            source = (f"best elite CMPID_{snapshot['source_ids'][0]}; two new attachment positions "
+                      f"inside sidechains from iteration {snapshot['attachment_from_iteration']}")
         if snapshot.get('elite_mcs_attempts'):
             attempts = snapshot['elite_mcs_attempts']
             print(f"[MCS] Iteration {iteration} elite subsets: "
@@ -302,7 +309,8 @@ def prepare_iteration_scaffold(args, iteration, elites=None, *, create=False, in
             snapshot = prepare_ranked_scaffold(
                 inputs, previous, initial['mcs_smarts'], mcs_timeout=args.mcs_timeout,
             )
-            if snapshot['source'] in ('previous_mcs_alternate_attachments', 'previous_mcs_reused_attachments'):
+            if snapshot['source'] in ('previous_mcs_alternate_attachments', 'previous_mcs_reused_attachments',
+                                      'single_elite_sidechain_mcs'):
                 snapshot['attachment_from_iteration'] = iteration - 1
             elif snapshot['source'] == 'previous_attachment_guided_mcs':
                 snapshot['attachment_from_iteration'] = iteration - 1

@@ -2840,3 +2840,123 @@ identify the reused positions and continued decoration generation. New snapshots
 use ranked_halving_alternate_attachments_v2 and freeze the choice on restart.
 Existing snapshots/results/jobs and the independent combichem protocols remain
 unchanged. RDKit structure validation is not a production TL/sampling validation.
+
+
+## Best-elite generation core with internal sidechain attachments (2026-11-04, latest requirement)
+
+**Confirmed user requirement:** when automatic ranked MCS reduction reaches its
+single-best-elite fallback, construct a new generation core from that molecule
+with at least two attachment points located in the sidechains attached to the
+preceding scaffold. Retain the ranked 10 -> 5 -> 2 -> 1 search; LibInvent supports
+exactly two attachments, satisfying that minimum, one in each old sidechain.
+This supersedes terminal same-core position search and unchanged-position reuse
+for new automatic LibInvent snapshots. Do not invoke single-molecule FindMCS or
+adopt the entire best molecule without decoration boundaries.
+
+Implementation: use the preceding concrete scaffold's attachment-aware best-elite
+embedding, preserving both the previous retained core and fixed docking query.
+Enumerate terminal single-bond, non-ring cuts whose retained and distal endpoints
+both belong to the same old sidechain. Exclude the original core-sidechain bonds.
+Keep each sidechain root in the new core and replace a distal component by that
+sidechain's original label 0/1. Never split a ring or change bond order, charge,
+isotope or retained stereochemistry. Rank candidates by largest retained heavy
+core, then bond indices in the canonical best molecule for deterministic ties.
+Build each candidate using the existing validated terminal-fragmentation helper;
+require exact isomeric decomposition/reassembly of the best molecule and at least
+two of the original selected training elites. Select the first passing candidate.
+MCS construction uses only the best molecule; training support does not redefine
+that source. TL still uses the full originally selected preceding-iteration elite
+population, the original prior, vocabulary checks and minimum-two usable pairs.
+Never duplicate the best molecule or silently skip TL to satisfy that minimum.
+
+Persist source=single_elite_sidechain_mcs, source_ids=[best_id], new retained-core
+SMARTS and two-site scaffold, eligible cut groups, selected cuts and canonical
+source molecule, compatible elite IDs, prior scaffold and core atom indices.
+Use policy ranked_halving_single_elite_sidechains_v1 and the same named terminal
+attempt status. Logs show the best ID and internal-sidechain attachment choice.
+Missing internal cuts (e.g. a one-atom halogen or an unsubstituted cyclic sidechain)
+or insufficient compatible training data stop explicitly rather than reusing old
+positions. Saved snapshots, generated compounds, submitted jobs and old protocol
+records remain immutable; this applies only to new snapshots. Independent
+combichem generation behavior is unchanged. Molecular regression tests and a
+read-only reconstruction from real EGFR elites validate graph behavior, not
+production TL/sampling, docking or GBSA accuracy.
+
+
+## Reuse previous LibInvent scaffold on insufficient sidechain training support (2026-11-04, latest correction)
+
+**Confirmed user requirement:** allow previous-scaffold reuse in the reported
+iteration-3 case: valid best-elite internal-sidechain scaffold candidates exist,
+but none supports at least two of the originally selected training elites.
+This narrowly supersedes the insufficient-training stop in the preceding
+best-elite requirement. Keep ranked halving and prefer a validated new core.
+Only after all candidates fail and at least one exactly reconstructs the best
+elite but lacks a second compatible training elite, reuse exactly N-1's saved
+MCS and attachment-bearing scaffold. Validate its core, two labelled terminal
+single-bond attachments and fixed docking query; require exact isomeric
+reconstruction of the best elite and at least two original training elites.
+Missing internal cuts, invalid chemistry/saved scaffolds, MCS timeouts and
+insufficient training support even for the previous scaffold still stop.
+
+Persist source=previous_mcs_reused_attachments, fallback_reason=
+insufficient_sidechain_training_elites, compatible elite IDs, original ranked
+source IDs, previous scaffold and terminal attempt status=reused_attachments.
+New ranked snapshots use policy ranked_halving_single_elite_sidechains_v2.
+Logs identify the training-support reason and reuse of existing attachment
+positions for continued decoration generation. Preserve all original selected
+TL inputs, original-prior restart, minimum-two usable pairs and vocabulary
+checks. Existing immutable snapshots, results, jobs and combichem are unchanged.
+Regression coverage includes the reported EGFR lactam elite, strict reuse
+validation, snapshot recovery and original-prior TL/sampling with reuse.
+These checks do not validate production scientific calculations or affinity.
+
+**Verification:** 197 affected regressions passed. The full suite reported
+1,893 passed, seven skipped and the previously documented unrelated failure in
+`test_combichem_3d.py::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself`.
+Editable installation, compileall, package/CLI imports and diff whitespace checks
+passed. Read-only reconstruction of the actual iteration-2 MD-ranked top ten
+confirmed exact previous-scaffold reuse with all ten elites compatible. No
+production database rows, saved snapshots or native jobs were changed or launched.
+
+
+## Reuse previous LibInvent scaffold when internal sidechain cuts are unavailable (2026-11-04)
+
+**Confirmed user requirement:** extend validated previous-scaffold reuse to the
+reported iteration-4 failure, where the best elite has a one-carbon methyl
+sidechain with no eligible internal single bond. This supersedes the earlier
+missing-internal-cut stop rule for new adaptive LibInvent snapshots. Keep ranked
+10 -> 5 -> 2 -> 1 search and prefer a validated new core when possible.
+
+At the terminal best-elite fallback, if either old sidechain has no eligible
+internal cut, reuse exactly N-1's saved MCS and attachment-bearing scaffold.
+Retain saved-core, two labelled terminal single-bond attachment and fixed docking
+query validation. Require exact isomeric decomposition/reassembly of the best
+elite and at least two originally selected training elites. Invalid saved
+scaffolds/chemistry, incompatible best elites, insufficient previous-scaffold
+training support and MCS timeouts still stop. Do not split rings or substitute
+old boundary cuts to manufacture new internal attachment positions.
+
+Persist source=previous_mcs_reused_attachments, fallback_reason=
+missing_internal_sidechain_cut, fallback_sidechain_label, compatible elite IDs,
+original ranked source IDs, previous scaffold and terminal attempt status=
+reused_attachments. New ranked snapshots use policy
+ranked_halving_single_elite_sidechains_v3. Logs identify the missing-cut reason
+and continued new decoration generation using existing attachment positions.
+The insufficient-training fallback retains its existing validation and reason.
+Preserve the original selected TL population, original-prior restart, vocabulary
+checks and minimum-two usable pairs. Existing immutable snapshots, compounds,
+results, submitted jobs and independent combichem protocols remain unchanged.
+Regression tests validate molecular graphs/workflow recovery, not production
+TL/sampling or affinity.
+
+
+**Verification:** 233 affected scaffold, vocabulary, iteration and combichem
+regressions passed; compileall, package/CLI imports and diff whitespace checks
+passed. Read-only reconstruction of the actual iteration-3 MD-ranked top ten
+reproduced 10 -> 5 -> 2 -> 1 with missing_internal_sidechain_cut at label 1 and
+all ten elites compatible with the exact preceding scaffold. During verification,
+the existing supervisor picked up the change, saved the v3 fallback snapshot,
+generated iteration 4's 10,000 compounds and advanced its 5,000 druglike passes
+to ligprep_running. No manual database edits, resets or job submissions were
+performed. This is workflow evidence, not scientific accuracy validation; the
+full test suite was not rerun for this extension.
