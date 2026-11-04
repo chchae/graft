@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.stages._summary import completion_summary
+from graft import _core, database
+from graft.stages._summary import completion_summary
 
 
 @pytest.fixture

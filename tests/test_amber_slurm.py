@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, amber_gbsa as amber, amber_slurm as slurm, database
-from molnova import amber_slurm_control as control
-from molnova.config import amber_settings
+from graft import _core, amber_gbsa as amber, amber_slurm as slurm, database
+from graft import amber_slurm_control as control
+from graft.config import amber_settings
 
 
 PROJECT = '''
@@ -109,7 +109,7 @@ def test_slurm_configuration_and_shared_environment(tmp_path):
     remote = settings['amber_remote']
     assert remote['host'] == 'slurm' and remote['partition'] == 'cpu'
     assert remote['remote_work_dir'].startswith('/homes1/')
-    assert remote['remote_work_dir'].endswith('/molnova-amber-slurm-runs')
+    assert remote['remote_work_dir'].endswith('/graft-amber-slurm-runs')
     assert 'conda_init' not in remote
     command = amber.environment_command(remote, 'python worker.py')
     assert '/share/opt/amber26/envs/AmberTools26/amber.sh' in command
@@ -340,11 +340,11 @@ def test_preparation_uploads_slurm_script_and_pins_worker_count(project, monkeyp
     amber.prepare_remote(project, 1, project.output, record)
     config = json.loads((folder / 'input.json').read_text())
     assert config['cpus'] == record['cpus']
-    from molnova.amber_runner import PROTOCOL, MINIMIZATION
+    from graft.amber_runner import PROTOCOL, MINIMIZATION
     assert config['protocol'] == PROTOCOL + ('_checkpoint_v1' if checkpoint_policy else '')
     assert config['minimization'] == (dict(MINIMIZATION, ntwr=-10, ntxo=1) if checkpoint_policy else MINIMIZATION)
     assert config.get('minimization_timeout_s') == (600 if checkpoint_policy else None)
-    from molnova.amber_runner import validate_protocol
+    from graft.amber_runner import validate_protocol
     validate_protocol(config)
     assert config.get('charge_timeout_s') == (600 if checkpoint_policy else None)
     if mode == slurm.ARRAY:
@@ -356,7 +356,7 @@ def test_preparation_uploads_slurm_script_and_pins_worker_count(project, monkeyp
     assert config['slurm']['job_name'] == (
         'amber-' + record['run_id'].removeprefix('run-') if mode == slurm.ARRAY and saved_limit == 'new'
         else 'amber-' + record['run_id'] if mode == slurm.ARRAY and saved_limit is not None
-        else 'molnova-amber-' + record['run_id'])
+        else 'graft-amber-' + record['run_id'])
     if mode == slurm.ARRAY and saved_limit is not None:
         assert config['slurm']['time_limit'] == ('01:00:00' if saved_limit == 'new' else saved_limit)
     else:

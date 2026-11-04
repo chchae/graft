@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, driver, schrodinger_guard as guard
-from molnova.stages._workspace import prepare_iteration_directory
+from graft import _core, database, driver, schrodinger_guard as guard
+from graft.stages._workspace import prepare_iteration_directory
 
 
 @pytest.fixture
@@ -233,7 +233,7 @@ def test_reset_rolls_back_and_restores_files_then_can_retry(deleted, monkeypatch
 
 
 def test_fresh_generation_clears_deleted_population_before_sampling(deleted, monkeypatch):
-    from molnova.stages import generate
+    from graft.stages import generate
     deleted.target_count = 2
     deleted.max_iteration = 1
     deleted.sidechain_library = deleted.output / 'edges.smi'
@@ -277,7 +277,7 @@ def test_driver_returns_from_md_to_generate_for_deleted_population(deleted, monk
         return 0
     monkeypatch.setattr(driver, 'stream_process', process)
     assert not driver.supervise_iteration(deleted, deleted.output/'project.toml', 1,
-        [('md-gbsa', 'molnova.stages.md_gbsa')], 30, driver.StopFlag())
+        [('md-gbsa', 'graft.stages.md_gbsa')], 30, driver.StopFlag())
     assert calls == (['md-gbsa'] if delete_during_poll else []) + ['generate']
     assert not database.iteration_was_deleted(deleted.db_path, 1)
     with database.connect(deleted.db_path) as conn:
@@ -295,7 +295,7 @@ def test_driver_does_not_regenerate_deleted_population_with_frozen_md_work(delet
     calls = []
     monkeypatch.setattr(driver, 'stream_process', lambda stage, *a: calls.append(stage) or 1)
     assert not driver.supervise_iteration(deleted, deleted.output/'project.toml', 1,
-        [('md-gbsa', 'molnova.stages.md_gbsa')], 30, driver.StopFlag(), once=True)
+        [('md-gbsa', 'graft.stages.md_gbsa')], 30, driver.StopFlag(), once=True)
     assert calls == ['md-gbsa']
     assert database.md_gbsa_selection(deleted.db_path, 1)['ids'] == [999]
     assert not (deleted.output/'.previous').exists()
@@ -311,14 +311,14 @@ def test_driver_does_not_regenerate_nonempty_rejected_population(deleted, monkey
     calls = []
     monkeypatch.setattr(driver, 'stream_process', lambda stage, *a: calls.append(stage) or 0)
     assert not driver.supervise_iteration(deleted, deleted.output/'project.toml', 1,
-        [('md-gbsa', 'molnova.stages.md_gbsa')], 30, driver.StopFlag(), once=True)
+        [('md-gbsa', 'graft.stages.md_gbsa')], 30, driver.StopFlag(), once=True)
     assert calls == ['md-gbsa']
     assert not (deleted.output/'.previous').exists()
     assert database.iteration_compound_count(deleted.db_path, 1) == 1
 
 
 def test_partial_manual_deletion_fails_before_sampling_without_reset(deleted, monkeypatch):
-    from molnova.stages import generate
+    from graft.stages import generate
     with database.connect(deleted.db_path) as conn:
         conn.execute("INSERT INTO compound(name,smiles,iteration,state) VALUES ('partial','CC',1,'generated')")
     deleted.target_count = 2

@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import md_gbsa_jobcontrol as adapter, md_gbsa_native as native
+from graft import md_gbsa_jobcontrol as adapter, md_gbsa_native as native
 
 
 @pytest.fixture
 def pool(tmp_path,monkeypatch):
-    base=tmp_path/'share/molnova-test'
+    base=tmp_path/'share/graft-test'
     roots=[]
     for cid in (1,2):
         root=base/f'CMPID_{cid}/replica01'

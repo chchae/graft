@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from molnova import amber_runner as worker
+from graft import amber_runner as worker
 
 
 def test_charge_timeout_is_terminal_and_never_uses_partial_ligand(tmp_path, monkeypatch):

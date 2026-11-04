@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, driver
+from graft import _core, database, driver
 
 
 def project(tmp_path):

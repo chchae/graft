@@ -4,8 +4,10 @@
 execution-backend = "slurm"
 # Do not set execution-host: no coordinator SSH dispatch to cpu1/cpu2.
 remote-env-script = "/share/opt/amber26/envs/AmberTools26/amber.sh"
-worker-hosts = { cpu1 = 192, cpu2 = 192 }
-processes = 384
+# Slurm chooses the nodes; processes/worker-hosts/worker-ssh-known-hosts are unnecessary.
+# Defaults: 2 nodes x 192 physical cores. Optional overrides:
+# slurm-nodes = 3                # 576 slots if three suitable nodes are available
+# slurm-cpus-per-node = 192
 coordinator-processes = 16        # local DB owners; each manages multiple remote slots
 slurm-host = "slurm"             # SSH for scheduler control only
 slurm-partition = "cpu"

@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, ligprep_recovery, prime_gbsa_async, prime_gbsa_queue, schrodinger_guard
-from molnova.glide_recovery import group_status
-from molnova.stages import ligprep, glide
+from graft import _core, database, ligprep_recovery, prime_gbsa_async, prime_gbsa_queue, schrodinger_guard
+from graft.glide_recovery import group_status
+from graft.stages import ligprep, glide
 
 
 @pytest.mark.parametrize('status', ['DONE', 'FAILED'])

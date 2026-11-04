@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, libinvent_vocabulary as vocab
-from molnova.stages import generate
+from graft import _core, libinvent_vocabulary as vocab
+from graft.stages import generate
 
 
 VOCABULARY = {

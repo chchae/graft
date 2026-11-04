@@ -1,6 +1,6 @@
 """Create an isolated artificial geometry example, never a production project.
 
-python make_toy_inputs.py /tmp/molnova-3d-demo --start-iteration 1
+python make_toy_inputs.py /tmp/graft-3d-demo --start-iteration 1
 """
 import argparse
 import json
@@ -32,7 +32,7 @@ def create(directory, start_iteration=1, attachments=1):
     parent.SetProp('_Name','artificial_parent')
     with Chem.SDWriter(str(directory/'parents.sdf')) as writer:
         writer.write(parent)
-    history = dict(schema='molnova_pose_history_v1',iteration=start_iteration,
+    history = dict(schema='graft_pose_history_v1',iteration=start_iteration,
                    core_smarts='c1ccccc1',atoms=atoms,attachments=[f'core:{i}' for i in range(attachments)],
                    core=[dict(core_index=i,uid=f'core:{i}',xyz=list(parent.GetConformer().GetAtomPosition(i))) for i in range(6)])
     (directory/'history.json').write_text(json.dumps(dict(parents=[history]),indent=2)+'\n')

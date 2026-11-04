@@ -1,4 +1,20 @@
-# MolNova Development Handoff
+# Graft Development Handoff
+
+## Project rename (2026-11-04)
+
+**Confirmed user request:** rename the software to Graft throughout project
+source, documentation, tests and example configuration. The distribution, Python
+package and console command are `graft`; stages run as `python -m graft.stages.<module>`.
+New helper names, job labels, cache paths and project-specific metadata use the
+same name. Scientific algorithms, parameters, database claims and stage gates
+are unchanged by this rename.
+
+Existing production databases, output trees, logs, frozen workers, manifests and
+native jobs are not rewritten or migrated. Compatibility with artifacts carrying
+the previous namespace has not been established; do not resume an existing run
+with the renamed package without reviewing its pinned helpers, metadata and shared
+submission registry/locks. This rename does not authorize resetting or resubmitting
+jobs. Existing installation and checkout directory names are not renamed.
 
 ## Amber charge-generation deadline (2026-11-02)
 
@@ -321,6 +337,55 @@ selections retain their existing semantics. Final MD failures supply no score;
 the existing finite-elite minimum still governs next-cycle generation.
 
 
+## Automatic Slurm node selection (2026-10-26)
+
+**Confirmed user request:** make `processes`, `worker-hosts` and
+`worker-ssh-known-hosts` unnecessary for COMBICHEM Slurm execution.
+**Implementation choice:** without `worker-hosts`, request two nodes with 192
+physical cores each, preserving the previous 384-slot default, and let Slurm
+choose nodes from `slurm-partition`. Optional `slurm-nodes` and
+`slurm-cpus-per-node` override these defaults; all nodes request the same 1..192
+physical cores. This selects the requested number of nodes, not every node in the
+partition or only currently idle nodes. Resources can queue normally. A newly
+added cpu3 becomes eligible without changing hostnames in the TOML; using three
+nodes requires `slurm-nodes=3` (576 slots), with sufficient available resources.
+
+Preserve explicit `worker-hosts` for pinned allocations; derive resource counts
+from that mapping and reject conflicting explicit Slurm counts. The two-node /
+384-slot ceiling remains for direct SSH/local mode; Slurm accepts larger node
+counts. Derive Slurm `processes` from node count times cores per node regardless
+of an optional legacy processes value. Coordinator processes remain independent.
+The known-hosts option applies only to direct calculator SSH, not native Slurm
+calculator sockets. Submission-host SSH still uses the normal SSH configuration.
+
+Submit one allocation without `--nodelist` for automatic mode. The native batch
+launcher expands its actual SLURM_JOB_NODELIST, validates node count, unique safe
+names and requested CPUs, creates private per-node authentication metadata and
+atomically saves allocation.json bound to its JobId before starting pure pools.
+The local coordinator waits for this record, verifies node/core/JobId/version
+identity and then uses the actual mapping for slot assignment and cleanup.
+Keep requested resources separate from discovered runtime hosts so readiness and
+reattachment do not change the launch signature. Reject mismatched saved/native
+identities; preserve existing tokens and never reuse another allocation's pools.
+Legacy explicitly named launch records without the new resource fields remain
+readable. Lost submission replies, uncertain history, completion verification,
+local SQLite/journals, scientific fingerprints and existing result protection
+remain unchanged. Node expansion is operational; the driver performs no science.
+New source still requires a separate output; no live projects are reset or moved.
+
+
+**Verification of automatic selection:** full suite 1,586 passed. Tests cover
+omitting all three legacy options, default resources, three-node/576-slot requests,
+explicit-host compatibility/conflicts, scheduler-selected cpu2/cpu3 metadata,
+token preservation, identity rejection, stable signatures, reattachment without
+new submission, and cleanup confined to discovered nodes. The real RDKit/TCP
+pipeline also runs under the supervisor without worker-hosts, using the allocated
+runtime map. Scheduler responses and native launch are mocked in allocation tests;
+no new native Slurm job or production benchmark was run. Editable installation,
+compileall, package/CLI imports and whitespace checks passed. The validated separate
+examples/tmp/egfr-slurm-auto.toml omits processes/worker-hosts/known-hosts and uses
+a new output; existing runtime TOMLs, allocations, databases and results are intact.
+
 ## Slurm full-product computation and bounded local claim owners (2026-10-26)
 
 **Confirmed user request:** move per-product preparation and result evaluation
@@ -382,7 +447,7 @@ Existing production inputs, DBs, jobs and results were not reset or moved.
 
 **Confirmed user request and correction:** replace direct cpu1/cpu2 SSH calculator
 connections with Slurm; keep task allocation, SQLite and result storage on the
-host invoking molnova. Do not move the coordinator onto a compute node. This
+host invoking graft. Do not move the coordinator onto a compute node. This
 supersedes the earlier two-host SSH execution choice for new Slurm runs. Glide
 submission remains unchanged; no existing jobs/results may be reset or cancelled.
 
@@ -660,10 +725,10 @@ other explicit restraint settings and opt-in legacy frontier probe behavior rema
 unchanged. Keep core displacement, stereo, receptor/internal bump checks and the
 100-iteration capped-minimization policy. Record constraint_scope in search reports.
 
-Add public integer atom property molnova_added_cycle from saved added_iteration:
+Add public integer atom property graft_added_cycle from saved added_iteration:
 original core=0, generated fragment atoms=their addition cycle. Preserve these
 values through trimming, no-ops, assembly and restoration; never relabel old atoms
-with the current cycle. Export atom.iprop.molnova_added_cycle in both SDF files
+with the current cycle. Export atom.iprop.graft_added_cycle in both SDF files
 using RDKit integer atom-property lists, which restore atom properties on read.
 Hydrogen birth is not tracked: leave it missing (n/a), and retain any INFERRED
 history provenance/assumptions rather than promoting inferred chronology to fact.
@@ -844,7 +909,7 @@ history/source changes stop resume rather than overwriting saved results.
 
 ## Shared project TOML inputs for COMBICHEM 3D (2026-10-25)
 
-**Confirmed user change:** `molnova combichem-3d` accepts the existing project
+**Confirmed user change:** `graft combichem-3d` accepts the existing project
 input TOML. Reuse shared receptor/parent/library/reference inputs and append
 3D-only controls under `[combichem-3d]` and `[combichem-3d.filters]`, using the
 control names from `examples/combichem-3d/toy-inputs/grow.toml`. Explicit section
@@ -880,7 +945,7 @@ real project TOML, never the toy folder. Legacy supervision/jobs are unchanged.
 
 ## Opt-in COMBICHEM 3D pose growth (2026-10-25)
 
-**Confirmed user requirements:** implement `molnova combichem-3d growth.toml` as
+**Confirmed user requirements:** implement `graft combichem-3d growth.toml` as
 an independent local workflow with prepared fixed receptor PDB/SDF, aligned 3D
 parent SDF, explicit Reference-MCS atom/coordinate mapping, authoritative atom
 UID/branch/fragment/birth history, a single-ended fragment library including -H,
@@ -1027,10 +1092,10 @@ A longer timeout does not guarantee completion or establish scientific accuracy.
 
 ## Configurable positive MD snapshot count (2026-10-23)
 
-**Confirmed user request:** remove MolNova's artificial 20–100 snapshot limit.
+**Confirmed user request:** remove Graft's artificial 20–100 snapshot limit.
 `md-gbsa-snapshots` accepts any positive integer, with default 20 and no configured
 upper bound. Reject zero, negative values, booleans, floats and strings. This is
-MolNova validation, not a Prime minimum-size requirement.
+Graft validation, not a Prime minimum-size requirement.
 
 For two or more snapshots, preserve distinct evenly spaced frames in the configured
 production analysis window. For one snapshot, select the final production frame.
@@ -1237,7 +1302,7 @@ cached file alone never proves completion. Native checkpoints/output remain in
 the frozen remote workspace; restart reconnects, never blindly restarts dynamics.
 Confirmed native failure preserves checkpoints for operator-directed recovery.
 
-Use `molnova md-gbsa project.toml --iteration N` or the normal supervisor. Local
+Use `graft md-gbsa project.toml --iteration N` or the normal supervisor. Local
 artifacts use `09-md_gbsa`; new FEP artifacts following it use `10-fep`. Preserve
 existing `09-fep`/legacy directories and all saved job paths. Enabling MD for an
 existing project backfills the latest completed generated iteration before the
@@ -1302,7 +1367,7 @@ md-gbsa-ssh-host = "slurm"
 md-gbsa-gpu-host = "slurm-gpu"
 md-gbsa-cpu-host = "slurm-cpu"
 md-gbsa-schrodinger = "/share/opt/schrodinger/2026-1" # explicitly tested site version
-md-gbsa-remote-work-dir = "/homes1/chchae/molnova-md-gbsa-runs"
+md-gbsa-remote-work-dir = "/homes1/chchae/graft-md-gbsa-runs"
 ```
 
 ## Confirmed calculation naming (2026-10-21)
@@ -1310,7 +1375,7 @@ md-gbsa-remote-work-dir = "/homes1/chchae/molnova-md-gbsa-runs"
 The user requested fresh projects and waived compatibility with prior work for
 this rename. All Prime stage identifiers now use `prime_gbsa`, including
 `prime_gbsa_score`, `prime_gbsa_running`, `prime_gbsa_done`, failure stage
-`prime_gbsa`, CLI `molnova prime_gbsa`, and directory `08-prime_gbsa`.
+`prime_gbsa`, CLI `graft prime_gbsa`, and directory `08-prime_gbsa`.
 The user subsequently requested the same corrected spelling everywhere,
 including Python module names, states, CLI, TOML, manifests and output paths.
 TOML uses `prime-gbsa-input-count`, `prime-gbsa-flexdist`,
@@ -1318,7 +1383,7 @@ TOML uses `prime-gbsa-input-count`, `prime-gbsa-flexdist`,
 Other renamed Prime keys are `prime-gbsa-elite-count`, `prime-gbsa-receptor`,
 and `prime-gbsa-cpus`. Internal Python settings retain `prime_gbsa_*`.
 Native job basenames are `ligprep`, `glide`, and `prime_gbsa`; new Amber
-Slurm names are `amber-<UUID>` without `molnova-` or `run-`.
+Slurm names are `amber-<UUID>` without `graft-` or `run-`.
 The external executable `prime_mmgbsa`, vendor Maestro property names such as
 `r_psp_MMGBSA_dG_Bind`, and native JobServer recognition remain unchanged.
 This is a naming change; selection, scientific parameters, seven-job Prime
@@ -1502,7 +1567,7 @@ selection and freezes passing IDs/reasons in SQLite. Rejected rows remain
 `druglike_rejected`. Default optional SA ratio is 1.0; explicit smaller values
 apply only within this druglike stage. Legacy iterations keep original targets,
 selection, compounds, state and submitted jobs. Reject raw inserts after a frozen
-selection. CLI exposes `molnova druglike project.toml --iteration N`.
+selection. CLI exposes `graft druglike project.toml --iteration N`.
 
 Canonical TOML count is `amber-input-count` (default 500), which limits the
 Glide-ranked Amber inputs. Legacy `amber-keep-count` remains an alias; reject
@@ -1524,7 +1589,7 @@ settings are retained. No live calculations are authorized by editing this file.
 
 ## 1. Project Goal
 
-MolNova is an iterative lead-optimization platform integrating:
+Graft is an iterative lead-optimization platform integrating:
 
 REINVENT4 / LibInvent
 → LigPrep
@@ -1538,15 +1603,15 @@ The primary application is congeneric lead optimization around a known scaffold/
 
 ## 2. Package Architecture
 
-MolNova uses a standard Python `src/` layout:
+Graft uses a standard Python `src/` layout:
 
-MolNova/
+graft/
 ├── pyproject.toml
 ├── AGENTS.md
 ├── README.md
 ├── docs/
 ├── examples/
-├── src/molnova/
+├── src/graft/
 │   ├── cli.py
 │   ├── config.py
 │   ├── database.py
@@ -1578,21 +1643,21 @@ Development installation:
 
 Main commands:
 
-    molnova run project.toml
-    molnova generate project.toml
-    molnova ligprep project.toml
-    molnova glide project.toml
-    molnova prime_gbsa project.toml
-    molnova fep project.toml
-    molnova status project.toml
+    graft run project.toml
+    graft generate project.toml
+    graft ligprep project.toml
+    graft glide project.toml
+    graft prime_gbsa project.toml
+    graft fep project.toml
+    graft status project.toml
 
-`molnova run` starts the supervisor.
+`graft run` starts the supervisor.
 
 Individual stage commands are useful for debugging and manual recovery.
 
 ## 4. Project Isolation
 
-MolNova source is installed once.
+Graft source is installed once.
 
 Each molecular target has a separate working directory:
 
@@ -2440,7 +2505,7 @@ existing results and submitted work when changing configuration.
 **Confirmed user request:** recalculate iteration 60's 413 unscored Amber
 failures and score the available coordinates when the ten-minute limit is hit.
 
-**Implementation choice:** `python -m molnova.stages.amber_retry PROJECT --iteration 60
+**Implementation choice:** `python -m graft.stages.amber_retry PROJECT --iteration 60
 --source FINISHED_ARRAY_MANIFEST --watch` creates one durable owned retry array
 in `07-amber_gbsa/timeout-retry`. Reverify original native termination and released
 locks, source fingerprints and exact identities; select only unscored terminal

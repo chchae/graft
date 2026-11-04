@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.config import sa_accepted_ratio
-from molnova.stages import generate
+from graft import _core, database
+from graft.config import sa_accepted_ratio
+from graft.stages import generate
 
 
 @pytest.fixture
@@ -105,7 +105,7 @@ def test_ratio_configuration():
 
 
 def test_new_generation_scores_full_population_then_filters(tmp_path, monkeypatch):
-    from molnova.chemistry.sa_score import calculate_sa_score
+    from graft.chemistry.sa_score import calculate_sa_score
     db = tmp_path / 'new.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)
@@ -119,7 +119,7 @@ def test_new_generation_scores_full_population_then_filters(tmp_path, monkeypatc
                            sample_size=10, sa_score_cpus=1, sa_accepted_ratio=.75)
     monkeypatch.setattr(_core, 'run_libinvent_sampling', lambda **kw: csv)
     generate._run_stage(args, 1)
-    from molnova.stages import druglike
+    from graft.stages import druglike
     druglike._run_stage(args, 1)
     with database.connect(db) as conn:
         rows = conn.execute('SELECT smiles,sa_score,state FROM compound ORDER BY sa_score,id').fetchall()
@@ -133,7 +133,7 @@ def test_new_generation_scores_full_population_then_filters(tmp_path, monkeypatc
 def test_synthetic_search_receives_only_accepted_compounds(tmp_path, monkeypatch):
     import gzip
     import json
-    from molnova.stages import synthetic_feasibility as synthetic
+    from graft.stages import synthetic_feasibility as synthetic
     db = tmp_path / 'synthetic.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)

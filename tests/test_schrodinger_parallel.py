@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core
-from molnova.config import prime_gbsa_job_options, schrodinger_cpu_settings, schrodinger_job_options
+from graft import _core
+from graft.config import prime_gbsa_job_options, schrodinger_cpu_settings, schrodinger_job_options
 
 
 @pytest.mark.parametrize("stage", ["ligprep", "glide", "prime_gbsa"])
@@ -70,9 +70,9 @@ def test_ligprep_splits_jobs_preserving_scientific_options(monkeypatch, tmp_path
     ("localhost", None, "localhost", None),
 ])
 def test_glide_splits_reference_groups_and_remains_asynchronous(monkeypatch, tmp_path, source_host, cpus, host, njobs):
-    from molnova import schrodinger_guard
+    from graft import schrodinger_guard
     monkeypatch.setattr(schrodinger_guard, "active_jobs", lambda *a: [])
-    from molnova import glide_recovery
+    from graft import glide_recovery
     monkeypatch.setattr(glide_recovery, "active_jobs", lambda *a: [])
     (tmp_path / "dock.in").write_text("grid")
     calls = []

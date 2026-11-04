@@ -1,4 +1,20 @@
-# Independent MolNova reconstruction prompt
+# Independent Graft reconstruction prompt
+
+## Project rename (2026-11-04)
+
+**Confirmed user request:** rename the software to Graft throughout project
+source, documentation, tests and example configuration. The distribution, Python
+package and console command are `graft`; stages run as `python -m graft.stages.<module>`.
+New helper names, job labels, cache paths and project-specific metadata use the
+same name. Scientific algorithms, parameters, database claims and stage gates
+are unchanged by this rename.
+
+Existing production databases, output trees, logs, frozen workers, manifests and
+native jobs are not rewritten or migrated. Compatibility with artifacts carrying
+the previous namespace has not been established; do not resume an existing run
+with the renamed package without reviewing its pinned helpers, metadata and shared
+submission registry/locks. This rename does not authorize resetting or resubmitting
+jobs. Existing installation and checkout directory names are not renamed.
 
 ## Amber charge-generation deadline (2026-11-02)
 
@@ -321,6 +337,43 @@ selections retain their existing semantics. Final MD failures supply no score;
 the existing finite-elite minimum still governs next-cycle generation.
 
 
+## Automatic Slurm node selection (2026-10-26)
+
+**Confirmed user request:** make `processes`, `worker-hosts` and
+`worker-ssh-known-hosts` unnecessary for COMBICHEM Slurm execution.
+**Implementation choice:** without `worker-hosts`, request two nodes with 192
+physical cores each, preserving the previous 384-slot default, and let Slurm
+choose nodes from `slurm-partition`. Optional `slurm-nodes` and
+`slurm-cpus-per-node` override these defaults; all nodes request the same 1..192
+physical cores. This selects the requested number of nodes, not every node in the
+partition or only currently idle nodes. Resources can queue normally. A newly
+added cpu3 becomes eligible without changing hostnames in the TOML; using three
+nodes requires `slurm-nodes=3` (576 slots), with sufficient available resources.
+
+Preserve explicit `worker-hosts` for pinned allocations; derive resource counts
+from that mapping and reject conflicting explicit Slurm counts. The two-node /
+384-slot ceiling remains for direct SSH/local mode; Slurm accepts larger node
+counts. Derive Slurm `processes` from node count times cores per node regardless
+of an optional legacy processes value. Coordinator processes remain independent.
+The known-hosts option applies only to direct calculator SSH, not native Slurm
+calculator sockets. Submission-host SSH still uses the normal SSH configuration.
+
+Submit one allocation without `--nodelist` for automatic mode. The native batch
+launcher expands its actual SLURM_JOB_NODELIST, validates node count, unique safe
+names and requested CPUs, creates private per-node authentication metadata and
+atomically saves allocation.json bound to its JobId before starting pure pools.
+The local coordinator waits for this record, verifies node/core/JobId/version
+identity and then uses the actual mapping for slot assignment and cleanup.
+Keep requested resources separate from discovered runtime hosts so readiness and
+reattachment do not change the launch signature. Reject mismatched saved/native
+identities; preserve existing tokens and never reuse another allocation's pools.
+Legacy explicitly named launch records without the new resource fields remain
+readable. Lost submission replies, uncertain history, completion verification,
+local SQLite/journals, scientific fingerprints and existing result protection
+remain unchanged. Node expansion is operational; the driver performs no science.
+New source still requires a separate output; no live projects are reset or moved.
+
+
 ## Slurm full-product computation and bounded local claim owners (2026-10-26)
 
 **Confirmed user request:** move per-product preparation and result evaluation
@@ -369,7 +422,7 @@ or establish a measured 384-slot throughput improvement.
 
 **Confirmed user request and correction:** replace direct cpu1/cpu2 SSH calculator
 connections with Slurm; keep task allocation, SQLite and result storage on the
-host invoking molnova. Do not move the coordinator onto a compute node. This
+host invoking graft. Do not move the coordinator onto a compute node. This
 supersedes the earlier two-host SSH execution choice for new Slurm runs. Glide
 submission remains unchanged; no existing jobs/results may be reset or cancelled.
 
@@ -488,7 +541,7 @@ implementation and source-fingerprint checks remain enforced on restart.
 
 ## Direct COMBICHEM SSH execution (2026-10-26)
 
-**Confirmed user request:** `molnova combichem-3d egfr.toml` must support direct
+**Confirmed user request:** `graft combichem-3d egfr.toml` must support direct
 execution on t41 without Slurm. Optional [combichem-3d] `execution-host` and
 absolute remote `remote-env-script` dispatch the entire supervisor through SSH
 before local output locking or initialization. TOML, inputs and source must be
@@ -619,10 +672,10 @@ other explicit restraint settings and opt-in legacy frontier probe behavior rema
 unchanged. Keep core displacement, stereo, receptor/internal bump checks and the
 100-iteration capped-minimization policy. Record constraint_scope in search reports.
 
-Add public integer atom property molnova_added_cycle from saved added_iteration:
+Add public integer atom property graft_added_cycle from saved added_iteration:
 original core=0, generated fragment atoms=their addition cycle. Preserve these
 values through trimming, no-ops, assembly and restoration; never relabel old atoms
-with the current cycle. Export atom.iprop.molnova_added_cycle in both SDF files
+with the current cycle. Export atom.iprop.graft_added_cycle in both SDF files
 using RDKit integer atom-property lists, which restore atom properties on read.
 Hydrogen birth is not tracked: leave it missing (n/a), and retain any INFERRED
 history provenance/assumptions rather than promoting inferred chronology to fact.
@@ -803,7 +856,7 @@ history/source changes stop resume rather than overwriting saved results.
 
 ## Shared project TOML inputs for COMBICHEM 3D (2026-10-25)
 
-**Confirmed user change:** `molnova combichem-3d` accepts the existing project
+**Confirmed user change:** `graft combichem-3d` accepts the existing project
 input TOML. Reuse shared receptor/parent/library/reference inputs and append
 3D-only controls under `[combichem-3d]` and `[combichem-3d.filters]`, using the
 control names from `examples/combichem-3d/toy-inputs/grow.toml`. Explicit section
@@ -839,7 +892,7 @@ real project TOML, never the toy folder. Legacy supervision/jobs are unchanged.
 
 ## Opt-in COMBICHEM 3D pose growth (2026-10-25)
 
-**Confirmed user requirements:** implement `molnova combichem-3d growth.toml` as
+**Confirmed user requirements:** implement `graft combichem-3d growth.toml` as
 an independent local workflow with prepared fixed receptor PDB/SDF, aligned 3D
 parent SDF, explicit Reference-MCS atom/coordinate mapping, authoritative atom
 UID/branch/fragment/birth history, a single-ended fragment library including -H,
@@ -986,10 +1039,10 @@ A longer timeout does not guarantee completion or establish scientific accuracy.
 
 ## Configurable positive MD snapshot count (2026-10-23)
 
-**Confirmed user request:** remove MolNova's artificial 20–100 snapshot limit.
+**Confirmed user request:** remove Graft's artificial 20–100 snapshot limit.
 `md-gbsa-snapshots` accepts any positive integer, with default 20 and no configured
 upper bound. Reject zero, negative values, booleans, floats and strings. This is
-MolNova validation, not a Prime minimum-size requirement.
+Graft validation, not a Prime minimum-size requirement.
 
 For two or more snapshots, preserve distinct evenly spaced frames in the configured
 production analysis window. For one snapshot, select the final production frame.
@@ -1196,7 +1249,7 @@ cached file alone never proves completion. Native checkpoints/output remain in
 the frozen remote workspace; restart reconnects, never blindly restarts dynamics.
 Confirmed native failure preserves checkpoints for operator-directed recovery.
 
-Use `molnova md-gbsa project.toml --iteration N` or the normal supervisor. Local
+Use `graft md-gbsa project.toml --iteration N` or the normal supervisor. Local
 artifacts use `09-md_gbsa`; new FEP artifacts following it use `10-fep`. Preserve
 existing `09-fep`/legacy directories and all saved job paths. Enabling MD for an
 existing project backfills the latest completed generated iteration before the
@@ -1261,7 +1314,7 @@ md-gbsa-ssh-host = "slurm"
 md-gbsa-gpu-host = "slurm-gpu"
 md-gbsa-cpu-host = "slurm-cpu"
 md-gbsa-schrodinger = "/share/opt/schrodinger/2026-1" # explicitly tested site version
-md-gbsa-remote-work-dir = "/homes1/chchae/molnova-md-gbsa-runs"
+md-gbsa-remote-work-dir = "/homes1/chchae/graft-md-gbsa-runs"
 ```
 
 ## Confirmed calculation naming (2026-10-21)
@@ -1269,7 +1322,7 @@ md-gbsa-remote-work-dir = "/homes1/chchae/molnova-md-gbsa-runs"
 The user requested fresh projects and waived compatibility with prior work for
 this rename. All Prime stage identifiers now use `prime_gbsa`, including
 `prime_gbsa_score`, `prime_gbsa_running`, `prime_gbsa_done`, failure stage
-`prime_gbsa`, CLI `molnova prime_gbsa`, and directory `08-prime_gbsa`.
+`prime_gbsa`, CLI `graft prime_gbsa`, and directory `08-prime_gbsa`.
 The user subsequently requested the same corrected spelling everywhere,
 including Python module names, states, CLI, TOML, manifests and output paths.
 TOML uses `prime-gbsa-input-count`, `prime-gbsa-flexdist`,
@@ -1277,7 +1330,7 @@ TOML uses `prime-gbsa-input-count`, `prime-gbsa-flexdist`,
 Other renamed Prime keys are `prime-gbsa-elite-count`, `prime-gbsa-receptor`,
 and `prime-gbsa-cpus`. Internal Python settings retain `prime_gbsa_*`.
 Native job basenames are `ligprep`, `glide`, and `prime_gbsa`; new Amber
-Slurm names are `amber-<UUID>` without `molnova-` or `run-`.
+Slurm names are `amber-<UUID>` without `graft-` or `run-`.
 The external executable `prime_mmgbsa`, vendor Maestro property names such as
 `r_psp_MMGBSA_dG_Bind`, and native JobServer recognition remain unchanged.
 This is a naming change; selection, scientific parameters, seven-job Prime
@@ -1309,7 +1362,7 @@ Use the selected iteration basename for `.previous/<iteration>-<timestamp>`
 archives. Scientific calculations, SQLite states and scheduling do not change.
 
 
-Reimplement MolNova from the self-contained specification below. You are starting a new implementation; no prior conversation is required.
+Reimplement Graft from the self-contained specification below. You are starting a new implementation; no prior conversation is required.
 
 Use the evidence labels carefully: explicitly confirmed constraints are binding; the documented baseline supplies compatibility behavior, but is not proof of historical user approval. Preserve that baseline unless the user changes it. Do not silently resolve listed conflicts, turn proposals into requirements, or treat arbitrary current implementation details as scientific truth.
 
@@ -1321,7 +1374,7 @@ The specification includes a complete project configuration example, input/outpu
 
 ---
 
-# MolNova specification
+# Graft specification
 
 ## Evidence, authority, and scope
 
@@ -1342,7 +1395,7 @@ legacy queue recovery.
 
 ## 1. Confirmed purpose and constraints
 
-MolNova performs iterative congeneric lead optimization around a known scaffold/core using REINVENT4/LibInvent, LigPrep, reference-guided constrained Glide, MM-GBSA, and optional FEP staging. SQLite is the workflow source of truth.
+Graft performs iterative congeneric lead optimization around a known scaffold/core using REINVENT4/LibInvent, LigPrep, reference-guided constrained Glide, MM-GBSA, and optional FEP staging. SQLite is the workflow source of truth.
 
 Workers are separate subprocesses. Each inspects SQLite, atomically claims eligible work, performs calculation, persists results, updates compound state, and exits. Workers do not invoke or coordinate directly with other workers. The driver supervises; it must not become a monolithic scientific calculation workflow.
 
@@ -1362,10 +1415,10 @@ Each target has separate TOML, DB, inputs, and outputs, sharing the installed pa
 
 ## 2. Environment and components — documented baseline
 
-- Package `molnova`, observed version `0.1.0`, Python >=3.11, setuptools>=70, `src/` layout, CLI entry point `molnova.cli:main`.
+- Package `graft`, observed version `0.1.0`, Python >=3.11, setuptools>=70, `src/` layout, CLI entry point `graft.cli:main`.
 - Normal Python dependencies: RDKit, NumPy, scikit-learn and threadpoolctl (the latter three support diagnostic projection/statistics). Standard-library SQLite, TOML, subprocess, CSV/JSON/gzip, and POSIX file locking support workflow management. Pytest supplies tests.
 - Production: Linux, Schrödinger Suite 2026-3, JobServer/observer, SLURM, CPU compute hosts. macOS development is mentioned; Windows support is not established.
-- REINVENT4/LibInvent and optional AiZynthFinder run in separately provisioned local or SSH environments. They and Schrödinger are external dependencies, not ordinary MolNova pip dependencies. REINVENT sampling/TL currently select `cuda:0`.
+- REINVENT4/LibInvent and optional AiZynthFinder run in separately provisioned local or SSH environments. They and Schrödinger are external dependencies, not ordinary Graft pip dependencies. REINVENT sampling/TL currently select `cuda:0`.
 - Exact RDKit, REINVENT4, AiZynthFinder, PyTorch/CUDA versions and environment locks are not pinned in the reviewed files.
 - Schrödinger resolution: stage `--schrodinger`, then `SCHRODINGER`, then `/home1/schrodinger/2026-3`. `run` currently has no `--schrodinger`; use the environment variable.
 
@@ -1385,7 +1438,7 @@ Current `examples/egfr.toml`:
 libinvent-prior = "/home1/astrazeneca/REINVENT/priors/libinvent.prior"
 reinvent-ssh-host = "tensor"
 reinvent-remote-env = "/home1/astrazeneca/REINVENT/env"
-reinvent-remote-work-dir = "/home1/astrazeneca/REINVENT/molnova-runs"
+reinvent-remote-work-dir = "/home1/astrazeneca/REINVENT/graft-runs"
 reference-pose = "./input/egfr-ligands-docked.maegz"
 reference-mcs = "c1nc(N[*:0])c2cc(-c3ccc([*:1])cc3)[nH]c2n1"
 dock-grid = "./input/egfr-grid.zip"
@@ -1405,7 +1458,7 @@ amber-keep-count = 200
 amber-ssh-host = "t41"
 amber-remote-env = "/home1/amber26/envs/AmberTools26"
 amber-conda-init = "/home1/amber26/miniforge3/etc/profile.d/conda.sh"
-amber-remote-work-dir = "/home1/chchae/molnova-amber-runs"
+amber-remote-work-dir = "/home1/chchae/graft-amber-runs"
 amber-receptor = "./output/iter00/08-prime_gbsa/receptor.maegz"
 amber-charge-method = "bcc"
 amber-ssh-config = "/home1/chchae/.ssh/config"
@@ -1424,7 +1477,7 @@ aizynth-nproc = 8
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 aizynth-ssh-host = "tensor"
 aizynth-remote-env = "/home1/astrazeneca/AiZynthFinder/env"
-aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/molnova-runs"
+aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 ```
 
 These are environment-specific values, not proof that the paths/hosts are accessible in another environment.
@@ -2149,23 +2202,23 @@ FEP export selects lowest GBSA, ties by ID, top `fep-input-count`, writing `iter
 Commands below assume cwd `examples/`, an installed package, and available configured calculators:
 
 ```bash
-molnova run egfr.toml --iteration 0
-molnova run egfr.toml --iteration 1
-molnova egfr.toml --iteration 1
-molnova run egfr.toml --iteration 1 --once
-molnova run egfr.toml --iteration 1 --poll-interval 5
-molnova generate egfr.toml --iteration 1
-molnova synthetic-feasibility egfr.toml --iteration 1
-molnova ligprep egfr.toml --iteration 1
-molnova glide egfr.toml --iteration 1
-molnova prime_gbsa egfr.toml --iteration 1
-molnova fep egfr.toml --iteration 1
-molnova fep egfr.toml --iteration 1 --import-scores fep_scores.tsv
-molnova synthetic-feasibility egfr.toml --iteration 1 --import-results results.json.gz
-molnova status egfr.toml
+graft run egfr.toml --iteration 0
+graft run egfr.toml --iteration 1
+graft egfr.toml --iteration 1
+graft run egfr.toml --iteration 1 --once
+graft run egfr.toml --iteration 1 --poll-interval 5
+graft generate egfr.toml --iteration 1
+graft synthetic-feasibility egfr.toml --iteration 1
+graft ligprep egfr.toml --iteration 1
+graft glide egfr.toml --iteration 1
+graft prime_gbsa egfr.toml --iteration 1
+graft fep egfr.toml --iteration 1
+graft fep egfr.toml --iteration 1 --import-scores fep_scores.tsv
+graft synthetic-feasibility egfr.toml --iteration 1 --import-results results.json.gz
+graft status egfr.toml
 ```
 
-Standalone modules also run as `python -m molnova.stages.<module>`. Glide accepts poll interval, completion fraction (0.95), and tail timeout override. Starting another iteration requires another supervisor invocation. Explicit generated iterations are 1..max-iteration; supervisor additionally accepts 0.
+Standalone modules also run as `python -m graft.stages.<module>`. Glide accepts poll interval, completion fraction (0.95), and tail timeout override. Starting another iteration requires another supervisor invocation. Explicit generated iterations are 1..max-iteration; supervisor additionally accepts 0.
 
 Format-only synthetic result example (CCO is not an asserted EGFR candidate):
 
@@ -2184,7 +2237,7 @@ id	fep_score
 
 Output DB: `output/<project>.sqlite`. Iteration artifacts include `iter0/prime_gbsa/`, `iterN/reinvent/generated.csv`, sampling/TL TOML, `elite_selected.tsv`, `elite_train.smi`, `elite_valid.smi`, `TL_libinvent.model`, synthetic directory/results, LigPrep directory, Glide group files and `best_poses.maegz`, MM-GBSA queue/manifests, FEP candidate TSV, native logs, and SSH reproduction records. These are output contracts; score values depend on real calculations and are not supplied as fabricated expected results.
 
-`status` reports iteration/state counts; docking/GBSA/FEP counts and minima; synthetic assessed and solved counts. Supervisor prints startup configuration once, suppresses repeated initialization noise, and prints concise idle skip reasons. **Confirmed console verbosity change (2026-10-13):** flat TOML `log_level` defaults to 1 (`log-level` is an alias; conflicting values are rejected). Accept integers >=1, excluding bool. Level 1 shows stage/iteration summaries and total completion times; level 2 also shows worker invocation timing and stage-internal progress; level >=3 displays individual compound/reference-group docking, Prime and external-command output. Amber native per-compound logs display at level >=3 after artifact download; they are not a live remote stream. Failure summaries and tracebacks remain visible at every level. This applies to supervised and standalone stages; filtering never changes result persistence, JobId checkpointing, queue refill or scientific state. Retain native logs and save suppressed helper-command output in `molnova_commands.log` under the configured output directory (reference import) or the stage work directory (including generation); never use the project root for these logs. Save Prime launch output in `prime_launch.log`, and Glide launch output in `glide_launch.log` in the corresponding work directory. Concise pose-merge logging is an observed uncommitted change, not a scientific constraint.
+`status` reports iteration/state counts; docking/GBSA/FEP counts and minima; synthetic assessed and solved counts. Supervisor prints startup configuration once, suppresses repeated initialization noise, and prints concise idle skip reasons. **Confirmed console verbosity change (2026-10-13):** flat TOML `log_level` defaults to 1 (`log-level` is an alias; conflicting values are rejected). Accept integers >=1, excluding bool. Level 1 shows stage/iteration summaries and total completion times; level 2 also shows worker invocation timing and stage-internal progress; level >=3 displays individual compound/reference-group docking, Prime and external-command output. Amber native per-compound logs display at level >=3 after artifact download; they are not a live remote stream. Failure summaries and tracebacks remain visible at every level. This applies to supervised and standalone stages; filtering never changes result persistence, JobId checkpointing, queue refill or scientific state. Retain native logs and save suppressed helper-command output in `graft_commands.log` under the configured output directory (reference import) or the stage work directory (including generation); never use the project root for these logs. Save Prime launch output in `prime_launch.log`, and Glide launch output in `glide_launch.log` in the corresponding work directory. Concise pose-merge logging is an observed uncommitted change, not a scientific constraint.
 
 **Confirmed terse MM-GBSA polling (2026-10-16):** each normal level-1 compound
 queue pass prints one line containing iteration-wide `running` (PRIME_GBSA_RUNNING
@@ -2233,7 +2286,7 @@ Run in a Python >=3.11 environment with dependencies, from repository root:
 python -m pip install -e .
 python -m pytest
 python -m compileall -q src tests
-python -c "import molnova; import molnova.cli"
+python -c "import graft; import graft.cli"
 ```
 
 Regression criteria: concurrent claimers receive disjoint work; score-bearing compounds retain top-N positions; ties are stable; generation shortage/retryable upstream work blocks progression; enough elites alone cannot bypass unfinished top-N; nonfinite GBSA cannot supply elites; completed driver iteration need not have next-generation elite count; native child activity and uncertain submissions override exit 0/cached output; crash before/after JobId save and between DB commit/checkpoint does not duplicate work; tail timeout does not release GBSA; job timeout survives restart; one of seven completed jobs frees one slot immediately; individual failure preserves other results; reference GBSA works without docking; invalid synthetic/FEP imports do not partially update; timing survives restarts and never finishes paused work.
@@ -2248,7 +2301,7 @@ Completion means required behavior passes relevant automated checks, scientific 
 
 - Full prior conversation is absent. Historical adoption of documented features/defaults is unverified; section 1 contains the explicit preserved constraints.
 - Scheduling: old architecture text says workers can run concurrently; latest handoff/code/tests say one iteration with sequential supervision. The original ban on a sequential monolith is preserved as separation of calculation from supervision. If that wording meant mandatory simultaneous stage supervision, the conflict needs a user decision. Preserve the latest documented baseline meanwhile.
-- Exact runtime versions/locks, active MolNova Python environment, GPU/CUDA compatibility, licenses, JobServer/SLURM host configuration and remote-path accessibility require provisioning evidence. The reviewed shell used Python 3.9 and lacked RDKit and a `molnova` executable; no runtime tests were performed during specification reconstruction.
+- Exact runtime versions/locks, active Graft Python environment, GPU/CUDA compatibility, licenses, JobServer/SLURM host configuration and remote-path accessibility require provisioning evidence. The reviewed shell used Python 3.9 and lacked RDKit and a `graft` executable; no runtime tests were performed during specification reconstruction.
 - Production FEP+ protocol, score units and reference convention are undefined. Experimental dG units/conversion are also unspecified. These do not block export/import-only FEP or preservation of input experimental values.
 - Operational continuation scope: whether a rebuilt implementation must resume current production DB/live legacy submissions requires confirmation and representative safe copies. Compatibility behavior is documented here; access to live state is not assumed.
 - Equal-Tanimoto reference tie policy and exact scaffold attachment edge cases lack a standalone user-approved contract. Use supplied source/regression fixtures for fidelity rather than inventing scientific behavior.
@@ -2267,7 +2320,7 @@ Completion means required behavior passes relevant automated checks, scientific 
 - Latest source/tests, this specification, development guidance, `pyproject.toml`, and project TOML, including relevant uncommitted scientific/recovery changes.
 - Multi-ligand reference MAEGZ, prepared Glide grid ZIP, and optional separate MM-GBSA receptor. Small regression fixtures for atom mapping, attachment decomposition, and multi-state best-pose selection.
 - Compatible original LibInvent prior and REINVENT runtime/version/environment; local or remote access details without embedding credentials.
-- Schrödinger 2026-3 installation, working JobServer/observer/SLURM hosts and licenses; a MolNova Python >=3.11 environment with RDKit and pytest.
+- Schrödinger 2026-3 installation, working JobServer/observer/SLURM hosts and licenses; a Graft Python >=3.11 environment with RDKit and pytest.
 - If enabling synthetic evaluation: AiZynthFinder YAML, compatible models/stock and runtime, representative JSON/JSON.gz results.
 - If resuming/migrating: safe DB backup and representative saved manifests/native logs/job-status responses, plus explicit treatment of live submissions.
 - If using FEP score import: eligible ID/score TSV and externally defined score meaning. Automated FEP requires a separate approved protocol.
@@ -2378,7 +2431,7 @@ keep-count must be >= `prime-gbsa-input-count`. CPU/count settings are positive 
 and reject bool. SSH host defaults tensor, environment defaults
 `/home1/amber26/envs/AmberTools26`, conda initialization defaults
 `/home1/chchae/anaconda3/etc/profile.d/conda.sh`, and remote work defaults
-`/home1/chchae/molnova-amber-runs`. The initialization script was located on tensor
+`/home1/chchae/graft-amber-runs`. The initialization script was located on tensor
 and these commands were checked in that runtime:
 
 ```bash
@@ -2440,9 +2493,9 @@ finite Prime results from exactly the preceding iteration.
 Commands:
 
 ```bash
-molnova run egfr.toml --iteration 1
-molnova amber-gbsa egfr.toml --iteration 1
-molnova prime_gbsa egfr.toml --iteration 1
+graft run egfr.toml --iteration 1
+graft amber-gbsa egfr.toml --iteration 1
+graft prime_gbsa egfr.toml --iteration 1
 ```
 
 Standalone Amber performs one submission/recovery pass; the supervisor polls it.
@@ -2589,7 +2642,7 @@ and results remain recoverable; do not retrospectively filter them.
 The user's later request supersedes individual submission/refill for **new**
 Prime work. Submit the complete selected unscored set in one native request,
 `-NJOBS <number of selected compounds>`, using aggregate `-HOST` slots of seven.
-Prime/JobDJ schedules the subjobs and refills slots; MolNova no longer maintains
+Prime/JobDJ schedules the subjobs and refills slots; Graft no longer maintains
 an individual submission buffer for new work. This does not promise that all
 subjobs are registered with JobServer immediately: native JobDJ controls launch.
 Multiple hosts share seven slots, rather than each receiving seven. One saved
@@ -2615,8 +2668,8 @@ Preserve configured flexibility per original molecule. Installed Schrödinger
 over all input ligands and shares free-receptor optimization. Therefore positive
 `prime-gbsa-flexdist` uses native complex-input mode: construct one original receptor
 plus one selected ligand per complex, retaining coordinates/compound IDs and
-marking ligand atoms with `i_molnova_batch_ligand`; pass `-ligand
-"atom.i_molnova_batch_ligand 1"`, `-rflexdist <configured distance>`,
+marking ligand atoms with `i_graft_batch_ligand`; pass `-ligand
+"atom.i_graft_batch_ligand 1"`, `-rflexdist <configured distance>`,
 `-rflexgroup residue`, and `-out_type COMPLEX`. Native `_prepareComplexInput`
 initializes/optimizes each complex's receptor independently. Frozen-receptor
 work retains PV input. This source verification establishes the intended native
@@ -2699,7 +2752,7 @@ existing direct SSH worker (EGFR: t41); LigPrep, Glide and Prime host settings
 are unchanged. Amber SLURM defaults are SSH host `slurm`, partition `cpu`,
 `amber-slurm-cpus=384` (validated 1..384), environment
 `/share/opt/amber26/envs/AmberTools26`, and shared work directory
-`/homes1/<current-user>/molnova-amber-slurm-runs`. Override these with
+`/homes1/<current-user>/graft-amber-slurm-runs`. Override these with
 `amber-slurm-host`, `amber-slurm-partition`, `amber-slurm-env`,
 `amber-slurm-work-dir`; optional `amber-slurm-conda-init` enables conda activation.
 Without that optional key source the shared environment's `amber.sh` directly.
@@ -2756,11 +2809,11 @@ No real minimization, speedup, energy or ranking validation is claimed.
 ## 21. Confirmed Amber one-core Slurm job arrays (2026-10-20)
 
 **Confirmed job-name correction (2026-10-21):** new Amber Slurm array
-records pin `slurm_job_name="amber-<UUID>"`, removing both `molnova-` and
+records pin `slurm_job_name="amber-<UUID>"`, removing both `graft-` and
 `run-` from the queue display while retaining the full unique UUID. Internal
 `run_id`/directories retain `run-<UUID>`. Previously pinned job names (including
 `amber-run-<UUID>`) remain unchanged. Saved records
-without this field retain `molnova-amber-<run_id>`, including unprepared legacy
+without this field retain `graft-amber-<run_id>`, including unprepared legacy
 records. Uploaded inputs, native jobs, submission journals and name-based
 uncertain-submission recovery are not renamed or rewritten.
 
@@ -2883,7 +2936,7 @@ A report failure is visible but does not stop scientific supervision. Unchanged
 snapshot/event/template combinations do not append duplicate log records.
 `distribution-report = false` disables automatic reports;
 The former `distribution-report-interval` setting is obsolete and ignored.
-Manual `molnova report project.toml [--iteration N]` reads existing DB data through
+Manual `graft report project.toml [--iteration N]` reads existing DB data through
 N (including references), without project initialization, migrations, claims,
 external-program calls or descriptor backfills. Standalone scientific stage
 commands retain their existing behavior; use the manual command to refresh them.
@@ -2927,7 +2980,7 @@ per-iteration boxplots/histograms work offline; copy HTML together with its
 **Confirmed user request:** recalculate iteration 60's 413 unscored Amber
 failures and score the available coordinates when the ten-minute limit is hit.
 
-**Implementation choice:** `python -m molnova.stages.amber_retry PROJECT --iteration 60
+**Implementation choice:** `python -m graft.stages.amber_retry PROJECT --iteration 60
 --source FINISHED_ARRAY_MANIFEST --watch` creates one durable owned retry array
 in `07-amber_gbsa/timeout-retry`. Reverify original native termination and released
 locks, source fingerprints and exact identities; select only unscored terminal

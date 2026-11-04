@@ -17,21 +17,21 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from molnova import database
-from molnova.config import combichem_3d_settings
-from molnova.states import PoseVerdict
-from molnova.chemistry.combichem3d import history as provenance
-from molnova.chemistry.combichem3d import search as conformations
-from molnova.chemistry.combichem3d.assembly import assemble, growth_sites, hydrogen_directions
-from molnova.chemistry.combichem3d.clashes import BumpChecker, load_receptor
-from molnova.chemistry.combichem3d.library import load_library, normalize, candidate_pools, combination_at
-from molnova.chemistry.combichem3d.evaluation import Evaluator
-from molnova.stages import combichem_3d as stage
+from graft import database
+from graft.config import combichem_3d_settings
+from graft.states import PoseVerdict
+from graft.chemistry.combichem3d import history as provenance
+from graft.chemistry.combichem3d import search as conformations
+from graft.chemistry.combichem3d.assembly import assemble, growth_sites, hydrogen_directions
+from graft.chemistry.combichem3d.clashes import BumpChecker, load_receptor
+from graft.chemistry.combichem3d.library import load_library, normalize, candidate_pools, combination_at
+from graft.chemistry.combichem3d.evaluation import Evaluator
+from graft.stages import combichem_3d as stage
 
 
 def toy(directory, iteration=1, attachments=1):
     path = Path(__file__).resolve().parents[1]/'examples/combichem-3d/make_toy_inputs.py'
-    spec = importlib.util.spec_from_file_location('molnova_toy_input',path)
+    spec = importlib.util.spec_from_file_location('graft_toy_input',path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     filename = module.create(directory,iteration,attachments)
@@ -488,7 +488,7 @@ def test_big_cartesian_counts_do_not_overflow_sqlite(inputs):
 
 def test_cli_real_cartesian_smoke_and_exports_preserve_poses(inputs):
     filename,cfg,_,_=inputs
-    completed=subprocess.run([sys.executable,'-m','molnova','combichem-3d',str(filename)],capture_output=True,text=True,timeout=40)
+    completed=subprocess.run([sys.executable,'-m','graft','combichem-3d',str(filename)],capture_output=True,text=True,timeout=40)
     assert completed.returncode==0,completed.stderr
     output=Path(cfg['out-dir']); report=json.loads((output/'summary.json').read_text())
     assert report['attempted']==9 and report['unique_count']==8
@@ -548,7 +548,7 @@ def test_old_project_database_cannot_be_repurposed(inputs):
     _,cfg,_,_=inputs
     Path(cfg['out-dir']).mkdir()
     with database.growth_connection(Path(cfg['out-dir'])/'combichem3d.sqlite') as conn:
-        from molnova import _core
+        from graft import _core
         _core.create_sqlite_schema(conn)
     with pytest.raises(RuntimeError,match='legacy project'):
         stage.prepare_project(cfg)
@@ -661,7 +661,7 @@ def test_ctrl_c_preserves_committed_results_and_exports_deferred_work(tmp_path):
     filename,cfg=toy(tmp_path/'interrupt',1,4)
     text=filename.read_text().replace('processes = 2','processes = 1').replace('max-seconds = 30.0','max-seconds = 30.0\ngrace-seconds = 0.5')
     filename.write_text(text)
-    process=subprocess.Popen([sys.executable,'-m','molnova','combichem-3d',str(filename)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    process=subprocess.Popen([sys.executable,'-m','graft','combichem-3d',str(filename)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
     db=Path(cfg['out-dir'])/'combichem3d.sqlite'
     ready=False
     try:
@@ -757,7 +757,7 @@ def test_linux_lock_stays_owned_by_orphaned_local_calculator(tmp_path):
     db=tmp_path/'lock.sqlite'
     code='''
 import multiprocessing,time
-from molnova import database
+from graft import database
 with database.stage_lock(DB,'combichem3d'):
     child=multiprocessing.get_context('fork').Process(target=time.sleep,args=(10,))
     child.start()
@@ -823,7 +823,7 @@ max-iteration = 2
     db=tmp_path/'legacy-output/project.sqlite'
     db.parent.mkdir()
     with database.growth_connection(db) as conn:
-        from molnova import _core
+        from graft import _core
         _core.create_sqlite_schema(conn)
         conn.execute("INSERT INTO compound(name,smiles,iteration,state) VALUES ('ref','CC',0,'reference')")
         conn.execute("INSERT INTO compound(name,smiles,iteration,state) VALUES ('generated','CCC',1,'generated')")
@@ -916,7 +916,7 @@ def test_project_can_extract_references_from_sdf_without_creating_source_db(inpu
 def test_existing_input_toml_cli_reuses_shared_data_end_to_end(inputs,tmp_path):
     filename,source=shared_project(inputs,tmp_path,'processes = 2\nmax-seconds = 30.0\nstop-mode = "time"')
     before=source.read_bytes()
-    result=subprocess.run([sys.executable,'-m','molnova','combichem-3d',str(filename)],
+    result=subprocess.run([sys.executable,'-m','graft','combichem-3d',str(filename)],
                           capture_output=True,text=True,timeout=40)
     assert result.returncode==0,(result.stdout,result.stderr)
     report=json.loads((source.parent/'combichem-3d/summary.json').read_text())
@@ -936,7 +936,7 @@ def test_project_native_sources_prefer_reference_pose_and_grid(inputs,tmp_path):
 @pytest.mark.parametrize('names',[[],['a_recep.mae','b_recep.mae']])
 def test_native_grid_rejects_ambiguous_or_absent_receptor(tmp_path,names):
     import zipfile
-    from molnova.chemistry.combichem3d.native_extract import receptor_member
+    from graft.chemistry.combichem3d.native_extract import receptor_member
     path=tmp_path/'grid.zip'
     with zipfile.ZipFile(path,'w') as archive:
         for name in names: archive.writestr(name,'test')
@@ -945,7 +945,7 @@ def test_native_grid_rejects_ambiguous_or_absent_receptor(tmp_path,names):
 
 
 def test_native_cache_validates_coordinates_and_retains_changed_sources(inputs,tmp_path,monkeypatch):
-    from molnova.chemistry.combichem3d import inputs as native
+    from graft.chemistry.combichem3d import inputs as native
     _,base,mol,_=inputs
     source=tmp_path/'reference.maegz';source.write_text('native placeholder')
     suite=tmp_path/'suite';suite.mkdir();(suite/'run').touch()
@@ -1007,7 +1007,7 @@ def test_project_missing_history_uses_inferred_cache_and_explicit_wins(inputs,tm
 
 @pytest.mark.parametrize('iteration',[1,3])
 def test_inference_groups_components_preserves_pose_and_tracks_all_fragments(iteration):
-    from molnova.chemistry.combichem3d.inference import infer_parent
+    from graft.chemistry.combichem3d.inference import infer_parent
     mol=Chem.AddHs(Chem.MolFromSmiles('CCc1ccc(OCC)cc1'))
     AllChem.EmbedMolecule(mol,randomSeed=42)
     before=mol.GetConformer().GetPositions().copy()
@@ -1024,13 +1024,13 @@ def test_inference_groups_components_preserves_pose_and_tracks_all_fragments(ite
 
 
 def test_inference_no_match_does_not_fabricate_core(inputs):
-    from molnova.chemistry.combichem3d.inference import infer_parent
+    from graft.chemistry.combichem3d.inference import infer_parent
     with pytest.raises(ValueError,match='does not match'):
         infer_parent(inputs[2],'[Si]')
 
 
 def test_inferred_cache_is_preserved_if_assumption_changes(inputs):
-    from molnova.chemistry.combichem3d.inference import materialize_inferred_history
+    from graft.chemistry.combichem3d.inference import materialize_inferred_history
     _,cfg,_,_=inputs
     cfg=dict(cfg,**{'history-source':'inferred','reference-mcs':'c1ccccc1',
                     'history':str(Path(cfg['out-dir'])/'input-cache/inferred-history.json')})
@@ -1055,7 +1055,7 @@ def test_cli_logs_progress_worker_diagnostics_and_appends_on_resume(inputs,debug
     filename.write_text('log-interval=0.01\n'+filename.read_text())
     # Match the installed console script's sys.exit(main()) contract as well
     # as forwarding the debug flag into independent child workers.
-    command=[sys.executable,'-c','import sys; from molnova.cli import main; sys.exit(main(sys.argv[1:]))',
+    command=[sys.executable,'-c','import sys; from graft.cli import main; sys.exit(main(sys.argv[1:]))',
              'combichem-3d',str(filename)]
     flags=['--trace'] if debug=='trace' else (['--debug'] if debug else [])
     result=subprocess.run(command+flags,capture_output=True,text=True,timeout=30)

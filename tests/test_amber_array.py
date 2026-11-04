@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import amber_array as array, amber_runner as worker
+from graft import amber_array as array, amber_runner as worker
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ def test_array_archive_maps_logs_to_original_compound_ids(run, monkeypatch):
 
 
 def test_uploaded_standalone_helpers_collect_without_amber_activation(run):
-    from molnova import receptor_pdb
+    from graft import receptor_pdb
 
     for source, name in [(Path(array.__file__), 'amber_array.py'),
                          (Path(worker.__file__), 'worker.py'),

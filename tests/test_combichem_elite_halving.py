@@ -1,8 +1,8 @@
 """Ranked combichem MCS subsets; molecular validation does not prove affinity."""
 import pytest
 from rdkit import Chem
-from molnova import _core
-from molnova.chemistry import combichem
+from graft import _core
+from graft.chemistry import combichem
 
 
 PREVIOUS = dict(mcs_smarts='c1ccccc1', scaffold_smiles='[*:0]c1ccc([*:1])cc1')

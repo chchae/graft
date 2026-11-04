@@ -1,0 +1,544 @@
+#!/usr/bin/env python3
+import argparse
+import fcntl
+import os
+import signal
+import subprocess
+import select
+import sys
+import time
+from pathlib import Path
+
+from graft.paths import iteration_directory, stage_directory, stage_in_iteration
+from graft import _core as c
+from graft import database
+from graft.stages._logging import WORK_STARTED, format_elapsed, progress
+
+BASE_STAGES = [
+    ("generate", "graft.stages.generate"),
+    ("ligprep", "graft.stages.ligprep"),
+    ("glide", "graft.stages.glide"),
+    ("prime_gbsa", "graft.stages.prime_gbsa"),
+]
+
+CALCULATION_LABELS = {
+    'generate': 'Generate',
+    'ligprep': 'LigPrep',
+    'glide': 'Glide docking',
+    'amber-gbsa': 'Amber GBSA',
+    'prime_gbsa': 'PRIME_GBSA (Prime)',
+    'md-gbsa': 'MD-GBSA (Desmond/Prime)',
+}
+
+
+def build_stages(synthetic_feasibility_enabled, fep_enabled, amber_gbsa_enabled=False, md_gbsa_enabled=False,
+                 prime_gbsa_enabled=True):
+    stages = [BASE_STAGES[0], ('druglike', 'graft.stages.druglike')]
+    if synthetic_feasibility_enabled:
+        stages.append(("synthetic", "graft.stages.synthetic_feasibility"))
+    stages.extend(BASE_STAGES[1:])
+    if amber_gbsa_enabled:
+        stages.insert(stages.index(BASE_STAGES[-1]), ('amber-gbsa', 'graft.stages.amber_gbsa'))
+    if not prime_gbsa_enabled:
+        stages.remove(BASE_STAGES[-1])
+    if md_gbsa_enabled:
+        stages.append(("md-gbsa", "graft.stages.md_gbsa"))
+    if fep_enabled:
+        stages.append(("fep", "graft.stages.fep"))
+    return stages
+
+
+def stream_process(stage, cmd, cwd, stop_event):
+    """Stream actual work and failures; summarize each successful idle poll."""
+    env = os.environ.copy()
+    env["GRAFT_SUPERVISED"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=0,
+        env=env,
+    )
+
+    pending = []
+    active = False
+
+    def emit(line):
+        nonlocal active
+        if line.strip() == WORK_STARTED:
+            active = True
+            pending.clear()
+        elif line.startswith('[MCS] '):
+            # Core summaries are visible even before WORK_STARTED or on resume.
+            # They must not mark an idle worker as active or start its timer.
+            print(f"[{stage:<8}] {line}", end="", flush=True)
+        elif active:
+            print(f"[{stage:<8}] {line}", end="", flush=True)
+        else:
+            pending.append(line)
+
+    try:
+        assert proc.stdout is not None
+        # Read bytes so buffered readline cannot hide output or block shutdown.
+        buffer = b""
+        while not stop_event.is_set():
+            ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+            if not ready:
+                continue
+            chunk = os.read(proc.stdout.fileno(), 65536)
+            if not chunk:
+                break
+            buffer += chunk
+            lines = buffer.split(b"\n")
+            buffer = lines.pop()
+            for line in lines:
+                emit(line.decode("utf-8", errors="replace") + "\n")
+        if buffer:
+            emit(buffer.decode("utf-8", errors="replace"))
+    finally:
+        if stop_event.is_set() and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        else:
+            proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+    if proc.returncode != 0:
+        for line in pending:
+            print(f"[{stage:<8}] {line}", end="", flush=True)
+    elif not active and not stop_event.is_set():
+        reason = next((line.strip() for line in reversed(pending) if line.strip()),
+                      "No eligible work.")
+        print(f"[{stage:<8}] skip: {reason}", flush=True)
+    return proc.returncode
+
+
+class StopFlag:
+    """Signal-controlled cancellation for the single-thread supervisor."""
+
+    def __init__(self):
+        self.stopped = False
+
+    def set(self):
+        self.stopped = True
+
+    def is_set(self):
+        return self.stopped
+
+    def wait(self, seconds):
+        deadline = time.monotonic() + seconds
+        while not self.stopped:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(remaining, 0.2))
+
+
+def reference_work_pending(args):
+    if ((getattr(args, 'prime_gbsa_enabled', True)
+         and database.reference_prime_gbsa_completion_reason(args.db_path) is not None)
+            or (not getattr(args, 'prime_gbsa_enabled', True)
+                and database.has_running_prime_gbsa(args.db_path, 0))
+            or (stage_directory(args.output, 0, 'prime_gbsa') / 'prime_gbsa_job.json').exists()):
+        return True
+    saved_md = database.md_gbsa_selection(args.db_path, 0)
+    if (saved_md is not None or (getattr(args, 'md_gbsa_enabled', False)
+                                and database.md_gbsa_rows(args.db_path, 0))):
+        if database.md_gbsa_completion_reason(args.db_path, 0) is not None:
+            return True
+    from graft.amber_gbsa import load_job
+    if load_job(stage_directory(args.output, 0, 'amber_gbsa')) is not None:
+        return True
+    if getattr(args, 'amber_gbsa_enabled', False):
+        return (database.amber_completion_reason(args.db_path, 0, args.target_count) is not None
+                or load_job(stage_directory(args.output, 0, 'amber_gbsa')) is not None)
+    return False
+
+
+def reference_stages(args):
+    return iteration_stages(args, 0)
+
+
+def iteration_stages(args, iteration):
+    prime = getattr(args, 'prime_gbsa_enabled', True)
+    amber = getattr(args, 'amber_gbsa_enabled', False)
+    md = (getattr(args, 'md_gbsa_enabled', False)
+          or database.md_gbsa_selection(args.db_path, iteration) is not None)
+    stages = ([('prime_gbsa', 'graft.stages.prime_gbsa')] if prime else []) if iteration == 0 else build_stages(
+        args.synthetic_feasibility_enabled, args.fep_enabled, amber, md, prime)
+    from graft.prime_gbsa_async import load_job as load_prime
+    from graft.amber_gbsa import load_job as load_amber
+    saved_amber = load_amber(stage_directory(args.output, iteration, 'amber_gbsa')) is not None
+    if iteration == 0 and amber:
+        stages.insert(0, ('amber-gbsa', 'graft.stages.amber_gbsa'))
+    if saved_amber and not amber:
+        stages.insert(0, ('amber-gbsa-recovery', 'graft.stages.amber_gbsa'))
+    if ((amber or not prime or saved_amber)
+            and (load_prime(stage_directory(args.output, iteration, 'prime_gbsa')) is not None
+                 or database.has_running_prime_gbsa(args.db_path, iteration))):
+        stages.insert(0, ('prime_gbsa-recovery', 'graft.stages.prime_gbsa'))
+    if iteration == 0 and md:
+        stages.append(('md-gbsa', 'graft.stages.md_gbsa'))
+    return stages
+
+
+def choose_iteration(args, requested=None):
+    """Select once; every worker receives the same explicit iteration."""
+    if requested is not None:
+        if not 0 <= requested <= args.max_iteration:
+            raise ValueError(f"Iteration must be between 0 and {args.max_iteration}.")
+        return requested
+    if reference_work_pending(args):
+        return 0
+    with database.connect(args.db_path) as conn:
+        latest_retry = conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0]
+    retry_stages = ('prime_gbsa','md_gbsa') if getattr(args,'prime_gbsa_enabled',True) else ('md_gbsa',)
+    if latest_retry is not None and any(database.score_retry_requests(args.db_path, latest_retry, stage)
+                                       for stage in retry_stages):
+        return latest_retry
+    with database.connect(args.db_path) as conn:
+        iterations = [row[0] for row in conn.execute(
+            "SELECT DISTINCT iteration FROM compound WHERE iteration>0 ORDER BY iteration"
+        )]
+    for iteration in iterations:
+        if (database.md_gbsa_selection(args.db_path,iteration) is not None and
+                database.md_gbsa_completion_reason(args.db_path,iteration)):
+            return iteration
+        from graft.amber_gbsa import load_job
+        if load_job(stage_directory(args.output, iteration, 'amber_gbsa')) is not None:
+            return iteration
+        from graft.prime_gbsa_async import load_job as load_prime
+        if (not getattr(args, 'prime_gbsa_enabled', True)
+                and load_prime(stage_directory(args.output, iteration, 'prime_gbsa')) is not None):
+            return iteration
+        if database.generation_completion_reason(args, iteration, 0) is not None:
+            return iteration
+        if (not getattr(args, 'prime_gbsa_enabled', True) and getattr(args, 'schrodinger', None) is not None
+                and external_completion_reason(args, iteration, 'glide') is not None):
+            return iteration
+    latest = max(iterations, default=0)
+    if latest and getattr(args,'md_gbsa_enabled',False) and database.md_gbsa_selection(args.db_path,latest) is None:
+        return latest
+    following = latest + 1
+    return following if following <= args.max_iteration else None
+
+
+def resume_iteration_stages(args, iteration, stages):
+    """Resume the final cycle's last entered calculation; retain native recovery."""
+    frontier = database.restart_calculation_stage(args.db_path,iteration)
+    names = [stage for stage,_ in stages]
+    if frontier not in names:
+        return stages
+    start = names.index(frontier)
+    from graft.prime_gbsa_async import load_job as load_prime
+    from graft.amber_gbsa import load_job as load_amber
+    from graft.ligprep_recovery import load_job as load_ligprep
+    saved = {
+        'prime_gbsa':load_prime(stage_directory(args.output,iteration,'prime_gbsa')) is not None,
+        'amber-gbsa':load_amber(stage_directory(args.output,iteration,'amber_gbsa')) is not None,
+        'ligprep':load_ligprep(stage_directory(args.output,iteration,'ligprep')) is not None,
+    }
+    from graft.glide_recovery import load_record
+    saved['glide'] = any(not load_record(path.parent).get('downloaded') for path in
+                          stage_directory(args.output,iteration,'glide').glob('*/glide_job.json'))
+    running = database.running_calculation_stages(args.db_path,iteration)
+    recoveries = []
+    for stage,module in stages[:start]:
+        base = stage.removesuffix('-recovery')
+        if base in running or saved.get(base):
+            name = base+'-recovery' if base in ('prime_gbsa','amber-gbsa') else base
+            if (name,module) not in recoveries:
+                recoveries.append((name,module))
+    return recoveries + stages[start:]
+
+
+def external_completion_reason(args, iteration, stage):
+    """Do not advance past live or uncertain native work, even with stale scores."""
+    recovering_prime = stage == 'prime_gbsa-recovery'
+    if stage == 'prime_gbsa-recovery':
+        stage = 'prime_gbsa'
+    if stage == 'amber-gbsa-recovery':
+        stage = 'amber-gbsa'
+    if stage == 'amber-gbsa':
+        from graft.amber_gbsa import load_job
+        if load_job(stage_directory(args.output, iteration, 'amber_gbsa')) is not None:
+            return 'Amber remote submission still requires recovery'
+        return None
+    if stage not in {"ligprep", "glide", "prime_gbsa"}:
+        return None
+    from graft import schrodinger_guard as guard
+    from graft.ligprep_recovery import load_job as load_ligprep
+    from graft.prime_gbsa_async import load_job as load_prime
+    from graft.amber_gbsa import load_job as load_amber
+
+    directory = iteration_directory(args.output, iteration)
+    try:
+        if stage == 'prime_gbsa' and not recovering_prime and load_amber(stage_in_iteration(directory, 'amber_gbsa')) is not None:
+            return 'Amber remote submission still requires recovery'
+        if stage == "ligprep" and load_ligprep(stage_in_iteration(directory, 'ligprep')) is not None:
+            return "LigPrep submission still requires recovery"
+        if stage == "prime_gbsa" and load_prime(stage_in_iteration(directory, 'prime_gbsa')) is not None:
+            return "prime_gbsa queue still requires recovery"
+        if stage == "glide":
+            from graft.glide_recovery import load_record
+            for record_path in (stage_in_iteration(directory, 'glide')).glob("*/glide_job.json"):
+                record = load_record(record_path.parent)
+                if not record.get("job_id"):
+                    return "Glide launch identity remains uncertain"
+                # Already downloaded records were verified terminal by the worker.
+                if not record.get("downloaded"):
+                    details = guard.job_details(args.schrodinger, record["job_id"])
+                    if any(job.get("status") not in guard.TERMINAL for job in details):
+                        return f"saved Glide job still active: {record['job_id']}"
+        jobs = guard.active_jobs(args.schrodinger)
+    except Exception as exc:
+        return f"cannot verify JobServer completion: {exc}"
+    directory = directory.resolve()
+    for job in jobs:
+        launch = job.get("spec", {}).get("launchParams", {}).get("launchDirectory")
+        belongs = (launch and Path(launch).resolve().is_relative_to(directory)) or (
+            str(directory) + "/" in job.get("commandLine", "")
+        )
+        if belongs:
+            return f"external job still active: {job['jobId']}"
+    return None
+
+
+def refresh_distribution_report(args, project_toml, iteration, event, stop):
+    """Supervise a diagnostic subprocess; report errors never gate calculations."""
+    if not getattr(args, 'distribution_report_enabled', False) or stop.is_set():
+        return
+    cmd = [sys.executable, '-m', 'graft.distributions', str(project_toml),
+           '--iteration', str(iteration), '--event', event]
+    try:
+        rc = stream_process('report', cmd, project_toml.parent, stop)
+        if rc and not stop.is_set():
+            print(f'[report  ] distribution report failed (exit={rc}); previous report retained; '
+                  'calculation supervision continues.', flush=True)
+    except OSError as exc:
+        print(f'[report  ] cannot launch distribution report: {exc}; calculation supervision continues.', flush=True)
+
+
+
+def md_stage_required(args, project_toml, iteration):
+    """Read opt-in at stage boundaries; saved ownership always requires recovery."""
+    if iteration < 0:
+        return False
+    if Path(project_toml).is_file():
+        import tomllib
+        from graft.config import md_gbsa_settings
+        with Path(project_toml).open('rb') as stream:
+            args.md_gbsa_enabled = md_gbsa_settings(tomllib.load(stream))['md_gbsa_enabled']
+    return (getattr(args, 'md_gbsa_enabled', False) or
+            database.md_gbsa_selection(args.db_path, iteration) is not None)
+
+def supervise_iteration(args, project_toml, iteration, stages, poll_interval, stop, once=False):
+    """Run one worker at a time; exit only after this iteration's final stage."""
+    pending_stages = list(stages)
+    md_stage = ('md-gbsa', 'graft.stages.md_gbsa')
+    while pending_stages:
+        if stop.is_set():
+            return False
+        stage, module = pending_stages.pop(0)
+        if (iteration > 0 and stage != 'generate'
+                and database.iteration_was_deleted(args.db_path, iteration)
+                and database.md_gbsa_selection(args.db_path, iteration) is None):
+            pending_stages = iteration_stages(args, iteration)
+            print(f'[driver  ] iteration {iteration}: compound population was deleted; '
+                  'returning to Generate for verified backup and recovery.', flush=True)
+            continue
+        if stage == 'md-gbsa' and not md_stage_required(args, project_toml, iteration):
+            continue  # Disabled before submission; saved selections still recover.
+        if (stage == 'fep' and md_stage_required(args, project_toml, iteration)
+                and database.md_gbsa_completion_reason(args.db_path, iteration) is not None):
+            pending_stages.insert(0, (stage, module))
+            stage, module = md_stage
+            print(f"[driver  ] iteration {iteration}: MD-GBSA required before FEP; supervising MD first.", flush=True)
+        started = time.monotonic()
+        timed_stage = 'prime_gbsa' if stage == 'prime_gbsa-recovery' else stage
+        if timed_stage in CALCULATION_LABELS:
+            database.start_stage_timer(args.db_path, iteration, timed_stage)
+        interval = min(poll_interval, 5) if stage in {"prime_gbsa", "prime_gbsa-recovery"} else poll_interval
+        cmd = [sys.executable, "-m", module, str(project_toml), "--iteration", str(iteration)]
+        if stage == 'generate' and getattr(args, 'cli_elite_mcs', None) is not None:
+            cmd += ['--elite-mcs', args.cli_elite_mcs]
+        while not stop.is_set():
+            rc = stream_process(stage, cmd, project_toml.parent, stop)
+            if stop.is_set():
+                return False
+            reason = f"worker exited with status {rc}" if rc else database.stage_completion_reason(
+                args.db_path, iteration, stage, args.target_count, args.prime_gbsa_input_count,
+                args.synthetic_feasibility_enabled, database.amber_keep_count(args),
+            )
+            if reason is None:
+                reason = external_completion_reason(args, iteration, stage)
+            if reason is None:
+                if (stage == 'prime_gbsa' and md_stage_required(args, project_toml, iteration)
+                        and md_stage not in pending_stages
+                        and database.md_gbsa_completion_reason(args.db_path, iteration) is not None):
+                    pending_stages.insert(0, md_stage)
+                    print(f"[driver  ] iteration {iteration}: MD-GBSA enabled; adding the stage after Prime.", flush=True)
+                if stage in CALCULATION_LABELS:
+                    from graft.stages._summary import completion_summary
+                    elapsed = database.finish_stage_timer(args.db_path, iteration, stage)
+                    print(f"[driver  ] iteration {iteration}: {CALCULATION_LABELS[stage]} stage complete; "
+                          f"total elapsed={format_elapsed(elapsed)} "
+                          "(including waiting, polling and restart recovery); "
+                          f"{completion_summary(args, iteration, stage, elapsed)}.", flush=True)
+                else:
+                    # Recovery alone does not finish the final Prime candidate set.
+                    print(f"[driver  ] iteration {iteration}: {stage} complete "
+                          f"({time.monotonic() - started:.1f} s including recovery/polling).", flush=True)
+                report_stage = ('fep' if getattr(args, 'fep_enabled', False) else
+                                'md-gbsa' if getattr(args, 'md_gbsa_enabled', False) else
+                                'prime_gbsa' if getattr(args, 'prime_gbsa_enabled', True) else
+                                'amber-gbsa' if getattr(args, 'amber_gbsa_enabled', False) else 'glide')
+                if iteration > 0 and stage == report_stage:
+                    refresh_distribution_report(args, project_toml, iteration, f'{stage}-complete', stop)
+                break
+            routine_prime_gbsa_poll = (rc == 0 and stage in {'prime_gbsa', 'prime_gbsa-recovery'}
+                                 and reason.startswith(('prime_gbsa still running for ',
+                                                        'reference prime_gbsa still running for ',
+                                                        'Existing Prime claims still running')))
+            report = progress if routine_prime_gbsa_poll else print
+            timing = ''
+            if stage in {'amber-gbsa', 'md-gbsa'}:
+                elapsed = database.stage_elapsed(args.db_path, iteration, stage)
+                if elapsed is not None:
+                    timing = (f'; elapsed={format_elapsed(elapsed)} '
+                              '(including waiting, polling and restart recovery)')
+            report(f"[driver  ] iteration {iteration}: {stage} pending: {reason}{timing}.", flush=True)
+            if once:
+                return False
+            if (iteration > 0 and stage != 'generate'
+                    and database.iteration_was_deleted(args.db_path, iteration)
+                    and database.md_gbsa_selection(args.db_path, iteration) is None):
+                pending_stages = iteration_stages(args, iteration)
+                print(f'[driver  ] iteration {iteration}: compound population was deleted; '
+                      'returning to Generate for verified backup and recovery.', flush=True)
+                break
+            if (stage == 'fep' and md_stage_required(args, project_toml, iteration)
+                    and database.md_gbsa_completion_reason(args.db_path, iteration) is not None):
+                pending_stages.insert(0, (stage, module))
+                pending_stages.insert(0, md_stage)
+                print(f"[driver  ] iteration {iteration}: returning to MD-GBSA before retrying FEP.", flush=True)
+                break
+            stop.wait(interval)
+    return not stop.is_set()
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(
+        description="Single-thread supervisor for one iteration of sequential stage workers"
+    )
+    p.add_argument("project_toml", type=Path)
+    p.add_argument("--iteration", type=int, help="Iteration to run; default: oldest unfinished, or next new iteration")
+    p.add_argument("--elite-mcs", help="Generation SMARTS override (takes precedence over TOML)")
+    p.add_argument(
+        "--poll-interval",
+        type=int,
+        default=30,
+        help="Seconds before restarting an idle/exited worker (default: 30)",
+    )
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="Attempt each stage once in order; stop at the first unfinished stage",
+    )
+    ns = p.parse_args(argv)
+
+    if ns.poll_interval < 1:
+        raise ValueError("--poll-interval must be >= 1")
+
+    project_toml = ns.project_toml.expanduser().resolve()
+
+    # Configure once so the DB exists and project name is known.
+    overrides = {'elite_mcs': ns.elite_mcs} if ns.elite_mcs is not None else {}
+    args = c.configure_project(project_toml, **overrides)
+    args.cli_elite_mcs = ns.elite_mcs
+
+    # One driver per project DB. Prevent accidental duplicate supervisors.
+    lock_path = database.lock_path(args.db_path, "driver")
+    lock_file = lock_path.open("a")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        raise SystemExit(
+            f"Another driver appears to be running for {args.project}: {lock_path}"
+        )
+
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+
+    previous_handlers = {}
+    try:
+        database.request_latest_score_retries(args, ns.iteration)
+        iteration = choose_iteration(args, ns.iteration)
+        if iteration is None:
+            print("[driver  ] All configured iterations are complete.")
+            return
+        stages = resume_iteration_stages(args, iteration, iteration_stages(args, iteration))
+        print("=" * 70)
+        print("SEQUENTIAL SINGLE-ITERATION DRIVER")
+        print(f"Project        : {args.project}")
+        print(f"TOML           : {project_toml}")
+        print(f"SQLite DB      : {args.db_path}")
+        print(f"Output         : {args.output}")
+        print(f"Iteration      : {iteration}")
+        print(f"Worker poll    : {ns.poll_interval} s (prime_gbsa: at most 5 s)")
+        print("Stages         : " + " -> ".join(stage for stage, _ in stages))
+        print("Stop           : Ctrl-C", flush=True)
+        stop = StopFlag()
+
+        def request_stop(signum=None, frame=None):
+            if not stop.is_set():
+                print("\n[driver  ] stopping current worker...", flush=True)
+                stop.set()
+
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_handlers[signum] = signal.signal(signum, request_stop)
+        # References use their supplied poses, without generation/LigPrep/Glide.
+        if iteration > 0 and reference_work_pending(args):
+            references_done = supervise_iteration(
+                args, project_toml, 0, reference_stages(args),
+                ns.poll_interval, stop, ns.once,
+            )
+            if not references_done:
+                print('[driver  ] reference prime_gbsa paused; restart to resume.', flush=True)
+                return
+        database.start_iteration_timer(args.db_path, iteration)
+        completed = supervise_iteration(
+            args, project_toml, iteration, stages, ns.poll_interval, stop, ns.once,
+        )
+        if completed:
+            elapsed, estimated = database.finish_iteration_timer(args.db_path, iteration)
+            qualifier = ' (estimated from first compound creation)' if estimated else ''
+            md_selection = database.md_gbsa_selection(args.db_path, iteration)
+            if md_selection is not None:
+                scored = len(set(md_selection['ids']) & database.completed_md_ids(args.db_path, iteration))
+                print(f'[driver  ] iteration {iteration}: MD-GBSA resolved; '
+                      f'selected={len(md_selection["ids"])}, scored={scored}, '
+                      f'final_failed={len(md_selection["ids"])-scored}.', flush=True)
+            print(f"[driver  ] iteration {iteration}: finished; "
+                  f"total elapsed={format_elapsed(elapsed)}{qualifier}.", flush=True)
+        else:
+            print(f"[driver  ] iteration {iteration}: paused; restart to resume.", flush=True)
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
+
+
+if __name__ == "__main__":
+    main()

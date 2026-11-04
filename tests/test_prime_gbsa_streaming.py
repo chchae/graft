@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, prime_gbsa_streaming, prime_gbsa_async
-from molnova.stages import prime_gbsa
-from molnova.stages._logging import timed_stage, work_started, format_elapsed, job_elapsed
+from graft import _core, database, prime_gbsa_streaming, prime_gbsa_async
+from graft.stages import prime_gbsa
+from graft.stages._logging import timed_stage, work_started, format_elapsed, job_elapsed
 
 
 def project(tmp_path):
@@ -137,8 +137,8 @@ def test_parent_completion_uses_final_output_without_child_transfers(tmp_path,mo
 @pytest.mark.parametrize('level', [1, 2, 3])
 def test_stage_timer_reports_work_and_failure_but_not_idle(monkeypatch,capsys,failed,level):
     from contextvars import ContextVar
-    monkeypatch.setattr('molnova.stages._logging._log_level', ContextVar('test_log_level', default=level))
-    clock=iter([10,75.25]);monkeypatch.setattr('molnova.stages._logging.time.monotonic',lambda:next(clock))
+    monkeypatch.setattr('graft.stages._logging._log_level', ContextVar('test_log_level', default=level))
+    clock=iter([10,75.25]);monkeypatch.setattr('graft.stages._logging.time.monotonic',lambda:next(clock))
     @timed_stage('Generate stage')
     def stage(active):
         if not active:return

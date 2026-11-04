@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core
-from molnova.stages.generate import choose_iteration
+from graft import _core
+from graft.stages.generate import choose_iteration
 
 
 def _project_args(tmp_path, max_iteration=3, target_count=2):
@@ -107,7 +107,7 @@ def test_generated_element_filter_uses_atoms_and_preserves_valid_smiles(tmp_path
 
 @pytest.mark.parametrize('policy', ['raw_v1', 'legacy'])
 def test_generated_element_filter_precedes_target_and_preserves_existing_rows(tmp_path, policy):
-    from molnova import database
+    from graft import database
 
     args = _project_args(tmp_path)
     database.mark_iteration_workspace_prepared(args.db_path, 1)

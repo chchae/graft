@@ -3,10 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core
-from molnova import cli
-from molnova import database, driver
-from molnova.config import remote_aizynth_settings, aizynth_process_count
+from graft import _core
+from graft import cli
+from graft import database, driver
+from graft.config import remote_aizynth_settings, aizynth_process_count
 
 
 PROJECT_TOML = '''
@@ -20,7 +20,7 @@ max-iteration = 1
 host = "localhost"
 aizynth-ssh-host = "tensor"
 aizynth-remote-env = "/home1/astrazeneca/AiZynthFinder/env"
-aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/molnova-runs"
+aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 '''
 
@@ -57,7 +57,7 @@ def test_md_gbsa_flag_rejects_non_booleans(tmp_path, value):
 
 
 def test_md_gbsa_protocol_defaults_are_configurable():
-    from molnova.config import md_gbsa_settings
+    from graft.config import md_gbsa_settings
     settings=md_gbsa_settings({'md-gbsa': True, 'md-gbsa-production-ns':20})
     assert settings['md_gbsa_enabled'] is True
     assert settings['md_gbsa_production_ns']==20
@@ -117,21 +117,21 @@ def test_amber_input_count_aliases_reach_the_selection_worker(tmp_path, extra, c
 @pytest.mark.parametrize('key', ['amber-input-count', 'amber-keep-count'])
 @pytest.mark.parametrize('value', [True, False, 0, -1, 500.0, '500'])
 def test_amber_input_count_alias_validation(tmp_path, key, value):
-    from molnova.config import amber_settings
+    from graft.config import amber_settings
     with pytest.raises(ValueError, match=key):
         amber_settings({'out-dir': 'output', key: value}, tmp_path)
 
 
 @pytest.mark.parametrize('enabled', [True, False])
 def test_conflicting_amber_input_count_aliases_are_rejected(tmp_path, enabled):
-    from molnova.config import amber_settings
+    from graft.config import amber_settings
     with pytest.raises(ValueError, match='must agree'):
         amber_settings({'out-dir': 'output', 'amber_gbsa': enabled,
                         'amber-input-count': 500, 'amber-keep-count': 300}, tmp_path)
 
 
 def test_amber_input_count_must_cover_prime_input_count(tmp_path):
-    from molnova.config import amber_settings
+    from graft.config import amber_settings
     with pytest.raises(ValueError, match='amber-input-count must be >= prime-gbsa-input-count'):
         amber_settings({'out-dir': 'output', 'amber_gbsa': True,
                         'amber-input-count': 100, 'prime-gbsa-input-count': 200}, tmp_path)
@@ -206,7 +206,7 @@ def test_cli_nested_toml_uses_filename_as_project(tmp_path, monkeypatch, explici
 
 def test_cli_shorthand_reads_process_arguments(monkeypatch):
     calls = []
-    monkeypatch.setattr(cli.sys, "argv", ["molnova", "input/egfr.toml"])
+    monkeypatch.setattr(cli.sys, "argv", ["graft", "input/egfr.toml"])
     monkeypatch.setattr(cli, "driver_main", lambda args: calls.append(args))
     cli.main()
     assert calls == [["input/egfr.toml", "--poll-interval", "30"]]
@@ -215,7 +215,7 @@ def test_cli_shorthand_reads_process_arguments(monkeypatch):
 @pytest.mark.parametrize('command', ['run', 'shorthand', 'generate'])
 @pytest.mark.parametrize('override', [None, '[*:0]c1ccc([*:1])cc1'])
 def test_cli_elite_mcs_reaches_generation_without_changing_toml(tmp_path, monkeypatch, command, override):
-    from molnova.stages import generate
+    from graft.stages import generate
 
     toml = tmp_path / 'project.toml'
     supplied = '[*:0]Oc1ccc([*:1])cc1'
@@ -228,7 +228,7 @@ def test_cli_elite_mcs_reaches_generation_without_changing_toml(tmp_path, monkey
 
     monkeypatch.setattr(_core, 'initialize_project_database', initialize)
     monkeypatch.setattr(driver, 'reference_work_pending', lambda args: False)
-    monkeypatch.setattr(driver, 'build_stages', lambda *args: [('generate', 'molnova.stages.generate')])
+    monkeypatch.setattr(driver, 'build_stages', lambda *args: [('generate', 'graft.stages.generate')])
     monkeypatch.setattr(database, 'stage_completion_reason', lambda *args: None)
     seen = []
     monkeypatch.setattr(generate, '_run_stage',
@@ -275,21 +275,21 @@ def test_combichem_configuration_needs_no_prior_or_reinvent_environment(tmp_path
 
 @pytest.mark.parametrize('value', ['', ' ', True, 17])
 def test_invalid_sidechain_library_config(tmp_path, value):
-    from molnova.config import generation_settings
+    from graft.config import generation_settings
     with pytest.raises(ValueError, match='sidechain-library'):
         generation_settings({'sidechain-library': value}, tmp_path)
 
 
 @pytest.mark.parametrize('value', [0, -1, True, '1000'])
 def test_invalid_combichem_batch_size(tmp_path, value):
-    from molnova.config import generation_settings
+    from graft.config import generation_settings
     with pytest.raises(ValueError, match='sample-size'):
         generation_settings({'sidechain-library': 'edges.smi', 'sample-size': value}, tmp_path)
 
 
 @pytest.mark.parametrize('value', [0, -1, True, False, 10.0, '10'])
 def test_invalid_sidechain_heavy_atom_limit(tmp_path, value):
-    from molnova.config import generation_settings
+    from graft.config import generation_settings
     with pytest.raises(ValueError, match='sidechain-max-heavy-atoms'):
         generation_settings({'sidechain-max-heavy-atoms': value}, tmp_path)
 
@@ -311,7 +311,7 @@ def test_prime_gbsa_flexdist_configuration(tmp_path, extra, expected):
 
 @pytest.mark.parametrize('value', [-1, True, False, '6.0', float('nan'), float('inf'), -float('inf'), None])
 def test_prime_gbsa_flexdist_rejects_invalid_values(value):
-    from molnova.config import prime_gbsa_flexdist
+    from graft.config import prime_gbsa_flexdist
     with pytest.raises(ValueError, match='prime-gbsa-flexdist'):
         prime_gbsa_flexdist({'prime-gbsa-flexdist': value})
 
@@ -374,7 +374,7 @@ def test_glide_job_timeout_config(tmp_path, value):
 
 @pytest.mark.parametrize('value', [-1, True, 1.5, '1800'])
 def test_glide_job_timeout_rejects_invalid_values(value):
-    from molnova.config import glide_job_timeout
+    from graft.config import glide_job_timeout
     with pytest.raises(ValueError, match='glide-job-timeout'):
         glide_job_timeout({'glide-job-timeout': value})
 
@@ -395,6 +395,6 @@ def test_log_level_configuration(tmp_path, extra, expected):
     {'log_level': 1, 'log-level': 3},
 ])
 def test_log_level_rejects_invalid_configuration(settings):
-    from molnova.config import log_level
+    from graft.config import log_level
     with pytest.raises(ValueError, match='log.level'):
         log_level(settings)

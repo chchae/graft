@@ -3,8 +3,8 @@ import sys
 
 import pytest
 
-from molnova import schrodinger_retry as retry
-from molnova.config import prime_gbsa_license_retry_settings
+from graft import schrodinger_retry as retry
+from graft.config import prime_gbsa_license_retry_settings
 
 
 def test_real_command_retries_license_failure_then_succeeds(tmp_path, monkeypatch):

@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 from rdkit import Chem
 
-from molnova import _core, database
-from molnova.chemistry.scaffold import prepare_iteration_scaffold, log_iteration_mcs, mcs_display_summary
-from molnova.stages import generate, glide
+from graft import _core, database
+from graft.chemistry.scaffold import prepare_iteration_scaffold, log_iteration_mcs, mcs_display_summary
+from graft.stages import generate, glide
 
 
 @pytest.fixture
@@ -391,7 +391,7 @@ def test_project_initialization_defers_core_calculations(project, monkeypatch, s
 @pytest.mark.parametrize('supplied', [None, '[*:0]c1ccc([*:1])cc1'])
 def test_default_log_shows_initial_and_elite_cores_on_create_and_resume(
         project, monkeypatch, capsys, supplied):
-    from molnova.stages import _logging
+    from graft.stages import _logging
     token = _logging.set_log_level(1)
     try:
         project.iteration_mcs = True
@@ -576,7 +576,7 @@ def test_first_iteration_uses_explicit_elite_core_instead_of_reference_core(proj
 
 @pytest.mark.parametrize('value', ['', '  ', True, 3, []])
 def test_invalid_elite_mcs_config(value):
-    from molnova.config import elite_mcs
+    from graft.config import elite_mcs
     with pytest.raises(ValueError, match='elite-mcs'):
         elite_mcs({'elite-mcs': value})
 
@@ -605,7 +605,7 @@ reference-mcs = "c1ccccc1"
 
 
 def test_iteration_zero_saves_reference_as_initial_elite_fallback(project):
-    from molnova.chemistry.scaffold import _initial_scaffold
+    from graft.chemistry.scaffold import _initial_scaffold
     project.initial_mcs_smarts = '[*:0]c1ccc([*:1])cc1'
     with database.connect(project.db_path) as conn:
         conn.execute('UPDATE compound SET iteration=2 WHERE iteration=1')
@@ -621,7 +621,7 @@ def test_iteration_zero_saves_reference_as_initial_elite_fallback(project):
 
 
 def test_iteration_zero_preserves_explicit_initial_elite_input(project):
-    from molnova.chemistry.scaffold import _initial_scaffold
+    from graft.chemistry.scaffold import _initial_scaffold
     project.initial_mcs_smarts = 'c1ccccc1'
     project.elite_mcs_smarts = '[*:0]Oc1ccc([*:1])cc1'
     saved = _initial_scaffold(project)
@@ -774,7 +774,7 @@ def test_fixed_mode_still_checks_preceding_iteration_and_docking_compatibility(p
 
 @pytest.mark.parametrize('value', [1, 0, 'true', 'false', None])
 def test_invalid_fixed_flag(value):
-    from molnova.config import elite_mcs_fixed
+    from graft.config import elite_mcs_fixed
     with pytest.raises(ValueError, match='elite-mcs-fixed'):
         elite_mcs_fixed({'elite-mcs-fixed': value})
 

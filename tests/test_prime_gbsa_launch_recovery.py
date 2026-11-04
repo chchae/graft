@@ -6,8 +6,8 @@ import time
 from pathlib import Path
 
 import pytest
-from molnova import prime_gbsa_async as prime, schrodinger_guard as guard
-from molnova.schrodinger_retry import _run_attempt
+from graft import prime_gbsa_async as prime, schrodinger_guard as guard
+from graft.schrodinger_retry import _run_attempt
 
 
 def record(tmp_path):

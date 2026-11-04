@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
-from molnova import glide_recovery as recovery, schrodinger_guard as guard
-from molnova.stages import glide
-from molnova import prime_gbsa_async as prime
+from graft import glide_recovery as recovery, schrodinger_guard as guard
+from graft.stages import glide
+from graft import prime_gbsa_async as prime
 
 
 def files(tmp_path):
@@ -100,7 +100,7 @@ def test_changed_input_never_deletes_live_or_uncertain_job_artifacts(tmp_path):
 @pytest.mark.parametrize('timeout', [0, 1800])
 def test_stage_does_not_import_partial_output_or_mark_failed_from_child_log(tmp_path,monkeypatch,timeout):
     import sqlite3
-    from molnova import _core as c
+    from graft import _core as c
     db=tmp_path/'results.sqlite'
     with sqlite3.connect(db) as conn:
         c.create_sqlite_schema(conn)

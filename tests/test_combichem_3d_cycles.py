@@ -11,16 +11,16 @@ import time
 import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from molnova import database
-from molnova.config import combichem_3d_settings
-from molnova.stages import combichem_3d as stage
-from molnova.chemistry.combichem3d import cycles, frames, history as provenance
-from molnova.chemistry.combichem3d.assembly import assemble, growth_sites
-from molnova.chemistry.combichem3d.library import load_library,candidate_pools,combination_at
-from molnova.chemistry.combichem3d.clashes import BumpChecker,load_receptor
-from molnova.chemistry.combichem3d.output import export_results
-from molnova.chemistry.combichem3d.attachment_policy import root_for_site, balanced_sites, growth_available, initial_attachment_spec
-from molnova.chemistry.combichem3d.analysis import attachment_display, final_analysis_lines
+from graft import database
+from graft.config import combichem_3d_settings
+from graft.stages import combichem_3d as stage
+from graft.chemistry.combichem3d import cycles, frames, history as provenance
+from graft.chemistry.combichem3d.assembly import assemble, growth_sites
+from graft.chemistry.combichem3d.library import load_library,candidate_pools,combination_at
+from graft.chemistry.combichem3d.clashes import BumpChecker,load_receptor
+from graft.chemistry.combichem3d.output import export_results
+from graft.chemistry.combichem3d.attachment_policy import root_for_site, balanced_sites, growth_available, initial_attachment_spec
+from graft.chemistry.combichem3d.analysis import attachment_display, final_analysis_lines
 
 
 @pytest.fixture
@@ -410,11 +410,11 @@ def test_real_two_cycle_search_starts_at_mcs_and_ignores_target_when_enumerating
     assert all(json.loads(r['history'])['constraint_reference']['record']==1 for r in parents if r['generated'])
     # Exported integer atom tags survive SDF loading, including older atoms.
     for saved in Chem.SDMolSupplier(str(Path(cfg['out-dir'])/'poses.sdf'),removeHs=False):
-        assert saved is not None and saved.HasProp('atom.iprop.molnova_added_cycle')
+        assert saved is not None and saved.HasProp('atom.iprop.graft_added_cycle')
         h=json.loads(saved.GetProp('history'))
         for a in h['atoms']:
-            assert saved.GetAtomWithIdx(a['index']).GetIntProp('molnova_added_cycle')==a['added_iteration']
-        assert all(not a.HasProp('molnova_added_cycle') for a in saved.GetAtoms() if a.GetAtomicNum()==1)
+            assert saved.GetAtomWithIdx(a['index']).GetIntProp('graft_added_cycle')==a['added_iteration']
+        assert all(not a.HasProp('graft_added_cycle') for a in saved.GetAtoms() if a.GetAtomicNum()==1)
 
 
 @pytest.mark.parametrize('include_h',[False,True])
@@ -453,12 +453,12 @@ def test_partial_growth_keeps_old_atom_cycles_and_only_counts_actual_additions(p
     old={a['uid']:a['added_iteration'] for a in h['atoms']}
     for atom in product.GetAtoms():
         expected=old.get(atom.GetProp('_mn_uid'),2)
-        assert atom.GetIntProp('molnova_added_cycle')==expected
-    assert sum(a.GetIntProp('molnova_added_cycle')==2 for a in product.GetAtoms())==2
+        assert atom.GetIntProp('graft_added_cycle')==expected
+    assert sum(a.GetIntProp('graft_added_cycle')==2 for a in product.GetAtoms())==2
     noop,noop_history=assemble(mol,h,sites,['-H']*3,'all-noop')
     assert provenance.canonical_smiles(noop)==provenance.canonical_smiles(mol)
     assert noop_history['growth_counts']==h['growth_counts']
-    assert {a.GetIntProp('molnova_added_cycle') for a in noop.GetAtoms()}=={0,1}
+    assert {a.GetIntProp('graft_added_cycle') for a in noop.GetAtoms()}=={0,1}
 
 
 def test_prepared_mcs_and_probe_results_survive_interruption(project,monkeypatch):

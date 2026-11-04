@@ -6,8 +6,8 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
-from molnova import _core as c, database, driver, prime_gbsa_queue, prime_gbsa_batch, prime_gbsa_async
-from molnova.stages import prime_gbsa
+from graft import _core as c, database, driver, prime_gbsa_queue, prime_gbsa_batch, prime_gbsa_async
+from graft.stages import prime_gbsa
 
 
 def project(tmp_path):
@@ -188,7 +188,7 @@ def test_driver_reference_stage_runs_without_generation(tmp_path, monkeypatch, r
     def supervise(args, project, iteration, stages, *other):
         calls.append(iteration)
         if iteration == 0:
-            assert stages == [('prime_gbsa', 'molnova.stages.prime_gbsa')]
+            assert stages == [('prime_gbsa', 'graft.stages.prime_gbsa')]
             with database.connect(args.db_path) as conn:
                 conn.execute("UPDATE compound SET prime_gbsa_score=-30 WHERE iteration=0 AND prime_gbsa_score IS NULL")
         return True

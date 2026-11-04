@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core
-from molnova.driver import build_stages
-from molnova.stages import synthetic_feasibility
-from molnova.chemistry.sa_score import calculate_sa_score
+from graft import _core
+from graft.driver import build_stages
+from graft.stages import synthetic_feasibility
+from graft.chemistry.sa_score import calculate_sa_score
 
 
 def _project(tmp_path):
@@ -234,7 +234,7 @@ def test_import_rejects_invalid_batch_without_partial_updates(tmp_path, case):
 
 
 def test_import_cli_forwards_result_path(monkeypatch):
-    from molnova import cli
+    from graft import cli
     calls = []
     monkeypatch.setattr(synthetic_feasibility, "main", lambda args: calls.append(args))
     cli.main(["synthetic-feasibility", "egfr.toml", "--iteration", "1", "--import-results", "results.json.gz"])
@@ -242,7 +242,7 @@ def test_import_cli_forwards_result_path(monkeypatch):
 
 
 def test_remote_aizynth_roundtrip_persists_local_sqlite(tmp_path, monkeypatch):
-    from molnova import aizynth_remote
+    from graft import aizynth_remote
     args = _project(tmp_path)
     env = tmp_path / "remote env"
     (env / "bin").mkdir(parents=True)
@@ -274,7 +274,7 @@ def test_remote_aizynth_roundtrip_persists_local_sqlite(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("failure", ["upload", "execution", "download", "empty"])
 def test_remote_failure_restores_claims_and_rejects_stale_results(tmp_path, monkeypatch, failure):
-    from molnova import aizynth_remote
+    from graft import aizynth_remote
     args = _project(tmp_path)
     args.remote_aizynth = {"host": "tensor", "env": "/remote/env",
                            "work_dir": "/remote/jobs", "config": "/remote/config.yml"}

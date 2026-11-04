@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, driver, cli, schrodinger_guard as guard
-from molnova.states import CompoundState as State
+from graft import _core, database, driver, cli, schrodinger_guard as guard
+from graft.states import CompoundState as State
 
 
 def project(tmp_path, state=State.GENERATED, iteration=3):
@@ -102,7 +102,7 @@ def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatc
     monkeypatch.setattr(database, 'stage_completion_reason',
                         lambda *a: reason)
     assert not driver.supervise_iteration(
-        args, tmp_path/'p.toml', 60, [(stage, f'molnova.stages.{stage.replace("-", "_")}')],
+        args, tmp_path/'p.toml', 60, [(stage, f'graft.stages.{stage.replace("-", "_")}')],
         30, driver.StopFlag(), once=True,
     )
     assert (f'iteration 60: {stage} pending: {reason}; '
@@ -230,8 +230,8 @@ def test_saved_glide_child_blocks_even_when_list_is_empty(tmp_path, monkeypatch)
 
 @pytest.mark.parametrize('status,removed', [('RUNNING',False), ('DONE',True)])
 def test_ligprep_postcommit_restart_retires_only_terminal_record(tmp_path, monkeypatch, status, removed):
-    from molnova.stages import ligprep
-    from molnova.ligprep_recovery import _save, load_job
+    from graft.stages import ligprep
+    from graft.ligprep_recovery import _save, load_job
     args = project(tmp_path, State.LIGPREPPED)
     args.synthetic_feasibility_enabled = False
     directory = tmp_path/'iter3/ligprep'; directory.mkdir(parents=True)
@@ -317,9 +317,9 @@ def test_enabling_md_at_runtime_supervises_it_before_fep_or_exit(tmp_path, monke
     config.write_text('md-gbsa = '+('true' if initial_stages=='fep' else 'false')+'\n')
     stages = []
     if initial_stages.startswith('prime'):
-        stages.append(('prime_gbsa','molnova.stages.prime_gbsa'))
+        stages.append(('prime_gbsa','graft.stages.prime_gbsa'))
     if 'fep' in initial_stages:
-        stages.append(('fep','molnova.stages.fep'))
+        stages.append(('fep','graft.stages.fep'))
     calls=[]
     class Stop(driver.StopFlag):
         def wait(self, seconds):
@@ -367,5 +367,5 @@ def test_md_enabled_during_fep_poll_returns_to_prerequisite(tmp_path, monkeypatc
     class Stop(driver.StopFlag):
         def wait(self,seconds):
             self.set()
-    assert not driver.supervise_iteration(args,config,3,[('fep','molnova.stages.fep')],30,Stop())
+    assert not driver.supervise_iteration(args,config,3,[('fep','graft.stages.fep')],30,Stop())
     assert calls==['fep','md-gbsa']

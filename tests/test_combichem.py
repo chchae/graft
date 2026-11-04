@@ -10,11 +10,11 @@ from types import SimpleNamespace
 import pytest
 from rdkit import Chem
 
-from molnova import _core, cli, database, driver
-from molnova.chemistry import combichem
-from molnova.chemistry.descriptors import calculate_rdkit_descriptors
-from molnova.chemistry.scaffold import prepare_iteration_scaffold
-from molnova.stages import generate
+from graft import _core, cli, database, driver
+from graft.chemistry import combichem
+from graft.chemistry.descriptors import calculate_rdkit_descriptors
+from graft.chemistry.scaffold import prepare_iteration_scaffold
+from graft.stages import generate
 
 
 def test_library_attachment_validation_deduplication_and_audit(tmp_path):
@@ -187,7 +187,7 @@ def adaptive_project(project, monkeypatch):
 
 
 def test_new_combichem_iteration_clears_old_outputs_before_assembly(project, monkeypatch):
-    from molnova import schrodinger_guard
+    from graft import schrodinger_guard
     with database.connect(project.db_path) as conn:
         conn.execute('DELETE FROM iteration_workspace WHERE iteration=1')
     project.schrodinger = Path('/suite')
@@ -1051,7 +1051,7 @@ sidechain-library = "edges.smi"
 ''')
     monkeypatch.setattr(_core, 'initialize_project_database', lambda **k: None)
     monkeypatch.setattr(driver, 'reference_work_pending', lambda args: False)
-    monkeypatch.setattr(driver, 'build_stages', lambda *args: [('generate', 'molnova.stages.generate')])
+    monkeypatch.setattr(driver, 'build_stages', lambda *args: [('generate', 'graft.stages.generate')])
     def worker(stage, cmd, cwd, stop):
         if stage == 'report':
             return 0

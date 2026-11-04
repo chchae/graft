@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, driver, md_gbsa, schrodinger_guard as guard
-from molnova.paths import stage_directory
-from molnova.states import CompoundState as State
+from graft import _core, database, driver, md_gbsa, schrodinger_guard as guard
+from graft.paths import stage_directory
+from graft.states import CompoundState as State
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def test_retry_resolves_inside_cycle_and_never_reopens_on_restart(project, monke
             answer = dict(status='failed', phase='md', error='verified terminal native failure')
         else:
             answer = dict(ensemble(cid), status='done', protocol=settings['protocol'])
-        return 'MOLNOVA_MD=' + json.dumps(answer)
+        return 'GRAFT_MD=' + json.dumps(answer)
     monkeypatch.setattr(md_gbsa, 'remote_call', poll)
     md_gbsa.run(args, 1)
     assert database.score_retry_requests(args.db_path, 1, 'md_gbsa')
@@ -116,7 +116,7 @@ def test_failed_state_before_retry_request_cannot_finish_or_export(project):
 
 def test_one_driver_invocation_waits_for_retry_before_finishing_and_exporting(project, monkeypatch):
     args, settings = project
-    from molnova.stages import fep
+    from graft.stages import fep
     calls = []
     md_polls = []
     monkeypatch.setattr(driver, 'external_completion_reason', lambda *a: None)
@@ -128,7 +128,7 @@ def test_one_driver_invocation_waits_for_retry_before_finishing_and_exporting(pr
             answer = dict(status='failed', phase='md', error='verified terminal failure')
         else:
             answer = dict(ensemble(cid), status='done', protocol=settings['protocol'])
-        return 'MOLNOVA_MD=' + json.dumps(answer)
+        return 'GRAFT_MD=' + json.dumps(answer)
     monkeypatch.setattr(md_gbsa, 'remote_call', poll)
     def process(stage, *unused):
         calls.append(stage)
@@ -146,7 +146,7 @@ def test_one_driver_invocation_waits_for_retry_before_finishing_and_exporting(pr
         def wait(self, seconds):
             pass
     assert driver.supervise_iteration(args, args.output/'project.toml', 1,
-        [('md-gbsa', 'molnova.stages.md_gbsa'), ('fep', 'molnova.stages.fep')], 1, Stop())
+        [('md-gbsa', 'graft.stages.md_gbsa'), ('fep', 'graft.stages.fep')], 1, Stop())
     assert calls == ['md-gbsa', 'md-gbsa', 'fep']
     assert md_polls == [1, 2, 1]
     assert (stage_directory(args.output, 1, 'fep')/'fep_candidates.tsv').is_file()
@@ -176,7 +176,7 @@ def test_legacy_live_retry_is_adopted_without_third_attempt_and_early_finish_is_
 @pytest.mark.parametrize('imported', [False, True])
 def test_early_fep_selection_refreshed_after_resolution_or_protected_if_imported(project, imported):
     args, _ = project
-    from molnova.stages import fep
+    from graft.stages import fep
     database.store_md_gbsa_result(args.db_path, 1, 2, ensemble(2, -70))
     with database.connect(args.db_path) as conn:
         conn.execute("UPDATE compound SET state='failed',failed_stage='md_gbsa' WHERE id=1")

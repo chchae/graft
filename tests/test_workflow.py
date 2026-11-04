@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core
-from molnova.driver import supervise_iteration, StopFlag
-from molnova.stages.fep import import_scores
+from graft import _core
+from graft.driver import supervise_iteration, StopFlag
+from graft.stages.fep import import_scores
 
 
 def _fep_args(tmp_path, fep_input_count=2):
@@ -69,10 +69,10 @@ def test_one_shot_worker_does_not_retry_failure(tmp_path, monkeypatch):
         calls.append(args)
         return 1
 
-    monkeypatch.setattr("molnova.driver.stream_process", failed_process)
+    monkeypatch.setattr("graft.driver.stream_process", failed_process)
     assert not supervise_iteration(
         _fep_args(tmp_path)[0], Path("project.toml"), 1,
-        [("generate", "molnova.stages.generate")], 1, StopFlag(), True,
+        [("generate", "graft.stages.generate")], 1, StopFlag(), True,
     )
 
     assert len(calls) == 1

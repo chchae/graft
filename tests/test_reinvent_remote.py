@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from molnova import _core, reinvent_remote
+from graft import _core, reinvent_remote
 
 
 REMOTE = {"host": "tensor", "env": "/remote/env", "work_dir": "/remote/jobs"}
@@ -212,7 +212,7 @@ synthetic-feasibility-enabled = false
     ("libinvent-prior", "relative/prior"),
 ])
 def test_invalid_remote_configuration(key, value):
-    from molnova.config import remote_reinvent_settings
+    from graft.config import remote_reinvent_settings
     settings = {"reinvent-ssh-host": "tensor", "reinvent-remote-env": "/remote/env",
                 "reinvent-remote-work-dir": "/remote/jobs", "libinvent-prior": "/remote/prior"}
     settings[key] = value

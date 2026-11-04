@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.config import glide_group_resources, schrodinger_job_options
-from molnova.glide_recovery import save_record, load_record
-from molnova.stages import glide
+from graft import _core, database
+from graft.config import glide_group_resources, schrodinger_job_options
+from graft.glide_recovery import save_record, load_record
+from graft.stages import glide
 
 
 def requested_slots(host):

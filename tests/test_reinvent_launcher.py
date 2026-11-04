@@ -1,7 +1,7 @@
 """Exercise the actual optional REINVENT network when its runtime is available."""
 import pytest
 
-from molnova.reinvent_launcher import preserve_encoder_dimensions
+from graft.reinvent_launcher import preserve_encoder_dimensions
 
 
 @pytest.mark.parametrize("num_layers", [1, 2])

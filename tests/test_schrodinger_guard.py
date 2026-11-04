@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import json
 import pytest
-from molnova import schrodinger_guard as guard
+from graft import schrodinger_guard as guard
 
 
 @pytest.mark.parametrize('job', [

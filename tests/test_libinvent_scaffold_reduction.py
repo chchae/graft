@@ -3,10 +3,10 @@ import json
 import pytest
 from rdkit import Chem
 
-from molnova import _core, database
-from molnova.chemistry.combichem import assemble
-from molnova.chemistry.libinvent_scaffold import reduce_to_two_attachments
-from molnova.chemistry.scaffold import prepare_iteration_scaffold
+from graft import _core, database
+from graft.chemistry.combichem import assemble
+from graft.chemistry.libinvent_scaffold import reduce_to_two_attachments
+from graft.chemistry.scaffold import prepare_iteration_scaffold
 from test_iteration_scaffold import project
 
 
@@ -114,7 +114,7 @@ def seed(project, smiles, previous=PREVIOUS):
     database.iteration_scaffold(project.db_path, 0, dict(mcs_smarts=docking,
                                 source='user_initial_mcs', initial_elite_mcs=None))
     # Retain the actual concrete previous core, without its dummies.
-    from molnova.chemistry.combichem import _retained_core_query
+    from graft.chemistry.combichem import _retained_core_query
     core = Chem.MolToSmarts(_retained_core_query(Chem.MolFromSmiles(previous)))
     saved = dict(mcs_smarts=core, scaffold_smiles=previous, source='previous_iteration_elites', source_ids=[])
     database.iteration_scaffold(project.db_path, 1, saved)
@@ -158,7 +158,7 @@ def test_real_iteration8_elites_reuse_previous_before_the_three_way_branch(proje
 def test_supplied_core_is_not_automatically_reduced(project, monkeypatch):
     elites, _ = seed(project, BRANCHED)
     project.elite_mcs_smarts = INFERRED
-    monkeypatch.setattr('molnova.chemistry.libinvent_scaffold.reduce_to_two_attachments',
+    monkeypatch.setattr('graft.chemistry.libinvent_scaffold.reduce_to_two_attachments',
                         lambda *a: pytest.fail('supplied core changed'))
     prepare_iteration_scaffold(project, 2, elites, create=True)
     assert database.iteration_scaffold(project.db_path, 2)['source'] == 'user_elite_mcs'

@@ -1,4 +1,4 @@
-from molnova.states import CompoundState
+from graft.states import CompoundState
 
 
 def test_state_values():

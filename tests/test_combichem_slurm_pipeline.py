@@ -11,15 +11,15 @@ import threading
 from unittest.mock import Mock
 
 import pytest
-from molnova import database
-from molnova.config import combichem_3d_settings
-from molnova.stages import combichem_3d as stage
-from molnova.stages import combichem_product as product
-from molnova.stages import combichem_slurm as slurm
-from molnova.stages import combichem_slurm_worker as worker
-from molnova.chemistry.combichem3d.clashes import BumpChecker,load_receptor
-from molnova.chemistry.combichem3d.evaluation import Evaluator
-from molnova.chemistry.combichem3d.frames import ReferencePoses
+from graft import database
+from graft.config import combichem_3d_settings
+from graft.stages import combichem_3d as stage
+from graft.stages import combichem_product as product
+from graft.stages import combichem_slurm as slurm
+from graft.stages import combichem_slurm_worker as worker
+from graft.chemistry.combichem3d.clashes import BumpChecker,load_receptor
+from graft.chemistry.combichem3d.evaluation import Evaluator
+from graft.chemistry.combichem3d.frames import ReferencePoses
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def project(tmp_path):
 
 @contextmanager
 def node(cfg, tmp_path, monkeypatch):
-    from molnova.stages.combichem_slurm_pool import main
+    from graft.stages.combichem_slurm_pool import main
     root=tmp_path/'pools'/socket.gethostname();root.mkdir(parents=True)
     (root/'token').write_text('test-token')
     cfg.update({'slurm-runtime-dir':str(tmp_path),'slurm-job-id':'42'})
@@ -176,7 +176,7 @@ def test_received_results_survive_failed_batch_and_resume(project,tmp_path,monke
             if fault=='persistence':
                 journals=list((Path(db).parent/'result-buffer').glob('*.jsonl'))
                 assert journals
-                from molnova.stages.combichem_buffer import recover
+                from graft.stages.combichem_buffer import recover
                 recover(db)
             saved=database.growth_run_info(db)['attempted']
             assert saved== (3 if fault=='disconnect' else 4)
@@ -190,11 +190,14 @@ def test_received_results_survive_failed_batch_and_resume(project,tmp_path,monke
             assert all(r['state']=='done' for r in database.growth_rows(db,'combichem3d_batch'))
 
 
-def test_supervisor_uses_local_owner_count_and_preserves_inherited_stage_lock(project,tmp_path,monkeypatch):
-    from molnova.stages import combichem_distributed as distributed
+@pytest.mark.parametrize('automatic',[False,True])
+def test_supervisor_uses_local_owner_count_and_preserves_inherited_stage_lock(project,tmp_path,monkeypatch,automatic):
+    from graft.stages import combichem_distributed as distributed
     _,cfg=project
     cfg['max-iteration']=1
+    if automatic:cfg.pop('worker-hosts')
     db,first=stage.prepare_project(cfg)
+    if automatic:cfg['slurm-allocated-hosts']={socket.gethostname():2}
     with node(cfg,tmp_path,monkeypatch):
         monkeypatch.setattr(stage,'worker_loop',distributed.worker_loop)
         monkeypatch.setattr(product,'evaluate_product',Mock(side_effect=AssertionError('No local product work')))

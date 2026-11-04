@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import amber_runner
+from graft import amber_runner
 
 
 FINAL = 'FINAL RESULTS\n\n NSTEP ENERGY RMS GMAX NAME NUMBER\n 500 -123.4 0.01 0.05 C1 1\n'

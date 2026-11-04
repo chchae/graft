@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, amber_gbsa, database
-from molnova.stages import amber_gbsa as stage
+from graft import _core, amber_gbsa, database
+from graft.stages import amber_gbsa as stage
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def finish(db, ids):
 
 @pytest.mark.parametrize('enabled', [False, True])
 def test_mode_defaults_select_prime_50_or_amber_500_then_prime_50(population, tmp_path, enabled):
-    from molnova.config import amber_settings
+    from graft.config import amber_settings
     settings = amber_settings({'out-dir': 'output', 'amber_gbsa': enabled}, tmp_path)
     args = SimpleNamespace(**settings)
     keep = database.amber_keep_count(args)

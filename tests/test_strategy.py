@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, driver
-from molnova.chemistry.druglike import filter_druglike
-from molnova.stages import druglike, generate, fep
+from graft import _core, database, driver
+from graft.chemistry.druglike import filter_druglike
+from graft.stages import druglike, generate, fep
 
 
 @pytest.fixture
@@ -191,7 +191,7 @@ def test_amber_failure_history_survives_prime_retry_and_completion(ranked_projec
 
 
 def test_druglike_results_do_not_depend_on_generation_batch_size(raw_project):
-    from molnova.chemistry.descriptors import calculate_rdkit_descriptors
+    from graft.chemistry.descriptors import calculate_rdkit_descriptors
     molecules = ['CCO','CCN','c1ccccc1','CC(=O)O']
     first = raw_project.db_path
     second = raw_project.output/'second.sqlite'

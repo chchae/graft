@@ -1,11 +1,17 @@
-# MolNova
+# Graft
+
+The Python package and command are `graft`. Install with `python -m pip install -e .`,
+then use `graft --help` or `python -m graft --help`.
+The repository is [chchae/graft](https://github.com/chchae/graft).
+Existing calculation outputs and submitted jobs are not migrated by the rename;
+review saved helpers, metadata and submission locks before resuming an older run.
 
 ## Confirmed calculation naming (2026-10-21)
 
 The user requested fresh projects and waived compatibility with prior work for
 this rename. All Prime stage identifiers now use `prime_gbsa`, including
 `prime_gbsa_score`, `prime_gbsa_running`, `prime_gbsa_done`, failure stage
-`prime_gbsa`, CLI `molnova prime_gbsa`, and directory `08-prime_gbsa`.
+`prime_gbsa`, CLI `graft prime_gbsa`, and directory `08-prime_gbsa`.
 The user subsequently requested the same corrected spelling everywhere,
 including Python module names, states, CLI, TOML, manifests and output paths.
 TOML uses `prime-gbsa-input-count`, `prime-gbsa-flexdist`,
@@ -13,7 +19,7 @@ TOML uses `prime-gbsa-input-count`, `prime-gbsa-flexdist`,
 Other renamed Prime keys are `prime-gbsa-elite-count`, `prime-gbsa-receptor`,
 and `prime-gbsa-cpus`. Internal Python settings retain `prime_gbsa_*`.
 Native job basenames are `ligprep`, `glide`, and `prime_gbsa`; new Amber
-Slurm names are `amber-<UUID>` without `molnova-` or `run-`.
+Slurm names are `amber-<UUID>` without `graft-` or `run-`.
 The external executable `prime_mmgbsa`, vendor Maestro property names such as
 `r_psp_MMGBSA_dG_Bind`, and native JobServer recognition remain unchanged.
 This is a naming change; selection, scientific parameters, seven-job Prime
@@ -31,11 +37,11 @@ for restart; historical path examples below refer to that layout.
 The new default Amber receptor path is `output/iter00/08-prime_gbsa/receptor.maegz`.
 
 
-MolNova is a modular iterative lead-optimization pipeline integrating REINVENT4/LibInvent, Schrödinger LigPrep and Glide, Prime MM-GBSA, SQLite workflow state, and FEP staging.
+Graft is a modular iterative lead-optimization pipeline integrating REINVENT4/LibInvent, Schrödinger LigPrep and Glide, Prime MM-GBSA, SQLite workflow state, and FEP staging.
 
 ## Local COMBICHEM 3D growth
 
-`molnova combichem-3d input.toml` extracts the starting frame from `reference-mcs`;
+`graft combichem-3d input.toml` extracts the starting frame from `reference-mcs`;
 reference ligands supply coordinates only. Each cycle enumerates the configured
 attachment-site Cartesian product, filters constrained poses against the receptor,
 ranks passing molecules by QED, then updates the next frame with elite-MCS
@@ -49,15 +55,15 @@ a cycle/frame/attachment analysis appended to its log.
 Later cycles include leaving any selected site unchanged, so partial extensions
 are enumerated alongside full extensions. Probe and product searches relax old
 and new sidechains together around the original core, and exported SDF atoms
-retain their `molnova_added_cycle` provenance tags.
+retain their `graft_added_cycle` provenance tags.
 
 An optional [Slurm configuration](examples/combichem-3d/slurm-settings.example.toml)
 keeps coordination, SQLite and result storage on the invoking host while native
 cpu1/cpu2 calculation pools perform searches, methyl probes and elite-MCS.
 
 ```bash
-python examples/combichem-3d/make_cycle_inputs.py /tmp/molnova-frame-demo
-molnova combichem-3d /tmp/molnova-frame-demo/grow.toml
+python examples/combichem-3d/make_cycle_inputs.py /tmp/graft-frame-demo
+graft combichem-3d /tmp/graft-frame-demo/grow.toml
 ```
 
 The example is synthetic, with a distant single-atom receptor; it does not validate
@@ -67,7 +73,7 @@ Older frontier regression examples explicitly select `growth-mode="frontier"`.
 
 ## Iteration landscape reports
 
-`molnova run project.toml` automatically refreshes chemical-space, substituent
+`graft run project.toml` automatically refreshes chemical-space, substituent
 and property/score reports after verified FEP candidate export. With FEP disabled,
 reports refresh after Prime GBSA completes instead. It also
 writes cumulative numerical summaries
@@ -81,8 +87,8 @@ alongside the HTML when moving reports. All files work offline.
 Generate a report from an existing project without running any calculator:
 
 ```bash
-molnova report project.toml
-molnova report project.toml --iteration 3
+graft report project.toml
+graft report project.toml --iteration 3
 ```
 
 The report offers iteration/score coloring, molecule structures on click,
@@ -101,19 +107,19 @@ distribution-report = true              # default; false disables automatic repo
 ```
 
 Other stages and pending calculations do not trigger automatic reports. The
-former `distribution-report-interval` setting is ignored. Use `molnova report`
+former `distribution-report-interval` setting is ignored. Use `graft report`
 when you want to refresh later scores manually.
 
 Manual reporting only reads the existing SQLite database. It does not migrate
 schemas, recalculate missing properties, submit jobs or change compounds/scores.
 Report errors are logged and scientific supervision continues. Standalone stage
-commands can be followed by `molnova report` to refresh their results.
+commands can be followed by `graft report` to refresh their results.
 
 ## Install for development
 
 ```bash
 conda activate reinvent4
-cd MolNova
+cd graft
 pip install -e .
 ```
 
@@ -121,15 +127,15 @@ REINVENT4 and the Schrödinger Suite are external runtime dependencies and are i
 
 ## REINVENT4 on tensor over SSH
 
-Local Python runs MolNova; SSH runs REINVENT in the environment on tensor.
-The local environment needs MolNova's dependencies (including RDKit), but does
+Local Python runs Graft; SSH runs REINVENT in the environment on tensor.
+The local environment needs Graft's dependencies (including RDKit), but does
 not need a local REINVENT installation. Configure the project TOML:
 
 ```toml
 libinvent-prior = "/home1/astrazeneca/REINVENT/priors/libinvent.prior"
 reinvent-ssh-host = "tensor"
 reinvent-remote-env = "/home1/astrazeneca/REINVENT/env"
-reinvent-remote-work-dir = "/home1/astrazeneca/REINVENT/molnova-runs"
+reinvent-remote-work-dir = "/home1/astrazeneca/REINVENT/graft-runs"
 ```
 
 These three remote paths must be absolute paths on tensor. Other project paths
@@ -140,7 +146,7 @@ Verify noninteractive SSH authentication and run generation:
 
 ```bash
 ssh -o BatchMode=yes tensor hostname
-molnova generate /path/to/project.toml --iteration 1
+graft generate /path/to/project.toml --iteration 1
 ```
 
 From local Python, the same stage can be invoked as a subprocess:
@@ -150,12 +156,12 @@ import subprocess
 import sys
 
 subprocess.run(
-    [sys.executable, "-m", "molnova.stages.generate", "/path/to/project.toml"],
+    [sys.executable, "-m", "graft.stages.generate", "/path/to/project.toml"],
     check=True,
 )
 ```
 
-MolNova uploads scaffold/training inputs, prepends the remote environment's
+Graft uploads scaffold/training inputs, prepends the remote environment's
 `bin` directory to PATH, and executes its `reinvent` directly. Sampling and elite
 transfer learning both use SSH. Later iterations start TL from the original
 remote prior, retrieve the trained model, then use that model for sampling.
@@ -171,12 +177,12 @@ Remove `reinvent-ssh-host` to use a local `reinvent` executable and local prior.
 ## Run
 
 ```bash
-molnova input/egfr.toml
+graft input/egfr.toml
 # Equivalent explicit command:
-molnova run input/egfr.toml --iteration 1
+graft run input/egfr.toml --iteration 1
 ```
 
-Passing a TOML path alone starts the same supervisor as `molnova run` and accepts
+Passing a TOML path alone starts the same supervisor as `graft run` and accepts
 the same options, such as `--once` and `--poll-interval`.
 
 To permit iteration numbers up to 10, set `max-iteration = 10` in
@@ -193,16 +199,16 @@ MM-GBSA waits for all docking work in its iteration to finish:
 ```bash
 conda activate reinvent4
 export SCHRODINGER=/home1/schrodinger/2026-3
-cd /home/chchae/work/MolNova/examples
+cd /home/chchae/work/graft/examples
 mkdir -p output
-molnova egfr.toml --poll-interval 30 > output/egfr-run.log 2>&1
+graft egfr.toml --poll-interval 30 > output/egfr-run.log 2>&1
 ```
 
 Inspect progress from another terminal in the same environment and directory:
 
 ```bash
 tail -f output/egfr-run.log
-molnova status egfr.toml
+graft status egfr.toml
 ```
 
 The database and locks are in `examples/output/`. The single-thread driver runs
@@ -213,7 +219,7 @@ iteration, or the next new iteration, once at startup. It does not automatically
 advance to another iteration. `max-iteration` bounds explicit and new iteration
 numbers. Restart with the same `--iteration N` to resume from SQLite and saved JobIds.
 
-Before a new iteration's first generation, MolNova clears any leftover `iterN/`
+Before a new iteration's first generation, Graft clears any leftover `iterN/`
 files from the calculation path into `output/.previous/iterN-<timestamp>/` and
 starts in an empty directory. The archive preserves old results and does not
 reclaim disk space. Existing SQLite iterations and same-iteration restarts retain
@@ -234,18 +240,18 @@ submitted external jobs remain recoverable. FEP execution remains external; cand
 Run one stage independently:
 
 ```bash
-molnova generate egfr.toml --iteration 5
-molnova synthetic-feasibility egfr.toml --iteration 5
-molnova ligprep egfr.toml --iteration 5
-molnova glide egfr.toml --iteration 5
-molnova prime_gbsa egfr.toml --iteration 5
-molnova fep egfr.toml --iteration 5
+graft generate egfr.toml --iteration 5
+graft synthetic-feasibility egfr.toml --iteration 5
+graft ligprep egfr.toml --iteration 5
+graft glide egfr.toml --iteration 5
+graft prime_gbsa egfr.toml --iteration 5
+graft fep egfr.toml --iteration 5
 ```
 
 Inspect SQLite workflow state:
 
 ```bash
-molnova status egfr.toml
+graft status egfr.toml
 ```
 
 ## Project separation
@@ -270,7 +276,7 @@ Relative paths in each TOML are resolved relative to that TOML file.
 
 The project name defaults to the TOML filename without its extension:
 `egfr.toml` uses `egfr` and saves SQLite as `<out-dir>/egfr.sqlite`.
-For `molnova input/egfr.toml`, set `out-dir = "../output"` to save the database
+For `graft input/egfr.toml`, set `out-dir = "../output"` to save the database
 in `output/egfr.sqlite`. The output path resolves relative to the TOML file;
 directory names do not become part of the project name.
 The `project` key can be omitted; existing files with an explicit `project` name
@@ -322,7 +328,7 @@ this pass's newly persisted results. Level 2 retains detailed recovery/pending
 messages, and errors/reconciliation diagnostics remain visible at every level.
 
 The same setting applies to standalone stages. Amber native logs display after download rather than during remote execution. Native logs are retained;
-suppressed helper output is saved in `molnova_commands.log` under `out-dir` for reference import,
+suppressed helper output is saved in `graft_commands.log` under `out-dir` for reference import,
 and under the corresponding stage directory for calculations and generation. Launch output is saved
 in `prime_launch.log` and `glide_launch.log` in their work directories.
 Failures and tracebacks remain visible at every level. Polling, JobId recovery
@@ -386,8 +392,8 @@ exhausting all valid attachment combinations leaves generation incomplete.
 You can override TOML `elite-mcs` for an invocation from the command line:
 
 ```bash
-molnova run egfr.toml --iteration 49 --elite-mcs '[*:0]Oc1ccc([*:1])cc1'
-molnova generate egfr.toml --iteration 49 --elite-mcs '[*:0]Oc1ccc([*:1])cc1'
+graft run egfr.toml --iteration 49 --elite-mcs '[*:0]Oc1ccc([*:1])cc1'
+graft generate egfr.toml --iteration 49 --elite-mcs '[*:0]Oc1ccc([*:1])cc1'
 ```
 
 The TOML-only supervisor shorthand also accepts `--elite-mcs`. Quote the SMARTS
@@ -420,7 +426,7 @@ from that saved value. Completion gates
 and TL from the original prior remain unchanged.
 
 If a new automatic generation MCS has fewer than two attachment boundaries,
-MolNova checks the immediately preceding iteration's saved scaffold. It reuses
+Graft checks the immediately preceding iteration's saved scaffold. It reuses
 that core and its two attachment positions only if it retains the fixed docking
 core and decomposes every selected elite. Otherwise generation stops with a
 diagnostic. Supplied cores and other MCS errors do not trigger this fallback.
@@ -444,7 +450,7 @@ active input/result paths. A cached result alone cannot satisfy new work.
 Saved jobs from the same submission are recovered on restart; live or uncertain
 jobs retain their files until JobServer reconciliation establishes termination.
 For an iteration affected by the old missing-LigPrep-input bug, rerun
-`molnova run project.toml --iteration N`: LigPrep retries that specific unscored
+`graft run project.toml --iteration N`: LigPrep retries that specific unscored
 failure and rebuilds inputs for the current compound IDs. Existing scientific
 scores and unrelated terminal failures are preserved.
 
@@ -532,7 +538,7 @@ host name retains Schrödinger defaults (localhost normally uses one slot); add
 a `:N` suffix or stage CPU overrides to request multiple CPUs. Explicit slot
 counts on multiple host entries are summed for LigPrep and Glide job splitting.
 
-MM-GBSA uses a durable MolNova queue with at most **seven active single-compound
+MM-GBSA uses a durable Graft queue with at most **seven active single-compound
 Prime jobs across a project**, including jobs waiting for Slurm resources. Each
 job receives receptor + one best ligand pose and `-HOST <host> -NJOBS 1`; no
 multi-ligand JobDJ parent is launched for new work. Host `:N` and legacy
@@ -547,7 +553,7 @@ only the released slots. It never waits for the slowest compound. The supervisor
 polls MM-GBSA at most every five seconds (or the smaller requested interval);
 status queries, downloads and score extraction add to the observed refill delay.
 Workers still exit between polls. When the driver reaches MM-GBSA, `--once`
-launches up to seven jobs and exits if work remains; use `molnova run project.toml --iteration N` or repeat the stage command, to continue the queue.
+launches up to seven jobs and exits if work remains; use `graft run project.toml --iteration N` or repeat the stage command, to continue the queue.
 
 License backoff without a live/uncertain JobId releases its slot. Transient
 status/download failures and unknown launches retain their slot and submission
@@ -614,7 +620,7 @@ The EGFR example runs AiZynthFinder on tensor via SSH, using:
 ```toml
 aizynth-ssh-host = "tensor"
 aizynth-remote-env = "/home1/astrazeneca/AiZynthFinder/env"
-aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/molnova-runs"
+aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 aizynth-nproc = 8
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 ```
@@ -625,7 +631,7 @@ processes. Set it to 1 for serial execution.
 
 In SSH mode, `aizynth-config` and both remote directories are absolute paths on
 tensor. Models and stock referenced by the YAML must also be accessible there.
-MolNova uploads target SMILES to a unique remote directory, invokes the remote
+Graft uploads target SMILES to a unique remote directory, invokes the remote
 environment's `bin/aizynthcli`, downloads its result, and saves feasibility in
 the local SQLite database. RDKit SA scores are computed locally. A local
 AiZynthFinder installation is unnecessary in SSH mode; `aizynth-cli` only applies
@@ -644,9 +650,9 @@ to LigPrep; this stage records an assessment rather than excluding compounds.
 For manual execution, run it directly after generation for the same iteration:
 
 ```bash
-molnova generate egfr.toml --iteration 5
-molnova synthetic-feasibility egfr.toml --iteration 5
-molnova ligprep egfr.toml --iteration 5
+graft generate egfr.toml --iteration 5
+graft synthetic-feasibility egfr.toml --iteration 5
+graft ligprep egfr.toml --iteration 5
 ```
 
 Install AiZynthFinder and its model dependencies in the runtime environment, and make
@@ -692,7 +698,7 @@ TPSA<=140. PAINS (A/B/C) and Brenk are counts of matching catalog entries, not
 occurrences or exclusion flags. Veber/alerts introduce no additional filters.
 Calculate the original SMILES without neutralizing or stripping salts. Schema
 migration retains old results. For raw iterations, run
-`molnova druglike project.toml --iteration N` to calculate missing properties and
+`graft druglike project.toml --iteration N` to calculate missing properties and
 publish the frozen selection report. The optional `sa-accepted-ratio` defaults
 to 1.0, adding no further cut. A smaller explicit ratio keeps that lowest-SA
 fraction of druglike survivors within the same stage; ID breaks ties. Existing
@@ -709,7 +715,7 @@ changing their workflow state or repeating completed AiZynthFinder searches.
 To save an existing AiZynthFinder JSON or JSON.gz result file in SQLite:
 
 ```bash
-molnova synthetic-feasibility egfr.toml --iteration 1 --import-results results/iter1/synthetic_feasibility/aizynthfinder_results.json.gz
+graft synthetic-feasibility egfr.toml --iteration 1 --import-results results/iter1/synthetic_feasibility/aizynthfinder_results.json.gz
 ```
 
 Import matches canonical target SMILES against the selected iteration, stores
@@ -802,10 +808,10 @@ to generated iterations only. Existing GBSA scores are preserved. Default `run`
 selects iteration 0 first when it needs calculation or recovery; explicit later
 iterations complete missing reference GBSA first. To run reference calculations:
 
-    molnova run project.toml --iteration 0
+    graft run project.toml --iteration 0
 
-To poll Amber separately, use `molnova amber-gbsa project.toml --iteration 0`;
-then poll Prime with `molnova prime_gbsa project.toml --iteration 0`. Reference titles and
+To poll Amber separately, use `graft amber-gbsa project.toml --iteration 0`;
+then poll Prime with `graft prime_gbsa project.toml --iteration 0`. Reference titles and
 source poses remain unchanged; calculation inputs use `CMPID_<id>`. Terminal
 reference failures are recorded and do not cause endless resubmission.
 
@@ -831,13 +837,13 @@ prime-gbsa-input-count = 50
 amber-ssh-host = "t41"
 amber-remote-env = "/home1/amber26/envs/AmberTools26"
 amber-conda-init = "/home1/amber26/miniforge3/etc/profile.d/conda.sh"
-amber-remote-work-dir = "/home1/chchae/molnova-amber-runs"
+amber-remote-work-dir = "/home1/chchae/graft-amber-runs"
 amber-receptor = "./output/iter00/08-prime_gbsa/receptor.maegz"
 amber-charge-method = "bcc"
 ```
 
-Run `molnova run egfr.toml --iteration 1` to supervise the full iteration, or
-`molnova amber-gbsa egfr.toml --iteration 1` for one Amber submit/recovery pass.
+Run `graft run egfr.toml --iteration 1` to supervise the full iteration, or
+`graft amber-gbsa egfr.toml --iteration 1` for one Amber submit/recovery pass.
 The receptor path is local and relative to TOML; environment/work/init paths
 belong to t41. Optional `amber-ssh-config` points to a local SSH config.
 
@@ -847,11 +853,11 @@ Prime keep their configured host. `amber-slurm-cpus` defaults to 384 (maximum
 384 concurrent array tasks); each compound has its own one-CPU array task.
 The shared Amber
 environment defaults to `/share/opt/amber26/envs/AmberTools26`; override with
-`amber-slurm-env`. Runs use `/homes1/<current-user>/molnova-amber-slurm-runs` by default;
+`amber-slurm-env`. Runs use `/homes1/<current-user>/graft-amber-slurm-runs` by default;
 `amber-slurm-work-dir` overrides it. `amber-slurm-host` and
 `amber-slurm-partition` override the submission host/partition. Saved uncertain
 submissions are reconciled through Slurm JobIds before any retry.
-New Amber Slurm job names use `amber-<unique-id>` without `molnova-` or
+New Amber Slurm job names use `amber-<unique-id>` without `graft-` or
 `run-` prefixes. Existing saved/submitted jobs retain their original names for recovery.
 
 New Amber runs also limit **antechamber/SQM charge generation to 600 seconds**.
@@ -860,7 +866,7 @@ using incomplete charges or calculating GBSA. Saved/submitted work retains its
 original limits.
 
 New Amber runs limit **minimization to 600 seconds**, saving native coordinates
-every ten steps. On that deadline, MolNova stops minimization and scores the
+every ten steps. On that deadline, Graft stops minimization and scores the
 latest readable, complete, finite checkpoint with MMPBSA. Missing valid coordinates
 or scientific errors produce failures. Results and `minimization_status.json`
 distinguish completed minimization from checkpoint scoring; a truncated structure

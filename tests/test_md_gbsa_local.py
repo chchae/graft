@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, md_gbsa, md_gbsa_local as local
-from molnova import md_gbsa_local_native as calculator, md_gbsa_native as native
-from molnova import schrodinger_guard as guard
-from molnova.config import md_gbsa_settings
+from graft import _core, database, md_gbsa, md_gbsa_local as local
+from graft import md_gbsa_local_native as calculator, md_gbsa_native as native
+from graft import schrodinger_guard as guard
+from graft.config import md_gbsa_settings
 
 
 def write(path, data):
@@ -20,7 +20,7 @@ def write(path, data):
 
 @pytest.fixture
 def task(tmp_path):
-    root = tmp_path/'share/molnova-run/CMPID_1/replica01'
+    root = tmp_path/'share/graft-run/CMPID_1/replica01'
     files = {'prime/frames.maegz': b'frames', 'frames.json': [dict(frame=0,time_ps=1000,ligand_rmsd=.2)],
              'identity.json': dict(id=1), 'md/md.job.json': dict(job_id='upstream',downloaded=True)}
     for name, value in files.items():
@@ -86,7 +86,7 @@ def test_existing_adam_job_prevents_another_parent(task,monkeypatch,status):
 
 def test_uncertain_other_project_reserves_adam_without_registered_native_job(task,monkeypatch):
     root,_ = task
-    write(root.parents[2]/'molnova-other/CMPID_8/replica01/prime/prime.job.json',dict(job_id=None,launching=True))
+    write(root.parents[2]/'graft-other/CMPID_8/replica01/prime/prime.job.json',dict(job_id=None,launching=True))
     monkeypatch.setattr(native,'active_jobs',lambda *a:[])
     monkeypatch.setattr(native,'poll_job',lambda *a:pytest.fail('uncertain launch ignored'))
     assert calculator.poll(root,Path('/suite'))['reason'] == 'Uncertain Adam launch'
@@ -94,7 +94,7 @@ def test_uncertain_other_project_reserves_adam_without_registered_native_job(tas
 
 def test_saved_active_parent_reserves_slots_even_when_absent_from_active_list(task,monkeypatch):
     root,_ = task
-    write(root.parents[2]/'molnova-other/CMPID_8/replica01/prime/prime.job.json',dict(job_id='saved'))
+    write(root.parents[2]/'graft-other/CMPID_8/replica01/prime/prime.job.json',dict(job_id='saved'))
     monkeypatch.setattr(native,'active_jobs',lambda *a:[])
     monkeypatch.setattr(native,'native_rows',lambda *a:[dict(jobId='saved',status='RUNNING')])
     monkeypatch.setattr(native,'poll_job',lambda *a:pytest.fail('sixteen-slot reservation ignored'))
@@ -172,7 +172,7 @@ def project(task,tmp_path,monkeypatch):
     archive = directory/'adam-results/CMPID_1/replica01'
     write(archive/'prime/prime_mmgbsa-out.maegz',b'coordinates')
     write(archive/'collected.json',dict(result=data,output_sha256=local.digest(archive/'prime/prime_mmgbsa-out.maegz')))
-    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a,**kw:'MOLNOVA_MD='+json.dumps(data))
+    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a,**kw:'GRAFT_MD='+json.dumps(data))
     return args,settings,directory,data,root
 
 
@@ -286,9 +286,9 @@ def test_worker_transfers_collects_commits_then_cleans_and_recovers_commit_failu
     monkeypatch.setattr(guard,'active_jobs',lambda *a:[])
     def remote(config_,action,path,*extra):
         if action=='frames':
-            return 'MOLNOVA_MD='+json.dumps(dict(status='frames',files=config['files']))
+            return 'GRAFT_MD='+json.dumps(dict(status='frames',files=config['files']))
         assert action in ('poll','verify')
-        return 'MOLNOVA_MD='+json.dumps(data)
+        return 'GRAFT_MD='+json.dumps(data)
     monkeypatch.setattr(md_gbsa,'remote_call',remote)
     original = database.store_md_gbsa_result
     if fail_commit:
@@ -310,7 +310,7 @@ def test_cross_project_fence_allows_md_frame_preparation_but_no_adam_submission(
     root,config = task
     settings = dict(local_compute=dict(root=str(root.parents[1])), protocol=config['protocol'])
     (root/'prime/frames.maegz').unlink()
-    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a:'MOLNOVA_MD='+json.dumps(dict(status='frames')))
+    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a:'GRAFT_MD='+json.dumps(dict(status='frames')))
     assert local.poll(settings,1,0,'/md',root/'archive',allow_submit=False)['status'] == 'pending'
 
 
@@ -318,10 +318,10 @@ def test_prepare_checks_same_shared_mount_and_preserves_frozen_helpers(tmp_path,
     args = SimpleNamespace(md_gbsa_local_compute=True, md_gbsa_local_host='adam',
         md_gbsa_local_work_dir=str(tmp_path), md_gbsa_local_schrodinger='/suite',md_gbsa_local_cpus=16)
     settings = local.add_settings(args,dict(root='/md/run',protocol=dict(seed=1)))
-    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a:'MOLNOVA_MD='+json.dumps(dict(owner={'foreign':True})))
+    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a:'GRAFT_MD='+json.dumps(dict(owner={'foreign':True})))
     with pytest.raises(RuntimeError,match='does not see'):
         local.prepare(settings)
-    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a:'MOLNOVA_MD='+json.dumps(dict(owner=local.owner(settings))))
+    monkeypatch.setattr(md_gbsa,'remote_call',lambda *a:'GRAFT_MD='+json.dumps(dict(owner=local.owner(settings))))
     local.prepare(settings)
     helper = Path(settings['local_compute']['helper'])
     helper.write_text('modified')

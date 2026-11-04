@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import amber_gbsa, config, driver, prime_gbsa_batch, prime_gbsa_queue
-from molnova.paths import (
+from graft import amber_gbsa, config, driver, prime_gbsa_batch, prime_gbsa_queue
+from graft.paths import (
     STAGE_DIRECTORIES, iteration_directory, stage_directory, stage_manifests,
 )
 

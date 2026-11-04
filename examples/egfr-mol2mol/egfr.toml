@@ -1,4 +1,4 @@
-# MolNova EGFR: Generate(DB) → Drug likeness → LigPrep → Glide
+# Graft EGFR: Generate(DB) → Drug likeness → LigPrep → Glide
 # → Amber best 500 → Prime best 50 → FEP 후보 best 20 export
 # 로컬 상대 경로는 이 TOML의 위치를 기준으로 해석합니다.
 # 기존 iteration은 저장된 선별/작업/결과를 유지합니다. 아래 정책은 새 iteration에 적용합니다.
@@ -20,6 +20,7 @@ sample-size = 50000              # 한 번의 생성/조합 batch 크기; DB 삽
 # sidechain-library = "./input/edges-50k.smi"
 sidechain-max-heavy-atoms = 8      # 각 입력 fragment의 non-H 원자 상한; 결합용 * 제외
 elite-mcs-fixed = false
+mcs-timeout = 300                 # 자동 MCS 탐색 제한(초); 복잡한 elite 10개에 시간 확보
 # elite-mcs = "c1nc(N[*:0])c2cc(-c3ccc([*:1])cc3)[nH]c2n1"
 # 첫 cycle은 reference-mcs, 이후는 직전 iteration의 Prime elite에서 generation core 결정
 # 다음 cycle도 Prime elite가 필요하며 FEP 후보 fallback이 이 조건을 대체하지 않습니다.
@@ -31,7 +32,7 @@ libinvent-prior = "/home1/astrazeneca/REINVENT/priors/libinvent.prior"
 reinvent-ssh-host = "tensor"
 reinvent-remote-env = "/home1/astrazeneca/REINVENT/env"
 # Shared runtime/prior are read-only; write run artifacts under the SSH user's directory.
-reinvent-remote-work-dir = "/home1/chchae/molnova-reinvent-runs"
+reinvent-remote-work-dir = "/home1/chchae/graft-reinvent-runs"
 elite-tl-epochs = 5
 
 # 3. Drug likeness: 생성된 iteration 전체를 DB에서 평가하고 탈락 이유도 보존
@@ -44,7 +45,7 @@ synthetic-feasibility-enabled = false
 aizynth-nproc = 8
 aizynth-ssh-host = "tensor"
 aizynth-remote-env = "/home1/astrazeneca/AiZynthFinder/env"
-aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/molnova-runs"
+aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 
 # 4. LigPrep → constrained Glide: Drug likeness 통과 화합물만 처리
@@ -68,14 +69,14 @@ amber-slurm-partition = "cpu"
 amber-slurm-time-limit = 600       # 초 단위; 화합물당 10분, 큐 대기 제외
 amber-slurm-cpus = 384           # 전체 Amber 작업 합계 상한; 각 단일 노드 작업은 최대 192
 amber-slurm-env = "/share/opt/amber26/envs/AmberTools26"
-# amber-slurm-work-dir = "/homes1/사용자명/molnova-amber-slurm-runs"  # 기본값: 현재 사용자별 디렉터리
+# amber-slurm-work-dir = "/homes1/사용자명/graft-amber-slurm-runs"  # 기본값: 현재 사용자별 디렉터리
 amber-cpus = 124
 amber-receptor = "./output/iter00/08-prime_gbsa/receptor.maegz"
 amber-charge-method = "bcc"
 amber-ssh-host = "t41"
 amber-conda-init = "/home1/amber26/miniforge3/etc/profile.d/conda.sh"
 amber-remote-env = "/home1/amber26/envs/AmberTools26"
-amber-remote-work-dir = "/home1/chchae/molnova-amber-runs"
+amber-remote-work-dir = "/home1/chchae/graft-amber-runs"
 amber-ssh-config = "/home1/chchae/.ssh/config"
 
 # 6. Prime GBSA: 유효 Amber 결과 best 50; 유효 Amber 결과가 0개이면 Glide best 50
@@ -98,7 +99,7 @@ prime-gbsa-license-retries = 3
 
 md-gbsa = true
 md-gbsa-input-count = 20  # Prime 점수 상위 20개; 비율 설정보다 우선
-md-gbsa-snapshots = 20
+md-gbsa-snapshots = 10
 md-gbsa-production-ns = 5.0
 md-gbsa-schrodinger = "/share/opt/schrodinger/2026-1"
 

@@ -7,12 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, md_gbsa, prime_gbsa_async as prime
-from molnova import prime_gbsa_batch as batch, prime_gbsa_local as local
-from molnova import prime_gbsa_local_native as calculator, schrodinger_guard as guard
-from molnova.config import prime_gbsa_local_settings
-from molnova.md_gbsa_native import save
-from molnova.md_gbsa_local import digest
+from graft import _core, database, md_gbsa, prime_gbsa_async as prime
+from graft import prime_gbsa_batch as batch, prime_gbsa_local as local
+from graft import prime_gbsa_local_native as calculator, schrodinger_guard as guard
+from graft.config import prime_gbsa_local_settings
+from graft.md_gbsa_native import save
+from graft.md_gbsa_local import digest
 
 prepare_batch_inputs=local.prepare
 
@@ -57,7 +57,7 @@ def project(tmp_path,monkeypatch):
     def remote(config,action,where,*extra):
         if action=='verify':
             assert database.prime_gbsa_scored_ids(db,1)==[1,2]  # Verify/cleanup AFTER commit.
-        return 'MOLNOVA_MD='+json.dumps(state)
+        return 'GRAFT_MD='+json.dumps(state)
     monkeypatch.setattr(md_gbsa,'remote_call',remote)
     def finish(iteration,args_,directory_,ids):
         scores=directory_/'scores.tsv'
@@ -85,7 +85,7 @@ def test_local_prime_flexibility_keeps_sidechains_and_configured_distance(projec
     args.prime_gbsa_flexdist=6
     monkeypatch.setattr(batch,'prepare_complexes',lambda *a:(directory/'prime_gbsa.maegz').write_bytes(b'complexes'))
     saved=local.create_batch(args,directory,[1,2])
-    assert saved['command'][-8:]==['-ligand','atom.i_molnova_batch_ligand 1',
+    assert saved['command'][-8:]==['-ligand','atom.i_graft_batch_ligand 1',
         '-rflexdist','6.0','-rflexgroup','side','-out_type','COMPLEX']
     assert saved['owner']['input_sha256']==digest(directory/'prime_gbsa.maegz')
 
@@ -188,7 +188,7 @@ def test_native_prime_defers_while_md_has_uncertain_reservation(project,monkeypa
     args,directory,record,root,state=project
     (root/'prime/prime.job.json').unlink()
     (root/'prime/prime_gbsa-out.maegz').unlink()
-    peer=root.parent/'molnova-md/CMPID_7/replica01/prime'
+    peer=root.parent/'graft-md/CMPID_7/replica01/prime'
     peer.mkdir(parents=True)
     save(peer/'prime.job.json',dict(job_id=None))
     monkeypatch.setattr(calculator.native,'poll_job',lambda *a:pytest.fail('MD reservation exceeded'))

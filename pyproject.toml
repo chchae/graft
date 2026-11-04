@@ -3,7 +3,7 @@ requires = ["setuptools>=70"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "molnova"
+name = "graft"
 version = "0.1.0"
 description = "Iterative molecular lead-optimization pipeline using REINVENT4, Schrödinger, SQLite, MM-GBSA and FEP staging"
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-molnova = "molnova.cli:main"
+graft = "graft.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

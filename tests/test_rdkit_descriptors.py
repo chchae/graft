@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.chemistry import descriptors
-from molnova.stages import generate
+from graft import _core, database
+from graft.chemistry import descriptors
+from graft.stages import generate
 
 
 @pytest.fixture

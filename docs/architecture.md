@@ -1,6 +1,6 @@
 # Architecture
 
-MolNova uses SQLite as the workflow state store. Independent stage workers can run concurrently.
+Graft uses SQLite as the workflow state store. Independent stage workers can run concurrently.
 
 ```text
 driver

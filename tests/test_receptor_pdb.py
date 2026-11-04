@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from molnova import amber_runner
-from molnova.receptor_pdb import NORMALIZATION_VERSION, normalize_receptor_pdb
+from graft import amber_runner
+from graft.receptor_pdb import NORMALIZATION_VERSION, normalize_receptor_pdb
 
 
 FIXTURE = Path(__file__).parent / 'data/amber_receptor_names.pdb'

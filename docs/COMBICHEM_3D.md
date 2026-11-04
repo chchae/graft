@@ -71,8 +71,8 @@ logs list only the actual frame, not previous-cycle products as growing parents.
 Runnable **artificial** example (uses explicitly declared QED ranking for testing):
 
 ```bash
-python examples/combichem-3d/make_cycle_inputs.py /tmp/molnova-cycle-example
-molnova combichem-3d /tmp/molnova-cycle-example/grow.toml
+python examples/combichem-3d/make_cycle_inputs.py /tmp/graft-cycle-example
+graft combichem-3d /tmp/graft-cycle-example/grow.toml
 ```
 
 The toy uses a distant Ne receptor and K=2: four initial combinations, then up to
@@ -154,9 +154,9 @@ Records carry SMILES, CMPID/pose IDs, parent links and `output_passed`. Geometri
 valid but descriptor/filter-failing poses are not labelled accepted outputs.
 Full 3D coordinates are in final `poses.sdf`/`passed_poses.sdf`, and complete
 ancestry and failure details remain in `growth_history.jsonl`/`failures.jsonl`.
-Generated heavy atoms also carry integer `molnova_added_cycle` tags: 0 for the
+Generated heavy atoms also carry integer `graft_added_cycle` tags: 0 for the
 original core, 1 for cycle-1 fragment atoms, 2 for cycle-2 additions, and so on.
-`poses.sdf` and `passed_poses.sdf` include `atom.iprop.molnova_added_cycle`; RDKit
+`poses.sdf` and `passed_poses.sdf` include `atom.iprop.graft_added_cycle`; RDKit
 restores it as an atom property on reading. Old atoms keep their birth cycle when
 later cycles optimize them or leave them unchanged. Hydrogen birth is untracked
 and appears as missing (`n/a`). Any inferred imported ancestry retains its
@@ -181,9 +181,9 @@ lists are independent of the bounded `log-structures` previews. Timed-out partia
 SMARTS are discarded. Input SMILES/weights remain in `cycles.jsonl` checkpoints.
 
 ```bash
-molnova combichem-3d egfr.toml          # concise iteration/frame/result logs
-molnova combichem-3d egfr.toml --debug  # compact parent/worker diagnostics
-molnova combichem-3d egfr.toml --trace  # verbose per-probe/product diagnostics
+graft combichem-3d egfr.toml          # concise iteration/frame/result logs
+graft combichem-3d egfr.toml --debug  # compact parent/worker diagnostics
+graft combichem-3d egfr.toml --trace  # verbose per-probe/product diagnostics
 ```
 
 `--debug` no longer prints product starts or repeated optimization errors/clash
@@ -204,7 +204,7 @@ not reset live jobs or scientific results.
 
 ## Install and run
 
-Use Linux and Python >=3.11. MolNova already depends on RDKit and NumPy; the new
+Use Linux and Python >=3.11. Graft already depends on RDKit and NumPy; the new
 geometry implementation adds no third-party dependencies. Its minimal dependency
 file is `examples/combichem-3d/requirements.txt`. The tested RDKit version is
 2026.03.6. It uses ETKDGv3 with `EmbedParameters.timeout`, coordinate maps,
@@ -216,37 +216,37 @@ From the repository root:
 python -m pip install -e .
 
 # Ready-to-run artificial example: one iteration-1 parent, two frontier atoms.
-molnova combichem-3d examples/combichem-3d/toy-inputs/grow.toml
+graft combichem-3d examples/combichem-3d/toy-inputs/grow.toml
 
 # Create another isolated example, including optional 1–4 initial attachments.
-python examples/combichem-3d/make_toy_inputs.py /tmp/molnova-3d-demo \
+python examples/combichem-3d/make_toy_inputs.py /tmp/graft-3d-demo \
   --start-iteration 0 --attachments 4
-molnova combichem-3d /tmp/molnova-3d-demo/grow.toml
+graft combichem-3d /tmp/graft-3d-demo/grow.toml
 
 # Existing project: append project-settings.example.toml to its input TOML.
-molnova combichem-3d /path/to/project/egfr.toml
+graft combichem-3d /path/to/project/egfr.toml
 
 # A standalone 3D TOML is also supported.
-molnova combichem-3d /path/to/project/growth.toml
+graft combichem-3d /path/to/project/growth.toml
 
 # Resume: run the same command. Re-export without calculations:
-molnova combichem-3d /path/to/project/growth.toml --export-only
+graft combichem-3d /path/to/project/growth.toml --export-only
 ```
 
 `out-dir` must be a dedicated empty directory for a new project. A legacy project
 DB or an occupied unrelated output folder is rejected. Do not point it at an
 existing EGFR production output. Local paths resolve against the TOML directory.
 The separate entry point can also be run with
-`python -m molnova.stages.combichem_3d growth.toml`.
+`python -m graft.stages.combichem_3d growth.toml`.
 
 ## Reuse an existing project input TOML
 
-Use the same TOML previously passed to `molnova run`, and append the
+Use the same TOML previously passed to `graft run`, and append the
 `[combichem-3d]` / `[combichem-3d.filters]` tables from
 `examples/combichem-3d/project-settings.example.toml`. There is no need to copy
 the shared sidechain library or reference list into a second project file.
-The legacy `molnova run` command keeps its existing behavior; the new command is
-`molnova combichem-3d egfr.toml`.
+The legacy `graft run` command keeps its existing behavior; the new command is
+`graft combichem-3d egfr.toml`.
 
 | 3D input | Shared project source, unless overridden in `[combichem-3d]` |
 | --- | --- |
@@ -335,7 +335,7 @@ The top-level JSON is `{"parents": [parent_history, ...]}`. Each history entry:
 
 ```json
 {
-  "schema": "molnova_pose_history_v1",
+  "schema": "graft_pose_history_v1",
   "iteration": 1,
   "core_smarts": "[#6]-[#6]",
   "core": [
@@ -521,7 +521,7 @@ uses all explicit/generated H atoms too.
 PDB water residues HOH/WAT/H2O/DOD follow `include-water`; other HETATM components,
 including ions and metals, follow `include-cofactors`. Defaults exclude waters
 and retain cofactors/metals. Receptor SDF records lack standard residue identity:
-all components are retained unless explicitly tagged `molnova_component=water`;
+all components are retained unless explicitly tagged `graft_component=water`;
 cofactor exclusion requires residue-labelled PDB. No ambiguous SDF oxygen is
 silently guessed to be water.
 
@@ -622,7 +622,7 @@ regenerated in bounded pages via temporary files; SQLite is the recovery source.
 ```bash
 python -m pytest -q tests/test_combichem_3d.py
 python -m compileall -q src tests
-python -c 'import molnova; import molnova.cli'
+python -c 'import graft; import graft.cli'
 ```
 
 Tests cover 1–4 attachments, K^N and different N_i counts, one-H substitution,
@@ -637,7 +637,7 @@ overlap tolerance. This tests the filtering distinction, not a receptor protocol
 The toy receptor is a distant single Ne atom; it provides no biological validation.
 
 Recorded verification on 2026-10-25: Python 3.11.16, RDKit 2026.03.6, NumPy 2.4.6,
-MolNova 0.1.0. The feature tests passed **118/118** and the complete repository suite
+Graft 0.1.0. The feature tests passed **118/118** and the complete repository suite
 passed **1,440/1,440**. Editable install, compile/import and whitespace checks passed.
 A 16-process artificial initial-growth run exhausted all **81 = 3^4** combinations
 and recorded 35 new unique structures. A separate iteration-1 import grown through
@@ -693,7 +693,7 @@ remote-env-script = "/share/opt/amber26/envs/AmberTools26/amber.sh"
 processes = 128
 ```
 
-Run `molnova combichem-3d egfr.toml` on tensor. SSH activates the remote
+Run `graft combichem-3d egfr.toml` on tensor. SSH activates the remote
 environment and starts the supervisor and workers on t41 without Slurm. The
 command stays attached; use nohup or tmux for a durable client session. Select a
 new output when changing scientific code or Python/RDKit versions. Existing jobs
@@ -764,7 +764,7 @@ project output. Keep the existing shared scientific inputs/limits. The prepared
 EGFR input is `examples/tmp/egfr-slurm.toml`:
 
 ```bash
-molnova combichem-3d egfr-slurm.toml
+graft combichem-3d egfr-slurm.toml
 ```
 
 The current host (for example tensor) keeps SQLite claims, graph assembly, ranking,

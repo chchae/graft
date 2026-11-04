@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from molnova import _core
-from molnova import database
+from graft import _core
+from graft import database
 
 
 def test_database_location_migration_preserves_wal_results_and_original(tmp_path):
@@ -282,7 +282,7 @@ def test_stage_lock_rejects_overlapping_invocation(tmp_path):
 
 def test_wal_initialization_retries_only_sqlite_lock_errors(monkeypatch):
     import sqlite3
-    from molnova import _core
+    from graft import _core
     calls=[]
     class Connection:
         attempts=0
@@ -305,7 +305,7 @@ def test_wal_initialization_retries_only_sqlite_lock_errors(monkeypatch):
 
 def test_non_lock_wal_error_closes_connection_without_retry(monkeypatch):
     import sqlite3
-    from molnova import _core
+    from graft import _core
     from unittest.mock import Mock
     connection=Mock()
     error=sqlite3.OperationalError('not a database')

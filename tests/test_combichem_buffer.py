@@ -7,10 +7,10 @@ from pathlib import Path
 import sqlite3
 
 import pytest
-from molnova import database
-from molnova.config import combichem_3d_settings
-from molnova.stages import combichem_3d as stage
-from molnova.stages import combichem_buffer as buffering
+from graft import database
+from graft.config import combichem_3d_settings
+from graft.stages import combichem_3d as stage
+from graft.stages import combichem_buffer as buffering
 
 
 @pytest.fixture
@@ -155,8 +155,8 @@ def test_supervisor_recovers_complete_batch_before_claiming_work(project, monkey
 
 def test_bulk_target_admission_preserves_all_completed_poses(project):
     from rdkit import Chem
-    from molnova.chemistry.combichem3d.assembly import assemble
-    from molnova.chemistry.combichem3d import history
+    from graft.chemistry.combichem3d.assembly import assemble
+    from graft.chemistry.combichem3d import history
     db, job, cfg = project
     database.growth_start_session(db, cfg | {'stop-mode':'target', 'target-count':1})
     row = database.growth_parent(db, job['parent_pose'])

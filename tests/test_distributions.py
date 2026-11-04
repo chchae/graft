@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, cli, config, database, distributions as reports, driver
-from molnova.distribution_html import render
+from graft import _core, cli, config, database, distributions as reports, driver
+from graft.distribution_html import render
 
 
 @pytest.fixture

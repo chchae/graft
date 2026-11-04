@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, driver, md_gbsa_retry as remote, score_recovery
-from molnova.paths import stage_directory
-from molnova.states import CompoundState as State
+from graft import _core, database, driver, md_gbsa_retry as remote, score_recovery
+from graft.paths import stage_directory
+from graft.states import CompoundState as State
 
 
 @pytest.fixture
@@ -162,7 +162,7 @@ def test_crash_between_archive_moves_resumes_same_intent(tmp_path,monkeypatch):
 
 
 def test_prime_retry_requires_verified_terminal_evidence(project,monkeypatch):
-    from molnova import prime_gbsa_async as prime
+    from graft import prime_gbsa_async as prime
     database.request_latest_score_retries(project)
     folder=stage_directory(project.output,1,'prime_gbsa')
     folder.mkdir(parents=True)
@@ -190,7 +190,7 @@ def test_md_retry_keeps_frozen_selection_and_successes(project,monkeypatch):
     directory=stage_directory(project.output,1,'md_gbsa');directory.mkdir(parents=True)
     progress={'(2, 0)':{'status':'done'},'(3, 0)':{'status':'failed','phase':'prime'}}
     (directory/'progress.json').write_text(json.dumps(progress))
-    from molnova import md_gbsa
+    from graft import md_gbsa
     calls=[]
     monkeypatch.setattr(md_gbsa,'ssh',lambda host,command: calls.append(command) or '{"status":"ready"}')
     score_recovery.recover_md(project,1,database.md_gbsa_selection(project.db_path,1))
@@ -240,7 +240,7 @@ def enter_md(project):
 
 def test_resume_last_md_stage_without_earlier_workers(project):
     enter_md(project)
-    assert driver.resume_iteration_stages(project,1,stages())==[('md-gbsa','molnova.stages.md_gbsa')]
+    assert driver.resume_iteration_stages(project,1,stages())==[('md-gbsa','graft.stages.md_gbsa')]
     assert driver.resume_iteration_stages(project,0,stages())==stages()
     assert driver.resume_iteration_stages(project,2,stages())==stages()
 

@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.stages import glide, prime_gbsa
-from molnova.states import CompoundState as State
+from graft import _core, database
+from graft.stages import glide, prime_gbsa
+from graft.states import CompoundState as State
 
 
 def _project(tmp_path):
@@ -115,7 +115,7 @@ def test_final_top_200_selection_keeps_completed_scores_in_ranking(tmp_path, mon
 
 
 def test_saved_prime_job_cannot_retry_while_docking_is_unfinished(tmp_path, monkeypatch):
-    from molnova import prime_gbsa_async
+    from graft import prime_gbsa_async
     args, ids = _project(tmp_path)
     args.target_count = 3
     directory = tmp_path / "iter1/prime_gbsa"
@@ -257,7 +257,7 @@ def test_constrained_glide_settings_match_reference_method(tmp_path):
 @pytest.mark.parametrize("cpus,host", [(None, "compute"), (16, "compute")])
 @pytest.mark.parametrize("batch_size", [1, 2, 12])
 def test_prime_mmgbsa_input_command_and_results(monkeypatch, tmp_path, capsys, cpus, host, batch_size):
-    from molnova import schrodinger_guard
+    from graft import schrodinger_guard
     monkeypatch.setattr(schrodinger_guard, "active_jobs", lambda *a: [])
     args, ids = _project(tmp_path)
     args.prime_gbsa_input_count = batch_size + 1
@@ -302,7 +302,7 @@ def test_prime_mmgbsa_input_command_and_results(monkeypatch, tmp_path, capsys, c
             pytest.fail(f"Unexpected command: {command}")
 
     monkeypatch.setattr(_core, "run_command", run)
-    from molnova import prime_gbsa_async
+    from graft import prime_gbsa_async
     def submit(command, cwd, compound_ids, **kwargs):
         run(command, cwd)
         return True
@@ -329,8 +329,8 @@ def test_glide_zero_pose_detection_requires_finished_log(tmp_path, text, expecte
 
 
 def test_glide_recovers_completed_job_without_poses(monkeypatch, tmp_path):
-    from molnova import schrodinger_guard
-    from molnova import glide_recovery
+    from graft import schrodinger_guard
+    from graft import glide_recovery
     monkeypatch.setattr(glide, "active_jobs", lambda *a: [])
     db = tmp_path / "project.sqlite"
     with sqlite3.connect(db) as conn:
@@ -410,7 +410,7 @@ def test_glide_keeps_current_jobs_and_results_after_restart(tmp_path):
 
 
 def test_glide_submits_new_job_instead_of_importing_legacy_results(monkeypatch, tmp_path):
-    from molnova import glide_recovery
+    from graft import glide_recovery
     monkeypatch.setattr(glide_recovery, 'job_details', lambda *a: [
         {'jobId': 'fresh', 'status': 'DONE'}])
     monkeypatch.setattr(glide, "active_jobs", lambda *a: [])

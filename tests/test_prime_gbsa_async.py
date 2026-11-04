@@ -5,8 +5,8 @@ import sqlite3
 
 import pytest
 
-from molnova import _core, prime_gbsa_async as prime
-from molnova.stages import prime_gbsa
+from graft import _core, prime_gbsa_async as prime
+from graft.stages import prime_gbsa
 
 
 def test_submit_then_poll_without_resubmission_or_early_result_read(tmp_path, monkeypatch):
@@ -156,8 +156,8 @@ def test_ambiguous_or_generic_failure_is_not_classified(ids, text):
 
 
 def test_atomtyping_failure_stops_retries_and_allows_next_iteration(tmp_path, monkeypatch):
-    from molnova import database
-    from molnova.states import CompoundState as State
+    from graft import database
+    from graft.states import CompoundState as State
     db = tmp_path / "project.sqlite"
     with sqlite3.connect(db) as conn:
         _core.create_sqlite_schema(conn)
@@ -257,7 +257,7 @@ def test_inline_batch_failure_uses_new_component_logs(tmp_path,monkeypatch):
 
 
 def test_batch_worker_failure_excludes_bad_compounds_preserving_other_results(tmp_path,monkeypatch):
-    from molnova import database
+    from graft import database
     db=tmp_path/'project.sqlite'
     with sqlite3.connect(db) as conn:
         _core.create_sqlite_schema(conn)
@@ -300,7 +300,7 @@ def test_partial_batch_scores_import_before_permanent_failures(tmp_path,monkeypa
 
 
 def test_permanent_failure_recording_preserves_existing_scores(tmp_path):
-    from molnova import database
+    from graft import database
     db=tmp_path/'project.sqlite'
     with sqlite3.connect(db) as conn:
         _core.create_sqlite_schema(conn)

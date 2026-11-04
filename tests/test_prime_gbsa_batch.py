@@ -7,9 +7,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, prime_gbsa_batch as batch, prime_gbsa_async as prime
-from molnova import schrodinger_guard
-from molnova.stages import prime_gbsa
+from graft import _core, database, prime_gbsa_batch as batch, prime_gbsa_async as prime
+from graft import schrodinger_guard
+from graft.stages import prime_gbsa
 
 
 def project(tmp_path, monkeypatch, count=2):
@@ -85,7 +85,7 @@ def test_flexible_batch_uses_per_complex_receptor_and_pins_protocol(tmp_path, mo
     monkeypatch.setattr(_core, 'run_command', prepare)
     record = batch.create_batch(args, root, [1, 2])
     assert record['command'][1] == str(root / 'prime_gbsa.maegz')
-    assert record['command'][-8:] == ['-ligand', 'atom.i_molnova_batch_ligand 1',
+    assert record['command'][-8:] == ['-ligand', 'atom.i_graft_batch_ligand 1',
                                       '-rflexdist', '6.0', '-rflexgroup', 'side',
                                       '-out_type', 'COMPLEX']
     assert (root / 'prime_gbsa.maegz').is_file()

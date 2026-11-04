@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import md_gbsa_jobcontrol as adapter, md_gbsa_native as native
+from graft import md_gbsa_jobcontrol as adapter, md_gbsa_native as native
 
 
 def job(identity, *, children=(), complete=True, exit_status='finished', directory='/launch', parent=''):
@@ -114,7 +114,7 @@ def test_native_uuid_still_uses_original_native_status_and_polling(tmp_path):
 
 
 def test_operational_adapter_preserves_frozen_helper_bytes(tmp_path):
-    from molnova import md_gbsa_local as local
+    from graft import md_gbsa_local as local
     settings=dict(root=str(tmp_path),suite='/suite',ssh_host='adam',helper=str(tmp_path/'md_gbsa_local_native.py'))
     native.save(tmp_path/'owner.json',dict(local=settings))
     (tmp_path/'md_gbsa_local_native.py').write_bytes(b'frozen scientific command')

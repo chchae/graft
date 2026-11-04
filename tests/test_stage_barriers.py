@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, ligprep_recovery as recovery, prime_gbsa_async
-from molnova.stages import ligprep, glide, prime_gbsa
-from molnova.states import CompoundState as State
+from graft import _core, database, ligprep_recovery as recovery, prime_gbsa_async
+from graft.stages import ligprep, glide, prime_gbsa
+from graft.states import CompoundState as State
 
 
 def project(tmp_path, states):

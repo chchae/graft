@@ -4,12 +4,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from molnova import _core as c, database, prime_gbsa_async as prime, prime_gbsa_queue as q
-from molnova.stages import prime_gbsa
+from graft import _core as c, database, prime_gbsa_async as prime, prime_gbsa_queue as q
+from graft.stages import prime_gbsa
 
 
 def fixture(tmp_path, monkeypatch, count=10, flexdist=0.0):
-    from molnova import schrodinger_guard
+    from graft import schrodinger_guard
     monkeypatch.setattr(schrodinger_guard, 'active_jobs', lambda *a: [])
     db = tmp_path / 'results.sqlite'
     with sqlite3.connect(db) as conn:
@@ -290,7 +290,7 @@ def test_missing_score_is_terminal_and_releases_only_its_slot(tmp_path, monkeypa
 
 @pytest.mark.parametrize('stage,interval,expected', [('prime_gbsa', 30, 5), ('prime_gbsa', 2, 2), ('glide', 30, 30)])
 def test_supervisor_refill_interval(stage, interval, expected, tmp_path, monkeypatch):
-    from molnova import driver
+    from graft import driver
     waits = []
     class Stop:
         def is_set(self):
@@ -341,7 +341,7 @@ def test_refills_before_checking_remaining_active_jobs(tmp_path, monkeypatch):
 
 
 def test_glide_blocks_refill_but_existing_scores_are_still_collected(tmp_path, monkeypatch):
-    from molnova import schrodinger_guard
+    from graft import schrodinger_guard
     args, root, record, launches, completed = fixture(tmp_path, monkeypatch)
     q.poll_queue(1, args, root, record)
     completed.add(1)
@@ -477,8 +477,8 @@ def test_legacy_completed_batch_publishes_native_coordinates(tmp_path, monkeypat
 
 @pytest.mark.parametrize('level', [1, 2])
 def test_supervised_queue_poll_has_one_terse_line_with_all_progress_counts(tmp_path, monkeypatch, capsys, level):
-    from molnova import driver
-    from molnova.stages import _logging
+    from graft import driver
+    from graft.stages import _logging
     args, root, record, launches, completed = fixture(tmp_path, monkeypatch)
     args.target_count = 10
     args.prime_gbsa_input_count = 10
@@ -493,7 +493,7 @@ def test_supervised_queue_poll_has_one_terse_line_with_all_progress_counts(tmp_p
             if saved:
                 completed.add(2)
             assert not driver.supervise_iteration(args, tmp_path / 'project.toml', 1,
-                                                 [('prime_gbsa', 'molnova.stages.prime_gbsa')],
+                                                 [('prime_gbsa', 'graft.stages.prime_gbsa')],
                                                  30, driver.StopFlag(), once=True)
             output = capsys.readouterr().out
             summary = (f'{1:<3d}: prime_gbsa running={10-saved:<3d}, saved={saved:<3d}, '

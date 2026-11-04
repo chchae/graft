@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.chemistry.sa_score import calculate_sa_score, calculate_sa_scores
-from molnova.config import sa_score_process_count
-from molnova.stages import generate
+from graft import _core, database
+from graft.chemistry.sa_score import calculate_sa_score, calculate_sa_scores
+from graft.config import sa_score_process_count
+from graft.stages import generate
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def test_scoring_failure_preserves_sampling_csv_without_partial_insert(project, 
 
 
 def test_local_parallel_scores_match_serial_scores(monkeypatch):
-    from molnova.chemistry import sa_score
+    from graft.chemistry import sa_score
     monkeypatch.setattr(sa_score.os, 'sched_getaffinity', lambda _: {0, 1}, raising=False)
     compounds = [(3, 'CCO'), (10, 'c1ccccc1'), (20, 'CC(=O)O')]
     assert calculate_sa_scores(compounds, 2) == calculate_sa_scores(compounds, 1)

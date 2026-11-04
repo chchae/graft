@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database, driver, amber_gbsa
-from molnova.config import amber_settings, md_gbsa_settings
-from molnova.paths import stage_directory
-from molnova.stages import prime_gbsa as prime_stage, amber_gbsa as amber_stage
-from molnova.states import CompoundState as State
+from graft import _core, database, driver, amber_gbsa
+from graft.config import amber_settings, md_gbsa_settings
+from graft.paths import stage_directory
+from graft.stages import prime_gbsa as prime_stage, amber_gbsa as amber_stage
+from graft.states import CompoundState as State
 
 
 @pytest.fixture

@@ -9,10 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, amber_gbsa, amber_runner, cli, database, driver
-from molnova.config import amber_settings
-from molnova.stages import amber_gbsa as stage, generate, prime_gbsa
-from molnova.states import CompoundState as State
+from graft import _core, amber_gbsa, amber_runner, cli, database, driver
+from graft.config import amber_settings
+from graft.stages import amber_gbsa as stage, generate, prime_gbsa
+from graft.states import CompoundState as State
 
 
 @pytest.fixture
@@ -68,9 +68,9 @@ def test_retry_rejects_live_or_other_stage_rows_atomically(project):
 
 
 def test_explicit_retry_refuses_active_original_and_completed_retry_never_resubmits(project, monkeypatch):
-    from molnova.stages import amber_retry
-    from molnova import amber_slurm
-    from molnova.paths import stage_directory
+    from graft.stages import amber_retry
+    from graft import amber_slurm
+    from graft.paths import stage_directory
     project.use_slurm = True
     directory = stage_directory(project.output, 1, 'amber_gbsa')
     directory.mkdir(parents=True)
@@ -488,7 +488,7 @@ def test_reference_export_maps_titles_and_preserves_source(references, monkeypat
 
 def test_new_remote_run_bundles_normalizer_and_records_version(references, monkeypatch):
     import tarfile
-    from molnova.receptor_pdb import NORMALIZATION_VERSION
+    from graft.receptor_pdb import NORMALIZATION_VERSION
     args = references
     directory = args.output / 'iter0/amber_gbsa'
     directory.mkdir(parents=True)

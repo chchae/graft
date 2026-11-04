@@ -1,4 +1,4 @@
-# MolNova development instructions
+# Graft development instructions
 
 Read `docs/SPEC.md` before starting any project work. Before architectural or scientific workflow changes, also read `docs/DEVELOPMENT_HANDOFF.md` and inspect the affected implementation and tests. Respect the evidence and uncertainty labels in SPEC; do not silently promote proposals or implementation details into user-approved requirements.
 
@@ -32,7 +32,7 @@ Run from the repository root in a Python >=3.11 environment with RDKit and the t
 python -m pip install -e .
 python -m pytest
 python -m compileall -q src tests
-python -c "import molnova; import molnova.cli"
+python -c "import graft; import graft.cli"
 ```
 
 Use a separate small project for authorized external-program smoke tests. Preserve production databases, submitted jobs, and results.

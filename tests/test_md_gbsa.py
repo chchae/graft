@@ -4,10 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from molnova import _core, database, driver, md_gbsa, md_gbsa_native as native
-from molnova.config import md_gbsa_settings
-from molnova.paths import stage_directory
-from molnova.states import CompoundState as State
+from graft import _core, database, driver, md_gbsa, md_gbsa_native as native
+from graft.config import md_gbsa_settings
+from graft.paths import stage_directory
+from graft.states import CompoundState as State
 
 
 @pytest.fixture
@@ -125,7 +125,7 @@ def test_no_md_candidates_reports_blocker_before_source_or_remote_work(db, monke
                      (iteration, state, score))
         before = conn.execute('SELECT * FROM compound ORDER BY id').fetchall()
     monkeypatch.setattr(driver, 'external_completion_reason', lambda *a: None)
-    monkeypatch.setattr('molnova.prime_gbsa_async.load_job', lambda *a: None)
+    monkeypatch.setattr('graft.prime_gbsa_async.load_job', lambda *a: None)
     monkeypatch.setattr(md_gbsa, 'settings_for', lambda *a: pytest.fail('Inspected nonexistent Prime file'))
     monkeypatch.setattr(md_gbsa, 'ssh', lambda *a, **kw: pytest.fail('Contacted remote host'))
     monkeypatch.setattr(md_gbsa, 'upload', lambda *a, **kw: pytest.fail('Uploaded MD inputs'))
@@ -145,7 +145,7 @@ def test_md_worker_waits_for_upstream_before_inspecting_source(db, monkeypatch, 
     with database.connect(db) as conn:
         conn.execute('UPDATE compound SET state=?,prime_gbsa_score=NULL WHERE id=4', (state,))
     monkeypatch.setattr(driver, 'external_completion_reason', lambda *a: None)
-    monkeypatch.setattr('molnova.prime_gbsa_async.load_job', lambda *a: None)
+    monkeypatch.setattr('graft.prime_gbsa_async.load_job', lambda *a: None)
     monkeypatch.setattr(md_gbsa, 'settings_for', lambda *a: pytest.fail('Inspected source while upstream pending'))
     monkeypatch.setattr(md_gbsa, 'ssh', lambda *a, **kw: pytest.fail('Contacted remote host'))
     args = SimpleNamespace(db_path=db, output=db.parent, md_gbsa_enabled=True,
@@ -157,7 +157,7 @@ def test_md_worker_waits_for_upstream_before_inspecting_source(db, monkeypatch, 
 
 def test_eligible_md_candidates_still_require_final_prime_coordinates(db, monkeypatch):
     monkeypatch.setattr(driver, 'external_completion_reason', lambda *a: None)
-    monkeypatch.setattr('molnova.prime_gbsa_async.load_job', lambda *a: None)
+    monkeypatch.setattr('graft.prime_gbsa_async.load_job', lambda *a: None)
     monkeypatch.setattr(md_gbsa, 'ssh', lambda *a, **kw: pytest.fail('Contacted remote host without source'))
     args = SimpleNamespace(db_path=db, output=db.parent, md_gbsa_enabled=True,
                            target_count=4, prime_gbsa_input_count=4)
@@ -277,8 +277,8 @@ def test_md_output_keeps_legacy_fep_but_new_fep_follows_md(tmp_path):
 
 
 def test_remote_prime_fences_local_prime_and_glide_but_allows_md_recovery(monkeypatch):
-    from molnova import schrodinger_guard as guard
-    remote=dict(jobId='remote-prime',jobName='prime_mmgbsa',molnova_md_remote=True)
+    from graft import schrodinger_guard as guard
+    remote=dict(jobId='remote-prime',jobName='prime_mmgbsa',graft_md_remote=True)
     monkeypatch.setattr(guard,'active_jobs',lambda suite:[remote])
     for stage in ('glide','prime_gbsa'):
         with pytest.raises(guard.SubmissionBlocked,match='prime_gbsa still active'):
@@ -361,7 +361,7 @@ def test_concurrent_selection_has_one_frozen_owner(db):
 @pytest.mark.parametrize('count',[1,5,20,101])
 def test_controller_recovers_disabled_flag_and_publishes_complete_ensembles(db,monkeypatch,wrong_identity,count):
     from contextlib import nullcontext
-    from molnova import schrodinger_guard as guard
+    from graft import schrodinger_guard as guard
     settings=dict(protocol=dict(snapshots=count,seed=1),replicates=1,root='/frozen',
                   ssh_host='slurm',suite='/suite',helper='/helper',gpus=2)
     database.freeze_md_gbsa_selection(db,1,settings,target_count=4,prime_count=4)
@@ -379,7 +379,7 @@ def test_controller_recovers_disabled_flag_and_publishes_complete_ensembles(db,m
             data['id']=999
         for frame in data['snapshots']:
             frame['ligand_rmsd']=.5
-        return 'MOLNOVA_MD='+json.dumps(data)
+        return 'GRAFT_MD='+json.dumps(data)
     monkeypatch.setattr(md_gbsa,'remote_call',poll)
     args=SimpleNamespace(db_path=db,output=db.parent,schrodinger=Path('/suite'),md_gbsa_enabled=False)
     if wrong_identity:

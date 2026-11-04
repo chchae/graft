@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.chemistry.descriptors import calculate_rdkit_descriptors
-from molnova.chemistry.druglike import filter_druglike
-from molnova.stages import generate
+from graft import _core, database
+from graft.chemistry.descriptors import calculate_rdkit_descriptors
+from graft.chemistry.druglike import filter_druglike
+from graft.stages import generate
 
 
 @pytest.fixture

@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from molnova import _core, database
-from molnova.stages import generate
-from molnova.states import CompoundState as State
+from graft import _core, database
+from graft.stages import generate
+from graft.states import CompoundState as State
 
 
 @pytest.fixture

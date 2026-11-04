@@ -1,0 +1,1 @@
+JOBS=$(ps x | grep graft | cut -f 1 -d ' ' | tr '\n' ' '); echo $JOBS; kill -9 $JOBS

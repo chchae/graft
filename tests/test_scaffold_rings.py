@@ -1,8 +1,8 @@
 import pytest
 from rdkit import Chem
 
-from molnova import _core
-from molnova.chemistry.scaffold import mcs_readable_smarts
+from graft import _core
+from graft.chemistry.scaffold import mcs_readable_smarts
 
 
 def test_readable_smarts_uses_element_symbols_without_losing_aromatic_matches():
