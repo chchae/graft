@@ -41,6 +41,9 @@ def restore_parent(row):
 
 
 def plan_parent(db, job, cfg, library, checker, deadline):
+    if cfg.get('generation-backend')=='crem':
+        from graft.chemistry.combichem3d.crem_growth import plan_parent as crem_plan
+        return crem_plan(db,job,cfg,checker,deadline)
     row = database.growth_parent(db,job['parent_pose'])
     parent, history = restore_parent(row), row['history']
     sites = growth_sites(parent,history)
@@ -98,7 +101,7 @@ def evaluate_batch(db, job, cfg, checker, evaluator, deadline, references=None):
         for ordinal in range(int(job['cursor']),int(job['stop'])):
             if database.growth_should_stop(db):
                 return
-            choices = combination_at(plan['pools'],ordinal)
+            choices = plan['operations'][ordinal] if plan.get('kind')=='crem_single_addition' else combination_at(plan['pools'],ordinal)
             trace('product start parent_pose=%s ordinal=%s choices=%s',job['parent_pose'],ordinal,choices)
             from graft.stages.combichem_product import evaluate_product
             report,payload = evaluate_product(parent,history,plan,ordinal,cfg,checker,
@@ -154,7 +157,7 @@ def worker_loop(db, cfg, iteration):
                 from graft.chemistry.combichem3d.cycles import prepare_next_frame
                 prepare_next_frame(db,iteration,cfg,checker,deadline)
             elif job['kind'] == 'plan':
-                if library is None:
+                if library is None and cfg.get('generation-backend')!='crem':
                     library,_ = load_library(cfg['sidechain-library'],cfg)
                 plan_parent(db,job,cfg,library,checker,deadline)
             else:
@@ -200,7 +203,8 @@ def materialize_project_references(cfg):
 
 
 def prepare_project(cfg):
-    frame_mode=cfg.get('growth-mode')=='frame-cycles'
+    frame_mode=cfg.get('growth-mode') in ('frame-cycles','fixed-frame')
+    crem_mode=cfg.get('generation-backend')=='crem'
     if frame_mode and cfg['max-iteration']>1 and not cfg['elite-rank-by']:
         raise ValueError('Set [combichem-3d].elite-rank-by to qed or similarity before multi-cycle elite selection; no affinity score is calculated by this module')
     logger.info('preflight: parents=%s receptor=%s history=%s library=%s',cfg['parents'],cfg['receptor'],cfg['history'],cfg['sidechain-library'])
@@ -238,10 +242,15 @@ def prepare_project(cfg):
     if parents[0][1]['iteration'] > cfg['max-iteration']:
         raise ValueError('max-iteration is the absolute final iteration and cannot precede input parents')
     logger.info('loading sidechain library: %s',cfg['sidechain-library'])
-    library,rejected = load_library(cfg['sidechain-library'],cfg)
-    logger.info('sidechain library ready: eligible_candidates=%s rejected=%s K=%s',len(library),len(rejected),cfg['sidechains-per-site'])
-    # Validate all supplied candidate overrides and K before launching calculators.
-    candidate_pools(list(cfg['site-candidates']) or ['__default__'],library,cfg)
+    if crem_mode:
+        from graft.chemistry.combichem3d.crem_growth import validate_database
+        cfg['runtime-versions']['crem']=validate_database(cfg)
+        library,rejected=[],[]
+        logger.info('CReM database ready: radius=%s K<=%s per PASS site; fixed frame, one addition per child',cfg['crem-radius'],cfg['sidechains-per-site'])
+    else:
+        library,rejected = load_library(cfg['sidechain-library'],cfg)
+        logger.info('sidechain library ready: eligible_candidates=%s rejected=%s K=%s',len(library),len(rejected),cfg['sidechains-per-site'])
+        candidate_pools(list(cfg['site-candidates']) or ['__default__'],library,cfg)
     known_uids = {r['uid'] for _,h in parents for r in h['atoms']}
     if set(cfg['site-candidates']) - known_uids:
         raise ValueError('site-candidates keys must identify explicit imported parent atom UIDs')
@@ -255,11 +264,16 @@ def prepare_project(cfg):
         records.append(dict(smiles=provenance.canonical_smiles(mol),molblock=Chem.MolToMolBlock(mol),history=history))
     operational = {'out-dir','config-path','max-seconds','target-count','processes','batch-size','grace-seconds','max-iteration','stop-mode','log-level','log-interval','log-structures','execution-host','remote-env-script','result-buffer-size','result-buffer-seconds','slurm-runtime-dir','slurm-allocated-hosts','slurm-nodes','slurm-cpus-per-node','slurm-poll-seconds','slurm-host','slurm-partition','slurm-time-limit','slurm-memory-mb','execution-backend','coordinator-processes','slurm-worker-index','slurm-job-id','worker-hosts','worker-ssh-known-hosts'}
     frozen = {k:v for k,v in cfg.items() if k not in operational}
-    frozen['input_sha256'] = {k:hashlib.sha256(Path(cfg[k]).read_bytes()).hexdigest()
+    frozen['input_sha256'] = {k:file_sha256(cfg[k])
                               for k in ('parents','receptor','history','reference-smiles','sidechain-library')}
+    if crem_mode:
+        # An SQLite library may have committed pages in WAL rather than its
+        # main file. Freeze both; checkpointing also requires a fresh output.
+        wal=Path(cfg['crem-db']+'-wal')
+        frozen['input_sha256']['crem-db-wal']=file_sha256(wal) if wal.is_file() and wal.stat().st_size else None
     if frame_mode:
         frozen['input_sha256']['reference-poses']=hashlib.sha256(Path(cfg['reference-poses']).read_bytes()).hexdigest()
-        frozen['growth_search_policy']=dict(optional_sites_after_initial=True,
+        frozen['growth_search_policy']=dict(optional_sites_after_initial=not crem_mode,
                                            movable_atoms='all_sidechains_outside_original_iteration0_core')
     frozen['result_buffer_implementation_sha256']=hashlib.sha256(Path(__file__).with_name('combichem_buffer.py').read_bytes()).hexdigest()
     scientific_source = Path(__file__).resolve().parents[1]/'chemistry/combichem3d'
@@ -307,6 +321,51 @@ def prepare_project(cfg):
         for row in rejected:
             stream.write(json.dumps(row)+'\n')
     return db,parents[0][1]['iteration']
+
+
+def file_sha256(filename):
+    """Bound memory even for multi-gigabyte fragment databases."""
+    digest=hashlib.sha256()
+    with open(filename,'rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024),b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def reset_crem_output(cfg):
+    """Clear the dedicated output under its held, never-unlinked stage lock.
+
+    Keeping that inode also excludes old-version supervisors and orphaned fork
+    workers. SSH forwarding reaches this function only on the execution host.
+    """
+    import shutil
+    output=Path(cfg['out-dir']).resolve()
+    inputs=('config-path','parents','receptor','crem-db','reference-poses',
+            'reference-source-db','reference-source-poses','remote-env-script')
+    for key in inputs:
+        value=cfg.get(key)
+        if value and Path(value).expanduser().resolve().is_relative_to(output):
+            raise ValueError(f'Refusing to clear output containing input {key}: {value}')
+    for key,generated in (('history',cfg.get('history-source')=='inferred'),
+                          ('reference-smiles',bool(cfg.get('reference-source-db') or cfg.get('reference-source-poses')))):
+        if not generated and cfg.get(key) and Path(cfg[key]).resolve().is_relative_to(output):
+            raise ValueError(f'Refusing to clear output containing input {key}: {cfg[key]}')
+    db=output/'combichem3d.sqlite'
+    if db.exists():
+        saved=database.growth_saved_settings(db)
+        if saved.get('execution-backend')=='slurm' or saved.get('worker-hosts'):
+            raise RuntimeError('Existing output has remote calculation pools; retain it and reconcile those jobs before resetting')
+    if (output/'slurm').exists():
+        raise RuntimeError('Existing output has Slurm records; retain it and reconcile those jobs before resetting')
+    lock=database.lock_path(db,'combichem3d.driver')
+    children=[child for child in output.iterdir() if child!=lock]
+    if children:
+        print(f'[combichem-3d] deleting existing output and starting fresh: {output}',flush=True)
+    for child in children:
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def supervise(cfg, db, first_iteration):
@@ -407,6 +466,8 @@ def _main(argv=None):
         cfg['log-level']='TRACE'
     db = Path(cfg['out-dir'])/'combichem3d.sqlite'
     with database.stage_lock(db,'combichem3d'):
+        if cfg.get('generation-backend')=='crem' and not ns.export_only:
+            reset_crem_output(cfg)
         configure(cfg['out-dir'],cfg['log-level'])
         logger.info('starting config=%s seed=%s processes=%s max_iteration=%s K=%s conformers=%s torsion_trials=%s time_limit=%.1fs target=%s mode=%s log=%s',
                     cfg['config-path'],cfg['seed'],cfg['processes'],cfg['max-iteration'],cfg['sidechains-per-site'],
@@ -441,7 +502,7 @@ def main(argv=None):
         return _main(argv)
     except Exception:
         if logger.handlers:
-            logger.exception('run failed; existing inputs and committed results retained')
+            logger.exception('run failed')
         raise
 
 

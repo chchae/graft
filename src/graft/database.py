@@ -2247,6 +2247,22 @@ def growth_connection(path):
         conn.close()
 
 
+def growth_saved_settings(path):
+    """Inspect an existing growth DB without initialization or migration."""
+    import json
+    source=sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro',uri=True,timeout=30)
+    try:
+        row=source.execute('SELECT settings FROM combichem3d_run WHERE id=1').fetchone()
+        if row is None:
+            raise RuntimeError('Cannot reset output with unknown workflow ownership')
+        settings=json.loads(row[0])
+        if not isinstance(settings,dict):
+            raise RuntimeError('Cannot reset output with invalid saved settings')
+        return settings
+    finally:
+        source.close()
+
+
 def growth_project_references(path):
     """Read an existing project's original molecules without migrations/claims."""
     source=sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro',uri=True,timeout=30)
@@ -2317,7 +2333,7 @@ def growth_initialize(path, cfg, fingerprint, parents):
                      (fingerprint, json.dumps(cfg, sort_keys=True)))
         for parent in parents:
             pose_id=_growth_insert_pose(conn, parent, None, generated=False)
-            if cfg.get('growth-mode')=='frame-cycles':
+            if cfg.get('growth-mode') in ('frame-cycles','fixed-frame'):
                 conn.execute('INSERT INTO combichem3d_cycle VALUES (?,?,?,?,NULL)',(1,Growth.READY,pose_id,json.dumps(dict(kind='initial_frame'))))
     return True
 
@@ -2426,6 +2442,11 @@ def growth_claim(path, iteration, batch_size, owner):
         if _growth_stop(conn):
             return None
         settings=json.loads(conn.execute('SELECT settings FROM combichem3d_run WHERE id=1').fetchone()[0])
+        if settings.get('generation-backend')=='crem' and iteration>1:
+            if not _growth_select_crem_parents(conn,iteration,settings):
+                return dict(kind='wait')
+            if _growth_stop(conn):
+                return None
         if settings.get('growth-mode')=='frame-cycles' and iteration>0:
             cycle=conn.execute('SELECT state FROM combichem3d_cycle WHERE iteration=?',(iteration,)).fetchone()
             if not cycle:
@@ -2475,6 +2496,37 @@ def growth_claim(path, iteration, batch_size, owner):
         return dict(kind='wait') if active else None
 
 
+def _growth_select_crem_parents(conn, iteration, settings):
+    """Freeze previous-cycle QED parents atomically, once all upstream work ends."""
+    import json
+    if conn.execute('SELECT 1 FROM combichem3d_cycle WHERE iteration=?',(iteration,)).fetchone():
+        return True
+    if conn.execute('SELECT 1 FROM combichem3d_batch WHERE iteration=? AND state!=? LIMIT 1',
+                    (iteration-1,Growth.DONE)).fetchone():
+        return False
+    if conn.execute('SELECT 1 FROM combichem3d_pose WHERE (iteration=? AND plan_state!=?) '
+                    'OR (iteration=? AND input_state!=?) LIMIT 1',
+                    (iteration-2,Growth.DONE,iteration-1,Growth.DONE)).fetchone():
+        return False
+    ranked=conn.execute(
+        'SELECT p.id,p.compound_id FROM combichem3d_pose p WHERE p.id IN '
+        '(SELECT MIN(id) FROM combichem3d_pose WHERE iteration=? AND generated=1 '
+        'AND output_passed=1 GROUP BY compound_id) '
+        'ORDER BY json_extract(p.properties,?) DESC,p.compound_id,p.id LIMIT ?',
+        (iteration-1,'$.'+settings['elite-rank-by'],settings['elite-count'])).fetchall()
+    # Keep every structure and score. Only selected parents receive new plans.
+    conn.execute('UPDATE combichem3d_pose SET plan_state=? WHERE iteration=?',(Growth.DONE,iteration-1))
+    conn.executemany('UPDATE combichem3d_pose SET plan_state=? WHERE id=?',[(Growth.PENDING,row[0]) for row in ranked])
+    report=dict(kind='fixed_frame_parent_selection',source_iteration=iteration-1,
+                rank_by=settings['elite-rank-by'],selected_pose_ids=[row[0] for row in ranked],
+                selected_compound_ids=[row[1] for row in ranked])
+    conn.execute('INSERT INTO combichem3d_cycle VALUES (?,?,NULL,?,NULL)',
+                 (iteration,Growth.READY,json.dumps(report)))
+    if not ranked:
+        conn.execute('UPDATE combichem3d_run SET stop_reason=? WHERE id=1',('crem_search_exhausted',))
+    return True
+
+
 def growth_parent(path, pose_id):
     import json
     with growth_connection(path) as conn:
@@ -2502,7 +2554,7 @@ def growth_save_input(path, pose_id, properties, passed, baseline, prune=False, 
     import json
     with growth_connection(path) as conn:
         settings=json.loads(conn.execute('SELECT settings FROM combichem3d_run WHERE id=1').fetchone()[0])
-        if settings.get('growth-mode')=='frame-cycles':
+        if settings.get('growth-mode') in ('frame-cycles','fixed-frame'):
             passed=False
             prune=False
         conn.execute('UPDATE combichem3d_pose SET properties=?,output_passed=?,input_state=? WHERE id=?',
@@ -2630,6 +2682,18 @@ def growth_run_info(path):
                                             '(plan_state IN (?,?) OR (plan_state=? AND allocated!=total))',
                                             (row['settings']['max-iteration'],Growth.PENDING,Growth.RUNNING,Growth.READY)).fetchone()[0]
     return row
+
+
+def growth_output_compounds(path, iteration=None):
+    """Stream distinct generated output identities in cycle/compound-ID order."""
+    with growth_connection(path) as conn:
+        conn.row_factory=sqlite3.Row
+        for row in conn.execute(
+            'SELECT p.iteration,p.compound_id,c.smiles FROM combichem3d_pose p '
+            'JOIN compound c ON c.id=p.compound_id WHERE p.generated=1 AND p.output_passed=1 '
+            'AND (? IS NULL OR p.iteration=?) GROUP BY p.iteration,p.compound_id '
+            'ORDER BY p.iteration,p.compound_id',(iteration,iteration)):
+            yield dict(row)
 
 
 def growth_compound_rows(path, after=0, limit=256):

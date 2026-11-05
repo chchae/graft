@@ -1,5 +1,120 @@
 # Graft Development Handoff
 
+## Cycle names and final SMILES export for CReM (2026-11-05)
+
+**Confirmed user request:** display passing compounds by cycle as `01_0001`,
+`01_0002`, `02_0001`, etc., and save their SMILES to a file at the end.
+
+**Implementation choice:** assign export/display labels to distinct generated,
+output-passing identities within each cycle, in ascending SQLite compound ID
+order. Start numbering at one per cycle; multiple poses share a cycle name.
+A repeated identity in another cycle gets a name for that cycle. Keep internal
+CMPID names/IDs, parent links, claims, provenance and scientific results intact.
+CReM RESULT/parent previews and iteration inventories expose the display name.
+At final/partial/export-only export, atomically publish `compounds.smi` as
+`SMILES<TAB>cycle_name`, one row per passing cycle/identity. CSV remains globally
+deduplicated: `name` is the first passing cycle label and `cmpid` retains CMPID.
+Passing SDF titles use cycle names with `cmpid`/`display_name` properties; preserve
+all poses. Histories include the display name. Legacy fragment exports retain
+their CMPID naming. Export-only must not delete or recalculate existing results.
+
+
+**Verification:** 237 related regressions passed, with the previously documented
+real-fragment collision assertion explicitly deselected. New coverage checks
+multiple poses sharing a name, repeated identities across cycles, CSV/SDF/SMILES
+mapping, excluded inputs/filter failures, empty output, repeatable exports and
+unchanged scientific DB identities/history. Compileall, imports and diff checks
+passed. Export-only updated the existing EGFR result artifacts without resetting
+or recalculating compounds: 46 SMILES entries, distributed 13/22/10/1 across
+cycles 1–4, now carry the requested cycle labels.
+
+
+## CReM CLI starts fresh in existing output (2026-11-05)
+
+**Confirmed user requirement:** if the existing CReM output folder exists, delete
+its contents and run anew instead of failing on changed initial-frame settings.
+This supersedes ordinary CReM CLI resume behavior in the earlier CReM section;
+internal claim/journal recovery and legacy fragment-backend CLI behavior remain.
+
+**Implementation:** after whole-run SSH dispatch, acquire the existing growth
+stage lock before any deletion. Remove only the configured dedicated CReM output
+contents, retaining the held lock inode to exclude concurrent old/new supervisors
+and orphaned local fork workers. Clear DB/WAL, frame/native caches, journals,
+logs and exports; no archive is created. `--export-only` never clears output.
+Reject output containing configured input paths or unknown/unreadable saved DBs,
+and retain saved remote-pool/Slurm evidence instead of resetting uncertain work.
+Do not change receptor preparation, geometry, CReM chemistry, rankings, CPU
+allocation or unrelated project output. Regression tests use isolated temporary
+projects; no existing scientific project is deleted for verification.
+
+
+**Verification:** 235 related regressions passed; the previously documented
+real-fragment collision assertion was explicitly deselected. Coverage includes
+changed-budget CLI relaunch, export-only retention, live-lock exclusion, stable
+lock inode, input containment, symlink-target retention and saved remote-job
+protection. Compileall, imports and diff checks passed. Cleanup tests only removed
+isolated synthetic outputs; existing EGFR results were not removed during testing.
+
+
+## Optional fixed-frame CReM growth (2026-11-05)
+
+**Confirmed user requirements:** reimplement 3D growth using CReM with the supplied
+`/home1/crem/database/chembl22_sa2_hac12.db`, existing project TOML inputs, local
+multiprocessing and direct SSH execution. The input `reference-mcs` is the fixed
+starting frame. `[*:N]` caps the number of fragment additions originating at that
+attachment, while bare `[*]` is unlimited. Preserve the rest of the frame against
+substitution via CReM `protected_ids`. Before generation, methyl-probe all
+H-bearing sites across the entire active branch and block sites without a passing
+pose. A child adds exactly one fragment and consumes one count on only that root.
+Keep the original frame coordinates fixed, relax sidechains, and check both
+receptor and internal clashes. No elite-MCS update or new docking stage.
+User accepted up to ten candidates per site, 5–10-heavy-atom fragments and up to
+100 QED-ranked distinct previous-cycle parents as the starting policy.
+
+**Implementation choices:** opt-in `[combichem-3d].generation-backend="crem"`,
+`crem-db`, context radius 3 and minimum frequency 0. This selects `fixed-frame`;
+legacy fragment/frontier/frame-cycle behavior remains separate. Extract the core
+from the first compatible reference pose, removing its external decorations.
+All passing single-branch intermediates are output candidates and eligible
+parents. `[*:999]` is literal 999 for CReM; absent numbers use null/unlimited.
+Every H-bearing heavy atom is one logical site with independent H-direction
+starts; any passing direction admits it. CReM uses a selected `replace_ids` site,
+all other heavy atoms protected and symmetry fixes enabled. Reconstruct each
+CReM candidate with persistent UIDs and require identical isomeric SMILES before
+joint constrained 3D search. Never retain methyl probes or bypass context matching.
+Default finite search uses two starts, two torsion trials and 100 minimizer
+iterations; iteration-limited poses still need all existing geometry/stereo gates.
+CReM calls use one core, while SQLite-claim workers provide multiprocessing.
+Freeze ranked parents transactionally only after all prior-cycle work finishes;
+preserve saved selections, pools, cursors, journals and results on restart.
+Fingerprint the immutable library main file and nonempty WAL, CReM version,
+settings and implementation. Stream file hashes to bound RAM. Use fresh output
+for the new protocol; never convert existing runs or reset their calculations.
+Support whole-supervisor `execution-host` SSH forwarding on shared paths; reject
+Slurm/distributed worker-host combinations for this backend. Retain legacy native
+input extraction and independent existing Glide/GBSA workflows.
+
+**Evidence limits:** regression and small synthetic RDKit/CReM runs verify graph,
+provenance, state, coordinate and workflow behavior. They do not establish real
+receptor accuracy, affinity or production-scale throughput. QED is not affinity;
+the fixed-receptor radius-overlap filter is separate from ligand-only optimization.
+See `docs/COMBICHEM_3D.md` and the CReM settings example for inputs and limitations.
+
+
+**Verification:** 17 dedicated CReM tests pass, including real CReM-generated
+synthetic DB chemistry, explicit protection, capped/unlimited branches, probe
+rejections/unresolved evidence, atomic concurrent parent claims, fixed coordinates,
+restart and library-change guards. The full suite (before two final test-only
+additions) passed 1,935 tests with seven skips and the previously documented
+real-fragment collision assertion failure in `tests/test_combichem_3d.py`.
+Editable installation with the CReM extra, compileall, imports and diff checks pass.
+A separate synthetic project using the supplied ChEMBL DB and requested frame
+ran two CPU workers, resumed from two to six configured cycles and ended naturally
+with 44 attempts / 43 unique passing molecules. Its distant single-Ne receptor
+provides no EGFR validation or production throughput evidence. Production TOMLs,
+databases, native jobs and scientific results were not edited or submitted.
+
+
 ## Amber progress messages only on change (2026-11-04)
 
 **Confirmed user request:** suppress repeated Amber polling messages while the

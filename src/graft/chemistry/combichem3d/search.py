@@ -222,7 +222,7 @@ def methyl_probe(parent, history, uid, checker, cfg, seed, deadline=float('inf')
     product, probe_history = assemble(parent, history, [uid], ['*C'], f'probe/{uid}')
     directions = hydrogen_directions(parent, uid)
     starts = [local_methyl_pose(parent, product, uid, direction) for direction in directions]
-    if history.get('growth_mode')=='frame-cycles':
+    if history.get('growth_mode') in ('frame-cycles','fixed-frame'):
         # Only the original iteration-0 core is fixed. Even atoms retained in
         # later elite-MCS frames remain movable alongside the new methyl group.
         result=search(product,probe_history,checker,cfg,seed,starts=starts,deadline=deadline)

@@ -1,5 +1,102 @@
 # COMBICHEM 3D sidechain growth
 
+## CReM backend: fixed input frame and one addition per child
+
+Install `python -m pip install -e '.[crem]'` in the calculation environment.
+Append [crem-settings.example.toml](../examples/combichem-3d/crem-settings.example.toml)
+to the existing project TOML and run `graft combichem-3d egfr.toml` as before.
+`generation-backend="crem"` selects `growth-mode="fixed-frame"`; the default
+fragment backend and its protocols below remain separate. `crem-db` supplies the
+CReM database instead of the SMILES `sidechain-library`.
+
+For `c1nc(N[*:1])c2cc(-c3ccc([*:3])cc3)[nH]c2n1`, the N branch allows one
+addition and the phenyl branch three. Numbers are budgets, not atom IDs; repeated
+values are allowed. Bare `[*]` is unlimited and `[*:999]` means exactly 999 in this
+backend. `:0` and legacy `initial-attachment-max-cycles` settings are rejected.
+Global `max-iteration` and `max-seconds` still bound all runs.
+
+The first compatible reference-pose record supplies the original frame coordinates.
+Original reference decorations are removed. The original frame graph and mapped
+coordinates remain unchanged throughout growth; there is no later elite-MCS or
+per-product reference-coordinate switching. At each step:
+
+1. Enumerate every H-bearing heavy atom across each still-active branch, including
+   older fragments, plus the explicitly declared core attachment atoms if they
+   still have H. Every other core atom remains protected.
+2. Probe each logical heavy-atom site with an independent methyl substitution.
+   Explicit/generated H directions are starting poses for that site's finite
+   search; one passing direction admits the site. Only the original frame is
+   fixed; all sidechains may relax. CLASH_REJECT and UNRESOLVED sites are blocked.
+3. For each PASS site call CReM `grow_mol` with that site's `replace_ids` and all
+   other heavy atoms in `protected_ids`, with `symmetry_fixes=True`. Each call has
+   `ncores=1`; independent SQLite workers provide CPU multiprocessing. Default
+   context radius is 3 and minimum frequency 0. Select up to ten replacements of
+   5–10 heavy atoms per site with a stable per-parent/site seed. Contexts with no
+   matches produce no candidates; they never trigger unconditioned substitution.
+4. Each child contains exactly one added fragment, at one site. This increments
+   only its originating branch's count by one. Extract the CReM fragment and
+   require exact canonical isomeric reassembly using the retained atom UIDs.
+   No methyl probe remains in a product. Independently generate and optimize the
+   full child pose with the core fixed, then check receptor and internal clashes.
+5. Save all geometric poses, provenance and output-filter verdicts. Once the
+   entire cycle is finished, atomically freeze up to 100 distinct passing products
+   from that cycle, ranked by QED with compound/pose ID ties, as the next parents.
+   Single-branch intermediates are included in outputs and eligible as parents;
+   both branches need not be populated first. Selection does not mix cycles and
+   survives restart unchanged. No available parents ends the finite search.
+
+Fast defaults are two conformer starts, two torsion trials and 100 optimization
+iterations; the search stops at its first valid passing pose. User settings can
+increase exploration. An iteration-limited minimization is still recorded as
+unconverged and must pass all geometry/stereo/clash gates. These settings and the
+ligand-only force-field/post-optimization receptor bump model do not establish
+affinity, receptor relaxation or exhaustive conformational coverage.
+
+Use `processes` for local slots. Existing `execution-host` and `remote-env-script`
+forward the complete supervisor to one SSH host on shared storage, where CReM and
+the DB must be available. Slurm and distributed `worker-hosts` are outside this
+backend's current scope and are rejected explicitly. Existing native extraction
+of MAE/MAEGZ reference poses and receptor grid inputs is retained.
+
+Normal CReM CLI execution clears the configured dedicated output and starts fresh,
+including when frame budgets/settings change. Cleanup occurs on the actual
+execution host, after SSH forwarding, under the existing stage lock. Preserve
+the lock file's inode while removing the DB, caches, journals, logs and exports,
+so running supervisors and orphaned fork workers block cleanup. Output containing
+configured input files, unreadable/unknown saved DBs, or remote pool/Slurm evidence
+is retained rather than deleting uncertain work. Do not use the project root or
+shared legacy output as the dedicated CReM output.
+
+`--export-only` never clears output and can export an existing run even after
+frame settings change. Low-level worker/session recovery remains available within
+the implementation; ordinary CReM CLI relaunches now explicitly start over.
+The fragment DB is an immutable input: main-file and any nonempty WAL hashes are
+frozen, along with CReM version, settings, input coordinates and implementation.
+Updating/checkpointing a library can invalidate its fingerprint. Do not modify
+the library during a run. Hashing is streamed to avoid loading the DB into RAM.
+SQLite claims, result journals and interrupts still apply within a run.
+`cycles.jsonl` records selected parents; `probes.jsonl` records individual
+probe decisions and saved CReM candidate pools. Summary protocol is
+`combichem3d_crem_fixed_frame_v1`. Exhaustion is conditional on the selected pools,
+finite probes and ranked parents; unresolved evidence still marks a partial search.
+
+CReM passing compounds use cycle display names such as `01_0001`, `01_0002`,
+`02_0001`. Within each cycle, distinct passing chemical identities are numbered
+by ascending SQLite compound ID, starting at one. Multiple poses of a compound
+in that cycle share the name; the same identity passing in a later cycle gets
+that cycle's name. These are display labels only: SQLite names/IDs, parent links,
+claims and scientific history remain unchanged.
+
+At final export (also on partial stops and `--export-only`), `compounds.smi`
+contains `SMILES<TAB>cycle_name`, ordered by cycle and compound ID, with one line
+per distinct passing compound per cycle. Inputs and filter-failing structures
+are excluded. CSV `name` uses the first passing cycle's name and `cmpid` retains
+the original `CMPID_<id>`; the CSV still deduplicates identities across cycles.
+Passing SDF titles use the cycle name, with `cmpid` and `display_name` properties
+for mapping; each pose is retained. Histories and iteration inventories also
+include `display_name`. Log RESULT/parent FRAME previews use these names. The
+legacy fragment backend retains its CMPID display conventions.
+
 ## Current workflow: MCS → products → elites → new MCS
 
 Reference-pose ligands supply coordinates only. They are never inserted as
@@ -602,6 +699,7 @@ example is not a throughput benchmark.
 | --- | --- |
 | `combichem3d.sqlite` | Durable unique compound identities, all poses/lineages, plans, ordinal batches, probes, attempts and failures |
 | `compounds.csv` | Output-passing unique isomeric SMILES, properties/QED/similarity, iteration memberships and pose counts |
+| `compounds.smi` | CReM: one `SMILES<TAB>cycle_name` line per passing cycle/compound identity |
 | `poses.sdf` | Every retained input/intermediate/passing pose; properties distinguish output membership |
 | `passed_poses.sdf` | Output-passing poses, named CMPID_id; metadata includes history, iteration, parent pose and properties |
 | `growth_history.jsonl` | Every pose's complete heavy-atom UID/core/branch/fragment/birth history and lineage |

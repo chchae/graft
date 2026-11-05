@@ -27,14 +27,35 @@ def rows(path, table, batch):
         after = chunk[-1]['export_rowid']
 
 
+def passing_names(db, iteration=None):
+    """Display labels only; internal CMPID identities and pose lineage stay intact."""
+    result={}
+    current=None
+    number=0
+    for row in database.growth_output_compounds(db,iteration):
+        if row['iteration']!=current:
+            current=row['iteration'];number=0
+        number+=1
+        result[(current,row['compound_id'])]=f'{current:02d}_{number:04d}'
+    return result
+
+
 def export_results(db, output, batch=256):
     root = Path(output)
     root.mkdir(parents=True,exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix='.export-',dir=root))
     info = database.growth_run_info(db)
+    crem_mode=info['settings'].get('generation-backend')=='crem'
+    display_names=passing_names(db) if crem_mode else {}
     names = ['probes.jsonl','failures.jsonl','growth_history.jsonl','compounds.csv','poses.sdf','passed_poses.sdf','summary.json']
     try:
-        if info['settings'].get('growth-mode')=='frame-cycles':
+        if crem_mode:
+            names.append('compounds.smi')
+            with (temporary/'compounds.smi').open('w') as stream:
+                for row in database.growth_output_compounds(db):
+                    name=display_names[(row['iteration'],row['compound_id'])]
+                    stream.write(f"{row['smiles']}\t{name}\n")
+        if info['settings'].get('growth-mode') in ('frame-cycles','fixed-frame'):
             names.append('cycles.jsonl')
             with (temporary/'cycles.jsonl').open('w') as stream:
                 for row in rows(db,'combichem3d_cycle',batch):
@@ -76,6 +97,12 @@ def export_results(db, output, batch=256):
                     restore(mol,metadata)
                     Chem.CreateAtomIntPropertyList(mol,'graft_added_cycle')
                     mol.SetProp('_Name',f"CMPID_{row['compound_id']}")
+                    display_name=display_names.get((row['iteration'],row['compound_id'])) if row['output_passed'] else None
+                    if crem_mode:
+                        mol.SetProp('cmpid',f"CMPID_{row['compound_id']}")
+                    if display_name:
+                        mol.SetProp('_Name',display_name)
+                        mol.SetProp('display_name',display_name)
                     for key,value in dict(pose_id=row['id'],parent_pose=row['parent_pose'],iteration=row['iteration'],
                                           output_passed=bool(row['output_passed']),history=metadata,
                                           properties=json.loads(row['properties'] or '{}')).items():
@@ -84,12 +111,13 @@ def export_results(db, output, batch=256):
                     if row['output_passed']:
                         passed_poses.write(mol)
                     history.write(json.dumps(dict(pose_id=row['id'],compound_id=row['compound_id'],
-                                                   parent_pose=row['parent_pose'],output_passed=bool(row['output_passed']),**metadata))+'\n')
+                                                   parent_pose=row['parent_pose'],output_passed=bool(row['output_passed']),
+                                                   **(dict(display_name=display_name) if display_name else {}),**metadata))+'\n')
         finally:
             all_poses.close(); passed_poses.close()
         metrics = ['mw','clogp','tpsa','qed','similarity','hbd','hba','rotatable_bonds','heavy_atoms']
         with (temporary/'compounds.csv').open('w',newline='') as stream:
-            writer = csv.DictWriter(stream,fieldnames=['id','name','smiles','first_iteration','iterations','pose_count',*metrics])
+            writer = csv.DictWriter(stream,fieldnames=['id','name',*(['cmpid'] if crem_mode else []),'smiles','first_iteration','iterations','pose_count',*metrics])
             writer.writeheader()
             after = 0
             while True:
@@ -98,6 +126,9 @@ def export_results(db, output, batch=256):
                     break
                 for row in chunk:
                     props = json.loads(row.pop('properties'))
+                    if crem_mode:
+                        row['cmpid']=row['name']
+                        row['name']=display_names[(row['first_iteration'],row['id'])]
                     writer.writerow(row | {key:props.get(key) for key in metrics})
                 after = chunk[-1]['id']
         info['versions'] = info['settings'].get('runtime-versions',versions())
@@ -105,12 +136,16 @@ def export_results(db, output, batch=256):
         frame_mode=info['settings'].get('growth-mode')=='frame-cycles'
         info['protocol'] = 'combichem3d_frame_cycles_v1' if frame_mode else 'combichem3d_v1'
         info['seed'] = info['settings']['seed']
-        info['partial_search'] = (info['stop_reason'] not in ('exhausted','attachment_cycle_limits_reached') or info['statuses'].get('UNRESOLVED',0)>0
+        info['partial_search'] = (info['stop_reason'] not in ('exhausted','attachment_cycle_limits_reached','crem_search_exhausted') or info['statuses'].get('UNRESOLVED',0)>0
                                   or info['probe_statuses'].get('UNRESOLVED',0)>0
                                   or info['attempted'] < int(info['planned_combinations']) or info['pending_plans'] > 0)
         info['enumeration'] = 'Iteration 1: full core-attachment Cartesian products; later: full PASS-site candidate products conditional on finite probe searches'
         if frame_mode:
             info['enumeration']='Reference-MCS K^N; later elite-MCS frames with initial-branch-balanced, cycle-limit-eligible probe-PASS sites ranked by bond distance within each branch, full candidate Cartesian products'
+            info['reference_poses_are_growth_parents']=False
+        if info['settings'].get('generation-backend')=='crem':
+            info['protocol']='combichem3d_crem_fixed_frame_v1'
+            info['enumeration']='Single CReM addition per child at each methyl-PASS heavy-atom site across active branches; bounded context-conditioned pools and ranked previous-cycle parents'
             info['reference_poses_are_growth_parents']=False
         info['count_limit_active']=info['settings']['stop-mode']=='target'
         info['target_overshoot'] = max(0,info['unique_count']-info['settings']['target-count']) if info['count_limit_active'] else 0
@@ -127,10 +162,13 @@ def export_results(db, output, batch=256):
 
 def log_frames(db, source_iteration, iteration, limit=3, frames_only=False):
     from graft.chemistry.combichem3d.logging_utils import logger
+    cfg=database.growth_run_info(db)['settings']
+    display_names=passing_names(db,source_iteration) if cfg.get('generation-backend')=='crem' else {}
     logger.info('iteration %s input frames: source_iteration=%s (structure preview, at most %s)',iteration,source_iteration,limit)
     for row in database.growth_structure_rows(db,source_iteration,limit=limit,frames_only=frames_only):
         history=json.loads(row['history'])
-        logger.info('FRAME CMPID_%s pose=%s source=%s SMILES=%s core=%s',row['compound_id'],row['pose_id'],
+        name=display_names.get((source_iteration,row['compound_id']),f"CMPID_{row['compound_id']}")
+        logger.info('FRAME %s pose=%s source=%s SMILES=%s core=%s',name,row['pose_id'],
                     history.get('source_name','generated'),row['smiles'],history['core_smarts'])
 
 
@@ -145,6 +183,9 @@ def log_iteration_results(db, cfg, iteration, source_iteration):
     temporary=destination.with_suffix('.jsonl.tmp')
     previews=[]
     seen=set()
+    display_names=passing_names(db,iteration) if cfg.get('generation-backend')=='crem' else {}
+    if cfg.get('generation-backend')=='crem' and source_iteration!=iteration:
+        display_names.update(passing_names(db,source_iteration))
     with temporary.open('w') as stream:
         stream.write(json.dumps(dict(kind='summary',**counts))+'\n')
         for kind,number,results in (('frame',source_iteration,False),('result',iteration,True)):
@@ -158,6 +199,8 @@ def log_iteration_results(db, cfg, iteration, source_iteration):
                         row['core_smarts']=history['core_smarts']
                         row['frame_smarts']=history.get('frame_smarts',history['core_smarts'])
                         row['attachments']=history['attachments']
+                    if row['output_passed'] and (number,row['compound_id']) in display_names:
+                        row['display_name']=display_names[(number,row['compound_id'])]
                     stream.write(json.dumps(dict(kind=kind,iteration=number,**row))+'\n')
                     if (kind=='result' and row['output_passed'] and row['compound_id'] not in seen
                             and len(previews)<cfg['log-structures']):
@@ -169,6 +212,6 @@ def log_iteration_results(db, cfg, iteration, source_iteration):
                 iteration,counts['frames'],counts['attempted'],counts['passed_unique'],counts['passed_poses'],
                 statuses.get('CLASH_REJECT',0),statuses.get('UNRESOLVED',0),counts['partial'])
     for row in previews:
-        logger.info('RESULT CMPID_%s pose=%s parent_pose=%s SMILES=%s',row['compound_id'],row['pose_id'],row['parent_pose'],row['smiles'])
+        logger.info('RESULT %s pose=%s parent_pose=%s SMILES=%s',row.get('display_name',f"CMPID_{row['compound_id']}"),row['pose_id'],row['parent_pose'],row['smiles'])
     logger.info('iteration %s complete structure inventory: %s; final 3D poses: %s',iteration,destination,Path(cfg['out-dir'])/'poses.sdf')
     return counts

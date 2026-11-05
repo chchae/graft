@@ -15,6 +15,9 @@ dependencies = [
     "threadpoolctl>=3.1",
 ]
 
+[project.optional-dependencies]
+crem = ["crem>=0.3.2,<0.4"]
+
 [project.scripts]
 graft = "graft.cli:main"
 

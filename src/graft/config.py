@@ -67,6 +67,8 @@ def combichem_3d_settings(filename):
         'growth-mode': 'frame-cycles', 'elite-count': 20, 'elite-rank-by': 'qed',
         'next-attachment-count': 3, 'attachment-distance': 'bonds', 'mcs-timeout': 60,
         'initial-attachment-max-cycles': {},
+        'generation-backend': 'fragments', 'crem-db': None, 'crem-radius': 3,
+        'crem-min-freq': 0,
         'execution-host': None, 'remote-env-script': None, 'worker-hosts': {}, 'worker-ssh-known-hosts': None,
         'coordinator-processes': None, 'execution-backend': 'ssh', 'slurm-host': 'slurm', 'slurm-partition': 'cpu',
         'slurm-time-limit': None, 'slurm-memory-mb': 0, 'slurm-poll-seconds': 5.,
@@ -81,6 +83,35 @@ def combichem_3d_settings(filename):
     if unknown:
         raise ValueError('Unknown combichem-3d settings: ' + ', '.join(sorted(unknown)))
     cfg = defaults | raw
+    if cfg['generation-backend'] not in ('fragments', 'crem'):
+        raise ValueError('generation-backend must be fragments or crem')
+    if cfg['generation-backend']=='crem':
+        if 'growth-mode' in raw and raw['growth-mode']!='fixed-frame':
+            raise ValueError('CReM requires growth-mode="fixed-frame"')
+        cfg['growth-mode']='fixed-frame'
+        for key,value in {'elite-count':100,'elite-rank-by':'qed','stop-mode':'cycles',
+                          'conformers':2,'torsion-trials':2,'optimization-iterations':100,
+                          'sidechain-min-heavy-atoms':5,'sidechain-max-heavy-atoms':10}.items():
+            # Legacy pipeline limits do not define this new scientific protocol.
+            explicit = section if project_mode else raw
+            if key not in explicit:
+                cfg[key]=value
+        value=cfg['crem-db']
+        if not isinstance(value,str) or not value.strip() or '://' in value:
+            raise ValueError('CReM requires crem-db pointing to a fragment SQLite database')
+        cfg['crem-db']=str((path.parent/Path(value).expanduser()).resolve())
+        # Reuse existing input validation and hashing, without requiring a .smi library.
+        cfg['sidechain-library']=cfg['crem-db']
+        if cfg['initial-attachment-max-cycles']:
+            raise ValueError('CReM uses [*:N] budgets; omit initial-attachment-max-cycles')
+        if cfg['core-constraint']!='fixed':
+            raise ValueError('CReM fixed-frame requires core-constraint="fixed"')
+        if cfg['site-candidates'] or cfg['sidechain-include-h']:
+            raise ValueError('CReM uses database candidates and one non-H addition per step')
+        if cfg.get('execution-backend')=='slurm' or cfg.get('worker-hosts'):
+            raise ValueError('CReM supports local multiprocessing or execution-host SSH; omit Slurm/worker-hosts')
+    elif cfg['growth-mode']=='fixed-frame':
+        raise ValueError('fixed-frame requires generation-backend="crem"')
     limits=cfg['initial-attachment-max-cycles']
     if isinstance(limits,str):
         parsed={}
@@ -106,7 +137,7 @@ def combichem_3d_settings(filename):
         raise ValueError('initial-attachment-max-cycles requires growth-mode="frame-cycles"')
     if cfg['growth-mode']=='frame-cycles' and 'stop-mode' not in raw:
         cfg['stop-mode']='cycles'
-    if 'history' not in cfg and (cfg['infer-history'] or cfg['growth-mode']=='frame-cycles'):
+    if 'history' not in cfg and (cfg['infer-history'] or cfg['growth-mode'] in ('frame-cycles','fixed-frame')):
         output=(path.parent/Path(cfg['out-dir']).expanduser()).resolve()
         cfg['history']=str(output/'input-cache/inferred-history.json')
         cfg['history-source']='inferred'
@@ -138,6 +169,10 @@ def combichem_3d_settings(filename):
         value = cfg[key]
         if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key in positive_ints else 0):
             raise ValueError(f'{key} must be an integer >= {1 if key in positive_ints else 0}')
+    for key,minimum in (('crem-radius',1),('crem-min-freq',0)):
+        value=cfg[key]
+        if isinstance(value,bool) or not isinstance(value,int) or value<minimum:
+            raise ValueError(f'{key} must be an integer >= {minimum}')
     if (cfg['execution-backend']!='slurm' and cfg['processes'] > 384) or cfg['seed'] > 2147483646:
         raise ValueError('processes must be <=384 and seed <=2147483646')
     for key in ('core-displacement', 'overlap-tolerance', 'one-four-scale', 'restraint-force', 'max-seconds', 'grace-seconds', 'log-interval', 'result-buffer-seconds'):
@@ -164,7 +199,7 @@ def combichem_3d_settings(filename):
         if not isinstance(cfg[key], bool):
             raise ValueError(f'{key} must be a boolean')
     for key, allowed in {'one-four-policy': ('exclude', 'include', 'scaled'),
-                         'growth-mode': ('frame-cycles','frontier'),
+                         'growth-mode': ('frame-cycles','frontier','fixed-frame'),
                          'sidechain-selection': ('random','ordered'),
                          'force-field': ('auto', 'MMFF', 'UFF'),
                          'core-constraint': ('fixed', 'restraint'), 'stop-mode': ('target', 'time','cycles')}.items():

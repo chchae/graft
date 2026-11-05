@@ -84,6 +84,10 @@ def final_analysis_lines(db):
                 lines.append(f"  미해결 오류(분자수, 중복가능): {row['error']} n={row['n']}")
     for cycle in snapshot['cycles']:
         report=cycle['report'];number=cycle['iteration']
+        if report.get('kind')=='fixed_frame_parent_selection':
+            lines.append(f"CYCLE {number} CReM 부모선택: rank_by={report['rank_by']} "
+                         f"pose_ids={report['selected_pose_ids']} compound_ids={report['selected_compound_ids']}")
+            continue
         row=frames.get(cycle['frame_pose'])
         if row is None:
             prepared=report.get('prepared_frame')
@@ -123,7 +127,7 @@ def final_analysis_lines(db):
                 used=h.get('growth_counts',{}).get(label)
                 limit=h.get('initial_attachment_max_cycles',{}).get(label,999)
                 lines.append(f"  ROOT {label}: initial_uid={uid} growth_cycles_used={used if used is not None else '이전 기록 없음'} "
-                             f"max_cycles={'unlimited' if limit==999 else limit} "
+                             f"max_cycles={'unlimited' if limit is None or limit==999 and h.get('growth_mode')!='fixed-frame' else limit} "
                              f"input_map_value={h.get('initial_attachment_map_values',{}).get(label,'이전 기록 없음')} "
                              f"cumulative_selected_sites={h.get('attachment_selection_counts',{}).get(label,'이전 기록 없음')}")
         probes=report.get('probes',{})

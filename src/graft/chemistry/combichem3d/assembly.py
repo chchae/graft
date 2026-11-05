@@ -64,7 +64,8 @@ def assemble(parent, history, sites, choices, token):
         # the terminal heavy atom. molzip preserves attachment stereochemistry.
         rw.ReplaceAtom(hs[0], dummy)
         branch = (f"branch_{history['attachments'].index(site) + 1}"
-                  if history['iteration'] == 0 else anchor.GetProp('_mn_branch'))
+                  if history['iteration'] == 0 or (history.get('growth_mode')=='fixed-frame' and site in history['attachments'])
+                  else anchor.GetProp('_mn_branch'))
         fragment_id = hashlib.sha256(f'{lineage}/{site}/{choice}'.encode()).hexdigest()[:24]
         for atom in fragment.GetAtoms():
             atom.SetAtomMapNum(0)

@@ -41,6 +41,21 @@ Graft is a modular iterative lead-optimization pipeline integrating REINVENT4/Li
 
 ## Local COMBICHEM 3D growth
 
+For **CReM with a fixed input frame**, append the
+[CReM settings](examples/combichem-3d/crem-settings.example.toml) to an existing
+project TOML, install `python -m pip install -e '.[crem]'`, then run
+`graft combichem-3d input.toml`. Each child receives one fragment at one
+methyl-probe-PASS site; all H-bearing positions in active branches are considered.
+`[*:N]` limits additions on that branch; bare `[*]` is unlimited, subject to global
+cycle/time limits. The original frame stays fixed. Up to 100 distinct QED-ranked
+products from the previous cycle become parents. Local multiprocessing and
+whole-run SSH forwarding use the existing settings and dedicated SQLite output.
+Normal CReM CLI launches clear that output and start from scratch; `--export-only`
+preserves saved results. A held calculation lock blocks cleanup.
+This backend performs no elite-MCS update, docking or affinity scoring.
+
+The original fragment backend remains available:
+
 `graft combichem-3d input.toml` extracts the starting frame from `reference-mcs`;
 reference ligands supply coordinates only. Each cycle enumerates the configured
 attachment-site Cartesian product, filters constrained poses against the receptor,

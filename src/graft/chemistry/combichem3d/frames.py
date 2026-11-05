@@ -79,12 +79,20 @@ class ReferencePoses:
         return result
 
 
-def initial_frame(filename, smarts, *, legacy_limits=None):
+def initial_frame(filename, smarts, *, legacy_limits=None, growth_mode='frame-cycles'):
     references=ReferencePoses(filename,smarts)
     record,source,match,_=references.records[0]
     query,anchors=frame_query(smarts)
     source_query=Chem.MolFromSmarts(smarts)
     labels,limits,notation=initial_attachment_spec(source_query,legacy_limits)
+    if growth_mode=='fixed-frame':
+        dummies=[a for a in source_query.GetAtoms() if a.GetAtomicNum()==0]
+        if any(a.HasProp('molAtomMapNumber') and a.GetAtomMapNum()<1 for a in dummies):
+            raise ValueError('CReM [*:N] requires positive growth counts; use [*] for unlimited')
+        labels=[str(i) for i in range(len(dummies))]
+        limits={label:a.GetAtomMapNum() if a.HasProp('molAtomMapNumber') else None
+                for label,a in zip(labels,dummies)}
+        notation='crem_addition_limits'
     mol=Chem.Mol(source)
     for atom in mol.GetAtoms():
         if atom.GetAtomicNum()>1:
@@ -95,7 +103,7 @@ def initial_frame(filename, smarts, *, legacy_limits=None):
     lookup={a.GetProp('_mn_uid'):a.GetIdx() for a in frame.GetAtoms()}
     history=dict(schema=provenance.SCHEMA,iteration=0,core_smarts=Chem.MolToSmarts(query),
                  core=[dict(core_index=i,uid=uid,xyz=list(frame.GetConformer().GetAtomPosition(lookup[uid]))) for i,uid in enumerate(uids)],
-                 attachments=[uids[i] for i in anchors],atoms=[],role='frame',growth_mode='frame-cycles',
+                 attachments=[uids[i] for i in anchors],atoms=[],role='frame',growth_mode=growth_mode,
                  frame_uids=[a.GetProp('_mn_uid') for a in frame.GetAtoms()],frame_smarts=Chem.MolToSmarts(frame),
                  frame_smiles=provenance.canonical_smiles(frame),reference_record=record,
                  initial_attachment_labels={label:uids[i] for label,i in zip(labels,anchors)},
@@ -114,7 +122,8 @@ def initial_frame(filename, smarts, *, legacy_limits=None):
 def prepare_frame_inputs(cfg):
     cfg['reference-poses']=cfg.get('reference-poses',cfg['parents'])
     mol,history=initial_frame(cfg['reference-poses'],cfg.get('reference-mcs'),
-                              legacy_limits=cfg.get('initial-attachment-max-cycles'))
+                              legacy_limits=cfg.get('initial-attachment-max-cycles'),
+                              growth_mode=cfg.get('growth-mode','frame-cycles'))
     folder=Path(cfg['out-dir'])/'input-cache/frame-seed'
     folder.mkdir(parents=True,exist_ok=True)
     sdf=Chem.MolToMolBlock(mol)+'\n$$$$\n'

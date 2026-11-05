@@ -1,0 +1,36 @@
+# Append this table to an existing Graft TOML. Keep its reference-pose and
+# dock-grid/receptor inputs. All local relative paths resolve against that TOML.
+# Normal CReM CLI runs clear this dedicated output and start fresh.
+# --export-only retains the saved DB/results and only rebuilds exports.
+[combichem-3d]
+generation-backend = "crem"
+crem-db = "/home1/crem/database/chembl22_sa2_hac12.db"
+crem-radius = 3
+crem-min-freq = 0
+reference-mcs = "c1nc(N[*:1])c2cc(-c3ccc([*:3])cc3)[nH]c2n1"
+out-dir = "./output/combichem-3d-crem"
+# One fragment per child per cycle. :1 + :3 permits at most four additions.
+max-iteration = 4
+stop-mode = "cycles"
+sidechains-per-site = 10 # upper bound; context may provide fewer replacements
+sidechain-min-heavy-atoms = 5
+sidechain-max-heavy-atoms = 10
+elite-count = 100
+elite-rank-by = "qed"
+processes = 16
+max-seconds = 1800
+# Fast finite searches; increase these explicitly for more exploration.
+conformers = 2
+torsion-trials = 2
+optimization-iterations = 100
+core-constraint = "fixed"
+
+# Optional: forward the complete supervisor to an SSH host with shared paths.
+# Omit both keys for local execution. Install graft[crem] in that environment.
+# execution-host = "t41"
+# remote-env-script = "/absolute/shared/path/to/activate-graft.sh"
+
+# Optional whole-molecule filters, separate from fragment-size limits:
+# [combichem-3d.filters]
+# mw = [0, 650]
+# qed = [0.2, 1.0]

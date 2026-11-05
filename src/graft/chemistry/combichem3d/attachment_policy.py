@@ -51,6 +51,8 @@ def root_for_site(history, uid):
 
 def growth_available(history, root):
     limit=history.get('initial_attachment_max_cycles',{}).get(root,999)
+    if history.get('growth_mode')=='fixed-frame':
+        return limit is None or history.get('growth_counts',{}).get(root,0)<limit
     return limit==999 or history.get('growth_counts',{}).get(root,0)<limit
 
 
