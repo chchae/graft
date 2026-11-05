@@ -3427,3 +3427,75 @@ generated iteration 4's 10,000 compounds and advanced its 5,000 druglike passes
 to ligprep_running. No manual database edits, resets or job submissions were
 performed. This is workflow evidence, not scientific accuracy validation; the
 full test suite was not rerun for this extension.
+
+
+## Reject unusable adaptive LibInvent MCS candidates (2026-11-05)
+
+**Observed runtime bug:** iteration 2 accepted a different top-two MCS whose
+attachment-bearing scaffold could not decompose either source elite, leaving
+zero usable TL pairs. A matching common substructure alone does not establish
+valid attachment boundaries or nonempty decorators.
+
+**Implementation repair:** before accepting a different automatic ranked MCS,
+require exact isomeric decomposition/reassembly of every elite in that ranked
+prefix. Record `elite_decomposition_failed` and continue the existing halving
+and validated best-elite/previous-scaffold fallback when this check fails.
+Preserve saved immutable snapshots, original ranked TL inputs, vocabulary and
+minimum-two checks, original-prior restart and fixed docking constraints.
+This validation applies to new snapshots; it does not reset saved plans or jobs.
+Regression tests include the reported EGFR top two and undeclared branches.
+Read-only reconstruction of the actual top ten selects the validated previous
+scaffold; all ten reconstruct exactly and pass the saved vocabulary checks.
+These checks do not validate external TL/sampling or affinity.
+
+**Verification:** 148 focused regressions passed. The full suite reported 1,901
+passed, seven skipped and the previously documented unrelated
+`test_combichem_3d.py::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself`
+failure. Compileall, package/CLI imports and diff whitespace checks passed.
+No production database, saved plan, calculation or submitted job was changed.
+
+
+## LibInvent hydrogen decorations (2026-11-05)
+
+**Confirmed user requirement:** support an unsubstituted attachment position as
+hydrogen in LibInvent elite decomposition, training and sampled-product assembly.
+This supersedes the earlier prohibition on hydrogen decorators for this LibInvent
+path. Keep exactly two declared attachment sites and the original prior, selected
+elite population, vocabulary gate and minimum-two usable training-pair gate.
+
+**Implementation choice:** represent an ordinary hydrogen decoration by a whole
+fragment `*`, e.g. `*|*CN1CCCC1`. This uses the original prior's existing tokens;
+do not introduce unsupported `[H]` training tokens or empty fields. After the
+existing heavy-atom decomposition fails, match a temporary explicit-H copy, keep
+all undeclared-branch/contact/overlap checks, and accept only exact canonical
+isomeric decomposition/reassembly. Do not replace isotope-labelled hydrogen by
+ordinary H or change charge, bond order or stereochemistry to make a pair fit.
+Automatic LibInvent candidate validation uses the same hydrogen-aware checks.
+Shared combichem decomposition, fragment admission and assembly remain unchanged.
+
+Both local and SSH LibInvent sampling/TL run through the standalone launcher.
+Within that process only, expand a whole decoration `*` to native `*[H]` before
+REINVENT assembly and remove ordinary explicit H from the product. Ordinary
+fragments retain native behavior; blank fields remain invalid. Do not edit the
+installed REINVENT package, prior, previously uploaded workers or saved scaffold
+snapshots. A saved scaffold can now produce valid new TL pairs without replacing
+its snapshot. Every new SSH invocation uploads its launcher into its own run
+folder; preserve existing remote JobIds, directories and recovery semantics.
+Models trained with this convention require this launcher when sampling.
+
+Tests cover the reported two EGFR elites, one/two hydrogen decorations, same-atom
+sites, isotope and stereochemical preservation, undeclared branches, connected
+sidechains, invalid valence/fragments, training vocabulary and launcher routing.
+These graph/runtime checks do not establish affinity or production sampling quality.
+
+**Verification:** full suite: 1,920 passed, seven skipped, with the previously
+recorded unrelated real-fragment collision assertion failure in
+`tests/test_combichem_3d.py`. Compileall, package/CLI imports and diff checks passed.
+A read-only CPU probe of the installed LibInvent original prior accepted both
+reported H-containing pairs, produced finite likelihoods and gradients, and
+reconstructed both molecules through the native assembly function with the
+process-local adapter. No prior/model was saved by that probe. The existing
+production supervisor independently loaded this change, accepted two of ten
+selected elites without rewriting the saved scaffold, completed TL/sampling and
+inserted new iteration-2 compounds. This is observed workflow compatibility,
+not docking/GBSA accuracy or a guarantee of sampling diversity/quality.

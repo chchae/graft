@@ -1611,7 +1611,8 @@ def run_libinvent_sampling(
 
     run_command(
         [
-            reinvent,
+            Path(reinvent).resolve().with_name("python"),
+            Path(__file__).with_name("reinvent_launcher.py"),
             "-l",
             run_dir / "sampling.log",
             config_file,
@@ -1949,6 +1950,7 @@ def write_elite_libinvent_training_files(
     remote=None,
     score_source="prime_gbsa",
 ):
+    from graft.chemistry.libinvent_decorations import decompose
     from graft.libinvent_vocabulary import load_prior_vocabulary, unsupported_pair_tokens
 
     vocabulary = load_prior_vocabulary(prior_file, remote) if prior_file is not None else None
@@ -1979,7 +1981,7 @@ def write_elite_libinvent_training_files(
             ) = row
             prime_gbsa_score = None
 
-        pair = decompose_elite_for_libinvent(
+        pair = decompose(
             smiles,
             scaffold_smiles,
         )

@@ -39,7 +39,8 @@ def test_remote_sampling_transfers_inputs_and_downloads_result(tmp_path, monkeyp
     assert config["parameters"]["num_smiles"] == 8
     assert len([kw for _, kw in calls if "stdin" in kw]) == 1
     execution = [cmd for cmd, _ in calls if "export PATH=" in cmd][0]
-    assert "/remote/env/bin/reinvent" in execution
+    assert "/remote/env/bin/python" in execution
+    assert "reinvent_launcher.py" in execution
 
 
 def test_remote_tl_uses_original_prior_and_uploads_local_model_for_sampling(tmp_path, monkeypatch):
@@ -146,6 +147,19 @@ def test_remote_transport_roundtrip_and_sqlite_insertion(tmp_path, monkeypatch):
         "pathlib.Path(sys.argv[2]).write_text('finished\\n')\n"
     )
     executable.chmod(0o755)
+    # Exercise the uploaded launcher against a minimal importable runtime.
+    (env / "bin/python").symlink_to(sys.executable)
+    package = env / "fake/reinvent"
+    (package / "chemistry/library_design").mkdir(parents=True)
+    (package / "models/libinvent/models").mkdir(parents=True)
+    (package / "Reinvent.py").write_text(
+        "import runpy\ndef main_script():\n"
+        f"    runpy.run_path({str(executable)!r}, run_name='__main__')\n")
+    (package / "chemistry/library_design/bond_maker.py").write_text(
+        "def join_scaffolds_and_decorations(*args): return None\n")
+    (package / "models/libinvent/models/decorator.py").write_text(
+        "class Encoder:\n    def forward(self, *args): pass\n")
+    monkeypatch.setenv("PYTHONPATH", str(env / "fake"))
     actual_run = subprocess.run
 
     def local_transport(command, **kwargs):
@@ -182,7 +196,8 @@ def test_local_sampling_remains_available(tmp_path, monkeypatch):
 
     def run(command, *, log_dir):
         assert log_dir == tmp_path
-        assert command[0] == "/local/bin/reinvent"
+        assert command[:2] == [Path("/local/bin/python"),
+                               Path(reinvent_remote.__file__).with_name("reinvent_launcher.py")]
         (tmp_path / "generated.csv").write_text("SMILES\nC\n")
 
     monkeypatch.setattr(_core, "run_command", run)

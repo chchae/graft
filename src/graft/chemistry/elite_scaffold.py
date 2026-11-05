@@ -150,6 +150,11 @@ def prepare_ranked_scaffold(inputs, previous, docking_smarts, *, mcs_timeout=60)
                 attempt['status'] = 'same_as_previous_mcs'
             elif not scaffold.HasSubstructMatch(Chem.MolFromSmarts(docking_smarts), useChirality=False):
                 raise RuntimeError('Generation scaffold does not contain the fixed docking core.')
+            elif not _round_trips(selected, info['scaffold_smiles']):
+                # A common substructure can still leave undeclared branches or
+                # consume an entire decorator. Require usable TL pairs before
+                # freezing this candidate, then continue the ranked search.
+                attempt['status'] = 'elite_decomposition_failed'
             else:
                 attempt['status'] = 'different_mcs'
                 attempts.append(attempt)

@@ -23,7 +23,8 @@ def project(tmp_path):
         conn.executemany(
             'INSERT INTO compound(name,smiles,iteration,state,docking_score,prime_gbsa_score) '
             'VALUES (?,?,1,\'prime_gbsa_done\',-10,?)',
-            [('E1', 'COc1ccc(CC)cc1', -40), ('E2', 'CCOc1ccc(CN)cc1', -30),
+            # Both elites retain a nonempty decoration at each inferred site.
+            [('E1', 'CCCOc1ccc(CNCC)cc1', -40), ('E2', 'NCCOc1ccc(CNCO)cc1', -30),
              ('OUTSIDE', 'NCc1ccc(Cl)cc1', -20)],
         )
     return SimpleNamespace(db_path=path, output=tmp_path, automatic_mcs=True,
@@ -179,7 +180,9 @@ def test_elite_core_can_expand_beyond_original_pose_core(project):
 
 
 def test_old_iteration_keeps_its_already_used_docking_core(project, monkeypatch):
-    elites = database.iteration_prime_gbsa_elites(project.db_path, 1, 2)
+    # Legacy docking used a core represented in the original reference poses.
+    elites = [(4, 'E1', 'COc1ccc(CC)cc1', 1, -10, -40),
+              (5, 'E2', 'CCOc1ccc(CN)cc1', 1, -10, -30)]
     inputs = [dict(id=r[0], name=r[1], mol=Chem.MolFromSmiles(r[2])) for r in elites]
     info = _core.prepare_libinvent_scaffold(inputs, None, project.output / 'old')
     old = dict(mcs_smarts=info['mcs_smarts'], scaffold_smiles=info['scaffold_smiles'],
@@ -519,9 +522,11 @@ def test_reference_fallback_is_not_reapplied_to_existing_project(project):
     saved = database.iteration_scaffold(project.db_path, 3)
     assert saved['source'] == 'previous_iteration_elites'
     assert saved['mcs_smarts'] != project.initial_mcs_smarts
-    with pytest.raises(RuntimeError, match='incompatible with the preceding scaffold'):
-        prepare_iteration_scaffold(project, 4, [(*r[:3], 3, *r[4:]) for r in elites], create=True)
-    assert database.iteration_scaffold(project.db_path, 4) is None
+    prepare_iteration_scaffold(project, 4, [(*r[:3], 3, *r[4:]) for r in elites], create=True)
+    following = database.iteration_scaffold(project.db_path, 4)
+    assert following['source'] == 'previous_mcs_reused_attachments'
+    assert following['scaffold_smiles'] == saved['scaffold_smiles']
+    assert following['scaffold_smiles'] != project.initial_mcs_smarts
     assert project.mcs_smarts == project.initial_mcs_smarts
 
 

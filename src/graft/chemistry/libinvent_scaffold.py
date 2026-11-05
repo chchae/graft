@@ -4,19 +4,19 @@ import re
 from rdkit import Chem
 
 from graft import _core
-from graft.chemistry.combichem import assemble, _retained_core_query
+from graft.chemistry.combichem import _retained_core_query
+from graft.chemistry.libinvent_decorations import decompose, assemble_pair
 
 
 def _round_trips(inputs, scaffold_smiles):
     """Every selected elite must survive decomposition and exact reassembly."""
-    scaffold = Chem.MolFromSmiles(scaffold_smiles)
     for ref in inputs:
         smiles = Chem.MolToSmiles(ref['mol'], isomericSmiles=True)
-        pair = _core.decompose_elite_for_libinvent(smiles, scaffold_smiles)
+        pair = decompose(smiles, scaffold_smiles)
         if pair is None:
             return False
-        # assemble orders sites by parsed atom index, as the TL SMILES columns do.
-        product = assemble(scaffold, [Chem.MolFromSmiles(s) for s in pair[1].split('|')])
+        # Site order follows the TL scaffold SMILES, including hydrogen sites.
+        product = assemble_pair(*pair)
         if product != smiles:
             return False
     return True

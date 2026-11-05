@@ -75,7 +75,7 @@ def test_missing_internal_cut_reuses_previous_without_cutting_ring_or_old_bounda
 
 
 @pytest.mark.parametrize('smiles', [('COc1ccc(Cl)cc1',),
-                                    ('COc1ccc(Cl)cc1', 'CCCc1ccccc1')])
+                                        ('COc1ccc(Cl)cc1', 'CCCc1cccc(N)c1')])
 def test_missing_internal_cut_reuse_requires_two_compatible_training_elites(smiles):
     with pytest.raises(RuntimeError, match='Previous scaffold reuse requires.*at least two'):
         adaptive.best_elite_scaffold(refs(smiles, n=len(smiles)), PREVIOUS, 'c1ccccc1')
@@ -120,7 +120,7 @@ def test_insufficient_new_core_training_reuses_exact_previous_scaffold(monkeypat
 
 
 def test_previous_reuse_still_requires_two_exactly_reconstructable_elites():
-    selected = refs(('CCc1ccc(CC)cc1', 'CCCc1ccccc1'), n=2)
+    selected = refs(('CCc1ccc(CC)cc1', 'CCCc1cccc(N)c1'), n=2)
     with pytest.raises(RuntimeError, match='Previous scaffold reuse requires.*at least two'):
         adaptive.best_elite_scaffold(selected, PREVIOUS, 'c1ccccc1')
 
@@ -189,7 +189,8 @@ def test_real_egfr_best_elite_uses_two_sidechain_cuts_with_original_elite_traini
     assert len(saved['replacement_cuts']) == 2
     base = set(saved['previous_core_atom_indices'])
     assert all(cut['retained_atom_index'] not in base for cut in saved['replacement_cuts'])
-    assert Chem.MolFromSmarts(saved['mcs_smarts']).GetNumAtoms() == 23
+    # An H decorator now permits retaining the full chlorobenzyl group.
+    assert Chem.MolFromSmarts(saved['mcs_smarts']).GetNumAtoms() == 30
 
 
 def test_different_valid_mcs_is_accepted_at_first_smaller_subset(monkeypatch):
@@ -200,6 +201,42 @@ def test_different_valid_mcs_is_accepted_at_first_smaller_subset(monkeypatch):
     saved = adaptive.prepare_ranked_scaffold(refs(), PREVIOUS, 'c1ccccc1')
     assert [a['elite_count'] for a in saved['elite_mcs_attempts']] == [10, 5]
     assert saved['source_ids'] == list(range(100, 105))
+
+
+def test_different_mcs_with_undeclared_branch_continues_ranked_search(monkeypatch):
+    selected = refs(('CCCc1ccc(C(CCN)CO)cc1', 'CCCCc1ccc(C(CCO)CN)cc1'))
+    invalid = dict(mcs_smarts='Cc1ccc(C(CC))cc1',
+                   scaffold_smiles='[*:0]Cc1ccc(C(CC)[*:1])cc1')
+    # The selected molecules share the proposed core, but its terminal C
+    # leaves an extra undeclared branch that TL decomposition must reject.
+    assert all(ref['mol'].HasSubstructMatch(Chem.MolFromSmarts(invalid['mcs_smarts']))
+               for ref in selected)
+    assert not adaptive._round_trips(selected, invalid['scaffold_smiles'])
+    calls = []
+    def infer(subset, *args, **kwargs):
+        calls.append(len(subset))
+        return invalid
+    monkeypatch.setattr(_core, 'prepare_libinvent_scaffold', infer)
+    saved = adaptive.prepare_ranked_scaffold(selected, PREVIOUS, 'c1ccccc1')
+    assert calls == [10, 5, 2]
+    assert [a['status'] for a in saved['elite_mcs_attempts'][:-1]] == [
+        'elite_decomposition_failed'] * 3
+    assert adaptive._round_trips(selected[:1], saved['scaffold_smiles'])
+    assert len(saved['compatible_elite_ids']) >= 2
+
+
+def test_reported_iteration2_elites_support_hydrogen_automatic_scaffold():
+    selected = refs((
+        'Cc1ccc(-c2cc3c(NC(CN4CCCC4)c4ccccc4)ncnc3[nH]2)cc1',
+        'CN1CCC(Cc2ccc(-c3cc4c(NCc5ccccc5)ncnc4[nH]3)cc2)CC1',
+    ), n=2)
+    old = 'c1nc(N[*:0])c2cc(-c3ccc([*:1])cc3)[nH]c2n1'
+    saved = adaptive.prepare_ranked_scaffold(
+        selected, dict(mcs_smarts=old, scaffold_smiles=old), old)
+    assert saved['elite_mcs_attempts'][0]['status'] == 'different_mcs'
+    assert saved['source'] == 'previous_iteration_elites'
+    assert saved['scaffold_smiles'] != old
+    assert adaptive._round_trips(selected, saved['scaffold_smiles'])
 
 
 @pytest.mark.parametrize('reuse', [False, True, 'missing_cut'])

@@ -117,7 +117,7 @@ def run_remote(config_file, output_file, settings, *, remote_model):
     _ssh(settings, f"cat > {quote(str(remote_config))}", input=rendered.encode())
     env_bin = str(PurePosixPath(settings["env"]) / "bin")
     executable = quote(env_bin + '/reinvent')
-    if config["run_type"] == "transfer_learning":
+    if config["run_type"] in ("transfer_learning", "sampling"):
         launcher = remote_dir / "reinvent_launcher.py"
         source = Path(__file__).with_name("reinvent_launcher.py").read_bytes()
         _ssh(settings, f"cat > {quote(str(launcher))}", input=source)
