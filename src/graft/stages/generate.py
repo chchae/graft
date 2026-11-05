@@ -175,6 +175,9 @@ def _run_combichem(args, iteration, directory):
 
 @timed_stage("Generate stage")
 def _run_stage(args, requested_iteration):
+    if getattr(args, 'generation_method', None) == 'crem':
+        from graft.stages.crem_generate import run_stage
+        return run_stage(args, requested_iteration)
     iteration = choose_iteration(args, requested_iteration)
     if iteration is None:
         print(f"Maximum iteration ({args.max_iteration}) reached.")
@@ -312,7 +315,7 @@ def _run_stage(args, requested_iteration):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="REINVENT4/LibInvent generation stage")
+    p = argparse.ArgumentParser(description="Molecule generation stage: REINVENT4/LibInvent, combichem or CReM")
     p.add_argument("project_toml", type=Path)
     p.add_argument("--iteration", type=int)
     p.add_argument("--schrodinger", type=Path)

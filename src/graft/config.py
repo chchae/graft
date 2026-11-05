@@ -442,10 +442,34 @@ def generation_settings(config: dict[str, Any], base: Path) -> dict[str, Any]:
     maximum = config.get('sidechain-max-heavy-atoms')
     if maximum is not None and (isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 1):
         raise ValueError('sidechain-max-heavy-atoms must be a positive integer')
+    method = config.get('generation-method', 'combichem' if library is not None else 'reinvent4')
+    if method not in ('reinvent4', 'combichem', 'crem'):
+        raise ValueError('generation-method must be reinvent4, combichem or crem')
+    if method == 'crem':
+        if library is not None:
+            raise ValueError('CReM generation does not use sidechain-library')
+        if not config.get('reference-mcs'):
+            raise ValueError('CReM generation requires reference-mcs with attachment points')
+        if not config.get('md-gbsa', False) or config.get('prime-gbsa', True) is False or not config.get('amber_gbsa', config.get('amber-gbsa-enabled', False)):
+            raise ValueError('CReM pipeline requires Amber, Prime and md-gbsa enabled')
+        count = config.get('elite-count', 30)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            raise ValueError('CReM elite-count must be a positive integer')
+        section = config.get('combichem-3d', {})
+        if not isinstance(section, dict) or section.get('generation-backend', 'crem') != 'crem':
+            raise ValueError('CReM pipeline requires a CReM combichem-3d table')
+        if section.get('filters') or section.get('prune-intermediates'):
+            raise ValueError('CReM pipeline applies drug likeness after generation; omit growth property filters/pruning')
+        if config.get('elite-mcs') is not None or config.get('elite-mcs-fixed', False):
+            raise ValueError('CReM pipeline uses a fixed reference-mcs; omit elite-mcs overrides')
+        if any(key in section for key in ('max-iteration', 'elite-count', 'elite-rank-by', 'stop-mode', 'target-count', 'out-dir')):
+            raise ValueError('CReM pipeline uses top-level iteration/elite-count/target-count/out-dir; remove internal cycle settings')
+    elif (method == 'combichem') != (library is not None):
+        raise ValueError('generation-method and sidechain-library disagree')
     return {'sidechain_library': library,
             'mcs_timeout': mcs_timeout,
             'sidechain_max_heavy_atoms': maximum,
-            'generation_method': 'combichem' if library is not None else 'reinvent4',
+            'generation_method': method,
             'sample_size': int(batch)}
 
 

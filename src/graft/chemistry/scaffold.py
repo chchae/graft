@@ -237,6 +237,12 @@ def log_iteration_mcs(args, iteration, snapshot=None, *, include_generation=True
 
 def prepare_iteration_scaffold(args, iteration, elites=None, *, create=False, include_generation=True):
     """Adapt generation to elites while keeping the initial docking constraint."""
+    if getattr(args, 'generation_method', None) == 'crem':
+        snapshot = database.iteration_scaffold(args.db_path, iteration)
+        if snapshot is None or snapshot.get('generation_method') != 'crem':
+            raise RuntimeError('CReM fixed docking scaffold must be saved by the generation worker')
+        args.mcs_smarts = snapshot['docking_mcs_smarts']
+        return
     if not getattr(args, 'iteration_mcs', getattr(args, 'automatic_mcs', False)):
         return
 

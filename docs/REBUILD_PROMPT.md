@@ -1,5 +1,68 @@
 # Independent Graft reconstruction prompt
 
+## CReM generation in the scored GRAFT pipeline (2026-11-05)
+
+**Confirmed user request and interview decisions:** replace REINVENT generation
+with CReM as an opt-in pipeline backend. Keep iteration 0 exactly as before.
+Start iteration 1 from the extracted reference-mcs frame, use grow-only fragment
+addition, retain methyl-probe and fixed-frame 3D clash gates, and remove separate
+CReM cycle progression. Each GRAFT iteration performs one expansion before the
+existing Drug likeness -> LigPrep -> constrained Glide -> Amber -> Prime ->
+MD-GBSA stages. Keep position-wise candidate caps and fragment sizes. Measure
+the generation target after validity/novelty/3D admission but before drug
+likeness; if the available candidate pools exhaust below target, continue with
+the actual population. Use `elite-count` for subsequent parent selection and
+retain the configured downstream filtering/calculation policies.
+
+**Implementation choices:** top-level `generation-method="crem"`; the existing
+`[combichem-3d]` table supplies the library/probe/search settings, but must omit
+internal iteration, elite, output and stopping settings. Keep the initial frame
+and docking core fixed. Select up to top-level `elite-count` finite, completed
+MD-GBSA-ranked parents from exactly N-1; no QED/Prime/Glide fallback or TL. If
+fewer finite parents are available, use those; zero finite parents stop explicitly.
+Growth uses the saved fixed-frame CReM pose/UID/branch history of the selected
+identity, not a guessed atom mapping from a subsequently protonated/docked/MD
+structure. Existing scored stages still retain the lowest Glide score and its
+corresponding pose under their original CMPID and recovery policies.
+
+The Generate worker owns a durable local task DB inside its iteration's
+`02-generate/crem/` folder. It seeds only N-1 parents and runs exactly one expansion
+numbered N; this is calculation task coordination, not an additional scientific
+cycle or a second ranked-parent loop. The driver continues supervising one GRAFT
+iteration with independent sequential stage subprocesses. The main project DB
+freezes settings/parents and atomically imports novel generated identities,
+fixed-frame pose/provenance and an explicit actual-population completion marker.
+Only that marker admits a below-target population to existing downstream gates.
+Incomplete generation, failed workers, pending journals and time limits do not
+establish completion. Known project identities are excluded from the generator's
+target count. A zero-candidate exhausted iteration terminates the search without
+launching empty scientific stages. Frozen populations may not be deleted/reset
+or extended on resume. Missing selected-parent provenance stops, without refill.
+
+This backend does not call the standalone CReM CLI or its output-reset function.
+Use a new project output; do not convert/reset existing standalone runs, production
+DBs or submitted jobs. Keep standalone CReM and legacy REINVENT/combichem behavior.
+The separate EGFR pipeline example retains Glide top 500 for Amber, Amber top
+100 for Prime, Prime top 24 for 5-ns MD with 20 snapshots, and explicit existing
+optional FEP export settings. Actual selection/routing and reference policies
+remain in the existing stage implementations; no external commands are invented.
+
+**Verification:** editable installation with the CReM extra succeeded. The final
+full-suite regression run passed 1,973 tests with seven skips and the previously
+documented real-fragment collision assertion explicitly deselected. An earlier
+unfiltered run reproduced that known assertion; new configuration compatibility
+failures found during development were fixed and retested. Eighteen dedicated
+pipeline tests cover one-step growth, raw-target capping, exhaustion, frozen MD
+parent order, coordinates/provenance, drug-likeness/score gates, import rollback,
+worker failures, cached-work recovery, changed-settings rejection, zero-candidate
+termination and unchanged reference stages. Compileall, imports, CLI help and diff
+checks pass. Production TOMLs, databases and submitted jobs were not modified.
+
+**Evidence limits:** synthetic RDKit/CReM integration and mocked scoring tests
+validate graph preservation, stage gates, ranking, target exhaustion, restart and
+transaction behavior. They do not validate EGFR affinity, native docking/GBSA/MD
+calculations or production throughput. Verification uses isolated temporary projects.
+
 ## Progress polling messages only in verbose logging (2026-11-05)
 
 **Confirmed user request:** log periodic `progress iteration=... attempted=...`

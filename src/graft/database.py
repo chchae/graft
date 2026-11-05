@@ -494,8 +494,154 @@ def _iteration_rows(conn, iteration):
     ).fetchall()
 
 
-def _docking_completion_reason(rows, target_count):
-    if len(rows) < target_count:
+def _crem_record(conn, iteration):
+    import json
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_crem'").fetchone():
+        return None
+    row = conn.execute('SELECT plan,state,population_count,stop_reason FROM iteration_crem WHERE iteration=?',
+                       (iteration,)).fetchone()
+    return dict(plan=json.loads(row[0]),state=row[1],population_count=row[2],stop_reason=row[3]) if row else None
+
+
+def crem_generation(path, iteration):
+    with connect(path) as conn:
+        return _crem_record(conn, iteration)
+
+
+def crem_iterations(path):
+    with connect(path) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_crem'").fetchone():
+            return []
+        return [r[0] for r in conn.execute('SELECT iteration FROM iteration_crem ORDER BY iteration')]
+
+
+def crem_pending_iteration(path):
+    for iteration in crem_iterations(path):
+        if crem_generation(path, iteration)['state'] != Growth.DONE:
+            return iteration
+    return None
+
+
+def _generation_readiness_reason(conn, iteration, target_count):
+    saved = _crem_record(conn, iteration)
+    count = conn.execute('SELECT COUNT(*) FROM compound WHERE iteration=?', (iteration,)).fetchone()[0]
+    if saved is not None:
+        if saved['state'] != Growth.DONE:
+            return 'CReM generation/import incomplete'
+        if count != saved['population_count']:
+            raise RuntimeError('Frozen CReM population changed; existing results retained')
+        return None
+    return f'generation incomplete ({count}/{target_count} compounds)' if count < target_count else None
+
+
+def generation_readiness_reason(path, iteration, target_count):
+    with connect(path) as conn:
+        return _generation_readiness_reason(conn, iteration, target_count)
+
+
+def freeze_crem_generation(path, iteration, plan):
+    """Pin inputs and parents before calculator claims; never convert live work."""
+    import json
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.execute('CREATE TABLE IF NOT EXISTS iteration_crem ('
+                     'iteration INTEGER PRIMARY KEY,plan TEXT NOT NULL,state TEXT NOT NULL,'
+                     'population_count INTEGER,stop_reason TEXT)')
+        conn.execute('CREATE TABLE IF NOT EXISTS crem_compound_pose ('
+                     'compound_id INTEGER PRIMARY KEY REFERENCES compound(id),iteration INTEGER NOT NULL,'
+                     'molblock TEXT NOT NULL,history TEXT NOT NULL,properties TEXT NOT NULL)')
+        saved = _crem_record(conn, iteration)
+        if saved:
+            if saved['plan'] != plan:
+                raise RuntimeError('Frozen CReM generation settings/parents changed; results retained')
+            return saved
+        if conn.execute('SELECT 1 FROM compound WHERE iteration=?', (iteration,)).fetchone():
+            raise RuntimeError('Cannot convert an existing population to CReM')
+        _mark_iteration_workspace_prepared(conn, iteration)
+        conn.execute('INSERT INTO iteration_crem VALUES (?,?,?,NULL,NULL)',
+                     (iteration,json.dumps(plan,sort_keys=True),Growth.RUNNING))
+        return _crem_record(conn, iteration)
+
+
+def crem_parent_poses(path, iteration, count):
+    """Use the preceding final MD ranking; coordinates/UIDs retain the fixed frame."""
+    import json
+    selection = md_gbsa_selection(path, iteration)
+    if selection is None or md_gbsa_completion_reason(path, iteration):
+        raise RuntimeError('CReM parents require completed preceding MD-GBSA work')
+    with connect(path) as conn:
+        rows = conn.execute('SELECT c.id,c.smiles,c.md_gbsa_score,p.molblock,p.history,p.properties '
+                            'FROM compound c LEFT JOIN crem_compound_pose p ON p.compound_id=c.id '
+                            'WHERE c.iteration=? ORDER BY c.md_gbsa_score,c.id', (iteration,)).fetchall()
+        selected = set(selection['ids'])
+        ranked = [r for r in rows if r[0] in selected and r[2] is not None and math.isfinite(r[2])][:count]
+        if any(r[3] is None for r in ranked):
+            raise RuntimeError('Selected MD-GBSA elite is missing CReM pose provenance; no replacement parent selected')
+        return [dict(compound_id=cid,smiles=smiles,score=score,molblock=block,
+                     history=json.loads(history),properties=json.loads(props))
+                for cid,smiles,score,block,history,props in ranked]
+
+
+def project_smiles(path):
+    with connect(path) as conn:
+        return [(cid, _core.canonicalize_smiles(smiles)) for cid,smiles in
+                conn.execute('SELECT id,smiles FROM compound ORDER BY id')]
+
+
+def growth_pipeline_results(path, iteration):
+    """Stream a deterministic representative of each passing generated identity."""
+    import json
+    with growth_connection(path) as conn:
+        for smiles,block,history,props in conn.execute(
+                'SELECT c.smiles,p.molblock,p.history,p.properties FROM combichem3d_pose p '
+                'JOIN compound c ON c.id=p.compound_id WHERE p.id IN '
+                '(SELECT MIN(id) FROM combichem3d_pose WHERE generated=1 AND output_passed=1 '
+                'AND iteration=? GROUP BY compound_id) ORDER BY p.id', (iteration,)):
+            yield dict(smiles=smiles,molblock=block,history=json.loads(history),properties=json.loads(props))
+
+
+def import_crem_results(path, iteration, records, stop_reason):
+    """Atomically publish raw novel identities, provenance and completion, even below target."""
+    import json
+    if stop_reason not in ('target_count', 'exhausted'):
+        raise ValueError('CReM generation must finish or exhaust before importing results')
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        saved = _crem_record(conn, iteration)
+        if saved is None:
+            raise RuntimeError('CReM generation has no frozen plan')
+        if saved['state'] == Growth.DONE:
+            _generation_readiness_reason(conn, iteration, saved['plan']['target_count'])
+            return saved['population_count']
+        existing = {_core.canonicalize_smiles(r[0]) for r in conn.execute('SELECT smiles FROM compound')}
+        count = 0
+        for row in records:
+            if row['history']['iteration'] != iteration:
+                raise ValueError('CReM output belongs to a different iteration')
+            smiles = _core.canonicalize_smiles(row['smiles'])
+            if smiles in existing:
+                continue
+            if count >= saved['plan']['target_count']:
+                break
+            cursor = conn.execute('INSERT INTO compound(name,smiles,iteration,state) VALUES (?,?,?,?)',
+                                 (f'CREM_I{iteration:02d}_{count+1:06d}',smiles,iteration,State.GENERATED))
+            cid = cursor.lastrowid
+            conn.execute('UPDATE compound SET name=? WHERE id=?', (f'CMPID_{cid}',cid))
+            conn.execute('INSERT INTO crem_compound_pose VALUES (?,?,?,?,?)',
+                         (cid,iteration,row['molblock'],json.dumps(row['history']),json.dumps(row['properties'])))
+            existing.add(smiles)
+            count += 1
+        conn.execute('UPDATE iteration_crem SET state=?,population_count=?,stop_reason=? WHERE iteration=?',
+                     (Growth.DONE,count,stop_reason,iteration))
+        return count
+
+
+def _docking_completion_reason(rows, target_count, conn=None, iteration=None):
+    if conn is not None:
+        reason = _generation_readiness_reason(conn, iteration, target_count)
+        if reason:
+            return reason
+    elif len(rows) < target_count:
         return f"generation incomplete ({len(rows)}/{target_count} compounds)"
     unfinished = sum(state in _PRE_DOCKING_STATES for _, state, _, _ in rows)
     if unfinished:
@@ -506,7 +652,7 @@ def _docking_completion_reason(rows, target_count):
 def docking_completion_reason(path, iteration, target_count):
     """Wait for the entire iteration, including retryable upstream work."""
     with connect(path) as conn:
-        return _docking_completion_reason(_iteration_rows(conn, iteration), target_count)
+        return _docking_completion_reason(_iteration_rows(conn, iteration), target_count, conn, iteration)
 
 
 def stage_is_running(path, stage):
@@ -529,8 +675,9 @@ def upstream_completion_reason(path, iteration, target_count, stage,
         return reason
     with connect(path) as conn:
         rows = _iteration_rows(conn, iteration)
-        if len(rows) < target_count:
-            return f'generation incomplete ({len(rows)}/{target_count} compounds)'
+        reason = _generation_readiness_reason(conn, iteration, target_count)
+        if reason:
+            return reason
         blocked = {State.SYNTHETIC_RUNNING}
         if stage == 'glide':
             blocked.update((State.GENERATED, State.LIGPREP_RUNNING))
@@ -599,7 +746,7 @@ def _amber_failure_ids(conn, iteration):
 
 
 def _amber_completion_reason(conn, iteration, target_count, keep_count=500):
-    reason = _docking_completion_reason(_iteration_rows(conn, iteration), target_count) if iteration > 0 else None
+    reason = _docking_completion_reason(_iteration_rows(conn, iteration), target_count, conn, iteration) if iteration > 0 else None
     if reason:
         return reason
     running = sum(r[2] == State.AMBER_RUNNING for r in _amber_rows(conn, iteration))
@@ -645,7 +792,7 @@ def claim_amber_candidates(path, iteration, target_count, keep_count=500):
     """Atomically rank the final Glide top-N, then claim its unscored members."""
     with connect(path) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        if iteration > 0 and _docking_completion_reason(_iteration_rows(conn, iteration), target_count):
+        if iteration > 0 and _docking_completion_reason(_iteration_rows(conn, iteration), target_count, conn, iteration):
             return []
         failed_ids = _amber_failure_ids(conn, iteration)
         rows = [r for r in _amber_rows(conn, iteration, keep_count)
@@ -770,7 +917,7 @@ def _prime_gbsa_candidates(conn, iteration, count, target_count, amber_keep_coun
             return []
         return [cid for cid, state, _, score in rows
                 if cid not in md_done and score is None and state in (State.REFERENCE, State.DOCKED)]
-    if iteration < 0 or _docking_completion_reason(rows, target_count) is not None:
+    if iteration < 0 or _docking_completion_reason(rows, target_count, conn, iteration) is not None:
         return []
     if amber_keep_count is not None and _amber_completion_reason(conn, iteration, target_count, amber_keep_count):
         return []
@@ -825,12 +972,12 @@ def iteration_completion_reason(path, iteration, target_count, input_count, elit
             reason = _amber_completion_reason(conn, iteration, target_count, amber_keep_count)
             if reason:
                 return reason
+        reason = _docking_completion_reason(rows, target_count, conn, iteration)
         docked = _prime_ranked_rows(conn, iteration, rows, amber_keep_count)
         md_done = _completed_md_ids(conn,iteration)
         amber_failed = {row[0] for row in conn.execute(
             "SELECT id FROM compound WHERE iteration=? AND state=? AND failed_stage='amber_gbsa'",
             (iteration, State.FAILED))}
-    reason = _docking_completion_reason(rows, target_count)
     if reason is not None:
         return reason
     running = sum(state == State.PRIME_GBSA_RUNNING for _, state, _, _ in rows)
@@ -910,7 +1057,7 @@ def iteration_has_saved_work(path, iteration):
     with connect(path) as conn:
         for table in ('compound', 'iteration_scaffold', 'iteration_combichem',
                       'iteration_combichem_history', 'iteration_sa_selection', 'combichem_batch',
-                      'iteration_workspace', 'iteration_druglike_selection', 'iteration_fep_selection', 'iteration_md_gbsa_selection'):
+                      'iteration_crem', 'iteration_workspace', 'iteration_druglike_selection', 'iteration_fep_selection', 'iteration_md_gbsa_selection'):
             if (conn.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?',
                              ('table', table)).fetchone()
                     and conn.execute(f'SELECT 1 FROM {table} WHERE iteration=? LIMIT 1',
@@ -920,6 +1067,8 @@ def iteration_has_saved_work(path, iteration):
 
 
 def _deleted_iteration(conn, iteration):
+    if _crem_record(conn, iteration) is not None:
+        return False  # Frozen CReM counts are validated, never automatically reset.
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if 'compound' not in tables:
         return False
@@ -1066,6 +1215,12 @@ def validate_generation_population(path, iteration, target_count=None):
     """Fail before expensive sampling when a frozen population cannot be resumed."""
     with connect(path) as conn:
         count = _validate_druglike_population(conn, iteration)
+        crem = _crem_record(conn, iteration)
+        if crem is not None and crem['state'] == Growth.DONE:
+            if target_count is not None and target_count != crem['plan']['target_count']:
+                raise RuntimeError('Cannot change target-count of a frozen CReM population')
+            _generation_readiness_reason(conn, iteration, target_count)
+            count = None  # Explicitly exhausted CReM populations may be below target.
     if count is not None and target_count is not None and target_count > count:
         raise RuntimeError(f'Iteration {iteration}: cannot increase target-count to {target_count} '
                            f'after drug likeness froze {count} compounds; restore the original '
@@ -1119,7 +1274,7 @@ def apply_druglike_selection(path, iteration, target_count, selections, sa_ratio
         if not _uses_raw_generation(conn, iteration):
             return None
         rows = conn.execute('SELECT id,state FROM compound WHERE iteration=? ORDER BY id', (iteration,)).fetchall()
-        if len(rows) < target_count:
+        if _generation_readiness_reason(conn, iteration, target_count):
             raise RuntimeError('Drug likeness waits for the complete generated population')
         if any(state != State.GENERATED for _, state in rows):
             raise RuntimeError('Drug likeness cannot change an iteration with downstream work')
@@ -1484,7 +1639,7 @@ def apply_sa_filter(path, iteration, target_count, ratio):
             'SELECT id,COALESCE(rdk_sa_score,sa_score),state,docking_score,amber_gbsa_score,prime_gbsa_score,fep_score '
             'FROM compound WHERE iteration=? ORDER BY COALESCE(rdk_sa_score,sa_score),id', (iteration,),
         ).fetchall()
-        if len(rows) < target_count:
+        if _generation_readiness_reason(conn, iteration, target_count):
             return None
         if any(state != State.GENERATED or any(score is not None for score in results)
                for _, _, state, *results in rows):
@@ -1659,8 +1814,9 @@ def stage_completion_reason(path, iteration, stage, target_count, input_count,
             return reason
     with connect(path) as conn:
         rows = _iteration_rows(conn, iteration)
-        if len(rows) < target_count:
-            return f'generation incomplete ({len(rows)}/{target_count} compounds)'
+        reason = _generation_readiness_reason(conn, iteration, target_count)
+        if reason:
+            return reason
         if stage == 'generate':
             return None
         if stage == 'synthetic':
@@ -1682,7 +1838,7 @@ def stage_completion_reason(path, iteration, stage, target_count, input_count,
                 return 'synthetic assessment incomplete'
             return None
         if stage == 'glide':
-            return _docking_completion_reason(rows, target_count)
+            return _docking_completion_reason(rows, target_count, conn, iteration)
     raise ValueError(f'Unknown stage: {stage}')
 
 
@@ -1894,7 +2050,7 @@ def fep_candidates(path, iteration, count, *, target_count=1, prime_count=None,
             if for_import and _uses_raw_generation(conn, iteration):
                 return []  # Imports cannot implicitly select an unexported raw iteration.
             if not for_import:
-                reason = _docking_completion_reason(_iteration_rows(conn, iteration), target_count)
+                reason = _docking_completion_reason(_iteration_rows(conn, iteration), target_count, conn, iteration)
                 if reason:
                     raise RuntimeError(f'FEP waiting: {reason}')
                 if _uses_raw_generation(conn, iteration):
@@ -2028,7 +2184,7 @@ def freeze_md_gbsa_selection(path, iteration, settings, *, count=None, ratio=.5,
                                   for _, state, _, score in _iteration_rows(conn, 0)):
             raise RuntimeError('MD-GBSA waiting for all reference Prime results')
         if iteration > 0:
-            reason = _docking_completion_reason(_iteration_rows(conn, iteration), target_count)
+            reason = _docking_completion_reason(_iteration_rows(conn, iteration), target_count, conn, iteration)
             if reason:
                 raise RuntimeError('MD-GBSA waiting: '+reason)
             if amber_keep_count is not None:
@@ -2279,8 +2435,12 @@ def growth_project_references(path):
 
 
 @_growth_retry_locked
-def growth_initialize(path, cfg, fingerprint, parents):
+def growth_initialize(path, cfg, fingerprint, parents, *, external_iteration=None, excluded_smiles=()):
     import json
+    if external_iteration is not None:
+        if (cfg.get('generation-backend') != 'crem' or cfg['max-iteration'] != external_iteration
+                or not parents or any(p['history']['iteration'] != external_iteration-1 for p in parents)):
+            raise ValueError('Integrated CReM requires preceding-iteration parents and a single expansion')
     with growth_connection(path) as conn:
         conn.execute('BEGIN IMMEDIATE')
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -2333,9 +2493,21 @@ def growth_initialize(path, cfg, fingerprint, parents):
                      (fingerprint, json.dumps(cfg, sort_keys=True)))
         for parent in parents:
             pose_id=_growth_insert_pose(conn, parent, None, generated=False)
-            if cfg.get('growth-mode') in ('frame-cycles','fixed-frame'):
+            if external_iteration is None and cfg.get('growth-mode') in ('frame-cycles','fixed-frame'):
                 conn.execute('INSERT INTO combichem3d_cycle VALUES (?,?,?,?,NULL)',(1,Growth.READY,pose_id,json.dumps(dict(kind='initial_frame'))))
+        if external_iteration is not None:
+            conn.execute('INSERT INTO combichem3d_cycle VALUES (?,?,NULL,?,NULL)',
+                         (external_iteration,Growth.READY,json.dumps(dict(kind='pipeline_parents'))))
+            # Input baselines precede generation, but must never spawn an internal cycle.
+            conn.execute('UPDATE combichem3d_pose SET input_state=? WHERE generated=0', (Growth.DONE,))
+            conn.execute('CREATE TABLE combichem3d_excluded (smiles TEXT PRIMARY KEY)')
+            conn.executemany('INSERT OR IGNORE INTO combichem3d_excluded VALUES (?)', ((s,) for s in excluded_smiles))
     return True
+
+
+def growth_excluded_smiles(path):
+    with growth_connection(path) as conn:
+        return {r[0] for r in conn.execute('SELECT smiles FROM combichem3d_excluded')}
 
 
 def _growth_insert_pose(conn, payload, parent, generated=True):

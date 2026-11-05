@@ -247,5 +247,6 @@ def log_iteration_results(db, cfg, iteration, source_iteration):
                 statuses.get('CLASH_REJECT',0),statuses.get('UNRESOLVED',0),counts['partial'])
     for row in previews:
         logger.info('RESULT %s pose=%s parent_pose=%s SMILES=%s',row.get('display_name',f"CMPID_{row['compound_id']}"),row['pose_id'],row['parent_pose'],row['smiles'])
-    logger.info('iteration %s complete structure inventory: %s; final 3D poses: %s',iteration,destination,Path(cfg['out-dir'])/'poses.sdf')
+    pose_file = f'cycle{iteration:02d}.sdf' if cfg.get('pipeline-generation') else 'poses.sdf'
+    logger.info('iteration %s complete structure inventory: %s; final 3D poses: %s',iteration,destination,Path(cfg['out-dir'])/pose_file)
     return counts

@@ -20,7 +20,7 @@ def _run_stage(args, iteration):
     if not database.uses_raw_generation(args.db_path, iteration):
         print(f'Iteration {iteration}: retaining legacy drug likeness/SA selection.')
         return
-    if database.iteration_compound_count(args.db_path, iteration) < args.target_count or database.stage_is_running(args.db_path, 'generate'):
+    if database.generation_readiness_reason(args.db_path, iteration, args.target_count) or database.stage_is_running(args.db_path, 'generate'):
         print(f'Iteration {iteration}: drug likeness waiting for complete generation.')
         return
     work_started(f'Iteration {iteration}: assessing drug likeness of all generated database compounds.')

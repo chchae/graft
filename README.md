@@ -39,6 +39,14 @@ The new default Amber receptor path is `output/iter00/08-prime_gbsa/receptor.mae
 
 Graft is a modular iterative lead-optimization pipeline integrating REINVENT4/LibInvent, Schrödinger LigPrep and Glide, Prime MM-GBSA, SQLite workflow state, and FEP staging.
 
+For CReM generation inside the scored pipeline, use the separate
+[EGFR pipeline example](examples/egfr-crem-pipeline/egfr.toml) and the
+[CReM pipeline instructions](docs/CREM_PIPELINE.md). Set top-level
+`generation-method="crem"` and run `graft run`, keeping iteration 0 and the existing
+Drug likeness/LigPrep/Glide/Amber/Prime/MD-GBSA stages. Each GRAFT iteration expands
+its fixed-frame parents once; there is no separate CReM cycle loop.
+
+
 ## Local COMBICHEM 3D growth
 
 For **CReM with a fixed input frame**, append the

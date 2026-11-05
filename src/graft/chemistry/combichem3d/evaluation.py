@@ -5,10 +5,11 @@ from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdFingerprintGenerat
 
 
 class Evaluator:
-    def __init__(self, reference_path, filters):
+    def __init__(self, reference_path, filters, *, excluded_smiles=()):
         self.generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
         self.references = []
         self.filters = filters
+        self.excluded_smiles = set(excluded_smiles)
         with open(reference_path) as stream:
             for index, line in enumerate(stream, 1):
                 if not line.strip() or line.lstrip().startswith('#'):
@@ -31,4 +32,8 @@ class Evaluator:
         if not all(math.isfinite(x) for x in values.values()):
             raise ValueError('Nonfinite molecular descriptor')
         rejected = [key for key, (low, high) in self.filters.items() if not low <= values[key] <= high]
+        if self.excluded_smiles:
+            from graft.chemistry.combichem3d.history import canonical_smiles
+            if canonical_smiles(mol) in self.excluded_smiles:
+                rejected.append('already_in_project')
         return values, not rejected, rejected

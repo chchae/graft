@@ -124,7 +124,8 @@ def worker_loop(db, cfg, iteration):
     try:
         logger.debug('worker initialization iteration=%s: loading receptor and references',iteration)
         checker = BumpChecker(load_receptor(cfg['receptor'],cfg),cfg)
-        evaluator = Evaluator(cfg['reference-smiles'],cfg['filters'])
+        excluded = database.growth_excluded_smiles(db) if cfg.get('pipeline-generation') else ()
+        evaluator = Evaluator(cfg['reference-smiles'],cfg['filters'],excluded_smiles=excluded)
         library = None
         references=None
         if cfg.get('growth-mode')=='frame-cycles':
@@ -400,6 +401,8 @@ def supervise(cfg, db, first_iteration):
             local_count = cfg.get('coordinator-processes',cfg['processes'])
             logger.info('iteration %s: starting %s local workers (%s calculation slots)',iteration,local_count,cfg['processes'])
             source_iteration=first_iteration if iteration==first_iteration else iteration-1
+            if cfg.get('pipeline-generation'):
+                source_iteration=iteration-1
             log_frames(db,source_iteration,iteration,cfg['log-structures'],cfg.get('growth-mode')=='frame-cycles')
             processes = []
             for index in range(local_count):

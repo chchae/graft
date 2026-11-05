@@ -1,0 +1,131 @@
+# CReM generation within the existing scored GRAFT pipeline.
+# Run with: graft run examples/egfr-crem-pipeline/egfr.toml
+# Each invocation supervises one GRAFT iteration; invoke again to advance/resume.
+# Iteration 0 uses the original reference calculation workflow unchanged.
+# This dedicated output is separate from examples/egfr-crem/output.
+generation-method = "crem"
+elite-count = 1000 # maximum preceding MD-GBSA-ranked parents; use available finite scores
+
+# Graft EGFR: Generate(DB) → Drug likeness → LigPrep → Glide
+# → Glide best 500: Amber → Amber best 100: Prime → Prime best 24: MD-GBSA
+# 로컬 상대 경로는 이 TOML의 위치를 기준으로 해석합니다.
+# 기존 iteration은 저장된 선별/작업/결과를 유지합니다. 아래 정책은 새 iteration에 적용합니다.
+
+# 실행 옵션: debug=true이면 화합물 수를 1/10로 축소(최소 1), 계산 조건·CPU 수 유지
+debug = false
+
+# 1. 프로젝트 입력과 생성 목표
+out-dir = "./output"
+reference-pose = "../egfr-crem/input/egfr-ligands-docked.maegz"
+reference-mcs = "c1nc(N[*:99])c2cc(-c3ccc([*:1])cc3)[nH]c2n1"
+dock-grid = "../egfr-crem/input/egfr-grid.zip"
+max-iteration = 10
+# 유효성·중복 제거 후 DB에 저장할 생성 화합물 수. Drug likeness 적용 전 수입니다.
+target-count = 10000
+
+sidechain-max-heavy-atoms = 8      # 각 입력 fragment의 non-H 원자 상한; 결합용 * 제외
+elite-mcs-fixed = false
+mcs-timeout = 300                 # 자동 MCS 탐색 제한(초); 복잡한 elite 10개에 시간 확보
+# elite-mcs = "c1nc(N[*:0])c2cc(-c3ccc([*:1])cc3)[nH]c2n1"
+# Fixed initial reference frame; later parents use the preceding MD-GBSA ranking.
+# No Prime/Glide fallback for CReM parent ranking.
+prime-gbsa-elite-count = 10
+
+
+# 3. Drug likeness: 생성된 iteration 전체를 DB에서 평가하고 탈락 이유도 보존
+# RO5 violation <= 1, QED 내림차순·SA 오름차순으로 전체의 최대 절반 통과
+sa-score-cpus = 16
+sa-accepted-ratio = 1.0           # 별도 SA 비율 절삭 없음; <1이면 drug likeness 통과군에 추가 적용
+
+# 선택적 합성 가능성 평가: Drug likeness 이후, LigPrep 이전; 경로 평가 자체는 필터가 아님
+synthetic-feasibility-enabled = false
+aizynth-nproc = 8
+aizynth-ssh-host = "tensor"
+aizynth-remote-env = "/home1/astrazeneca/AiZynthFinder/env"
+aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
+aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
+
+# 4. LigPrep → constrained Glide: Drug likeness 통과 화합물만 처리
+host = "t41-cpu:128"  # 일반 Prime 등의 기본 host; use-slurm=true이면 LigPrep/Glide는 slurm-cpu
+ligprep-cpus = 124
+ligprep-ph = 7.4
+ligprep-pht = 1.0
+ligprep-max-states = 2
+ligprep-max-stereo = 1
+glide-cpus = 124
+tail-timeout = 300                # 대기 제한; native job을 취소하지 않음
+glide-job-timeout = 1800          # 0이면 native Glide timeout 비활성화
+
+# 5. Amber GBSA: 모든 Glide 작업이 끝난 뒤 최종 Glide best 500 평가
+amber_gbsa = true
+amber-input-count = 500
+# true: LigPrep/Glide는 native slurm-cpu, Amber는 Slurm cpu 배열로 제출
+# false 또는 생략: LigPrep/Glide는 host, Amber는 아래 SSH 설정 사용
+use-slurm = true
+amber-slurm-host = "slurm"
+amber-slurm-partition = "cpu"
+amber-slurm-time-limit = 600       # 초 단위; 화합물당 10분, 큐 대기 제외
+amber-slurm-cpus = 384           # 전체 Amber 작업 합계 상한; 각 단일 노드 작업은 최대 192
+amber-slurm-env = "/share/opt/amber26/envs/AmberTools26"
+# amber-slurm-work-dir = "/homes1/사용자명/graft-amber-slurm-runs"  # 기본값: 현재 사용자별 디렉터리
+amber-cpus = 124
+amber-receptor = "./output/iter00/08-prime_gbsa/receptor.maegz"
+amber-charge-method = "bcc"
+amber-ssh-host = "t41"
+amber-conda-init = "/home1/amber26/miniforge3/etc/profile.d/conda.sh"
+amber-remote-env = "/home1/amber26/envs/AmberTools26"
+amber-remote-work-dir = "/home1/chchae/graft-amber-runs"
+amber-ssh-config = "/home1/chchae/.ssh/config"
+
+# 6. Prime GBSA: 유효 Amber 결과 best 100; 유효 Amber 결과가 0개이면 Glide best 100
+# 진행 중·복구 대기·재시도 가능 작업은 기다립니다. 서로 다른 score를 섞어 순위를 만들지 않습니다.
+# 유효 결과가 일부만 있으면 그 집합에서 최대 100개만 선택하며 다른 tier로 보충하지 않습니다.
+prime-gbsa-local-compute = true
+prime-gbsa-local-host = "prime"
+prime-gbsa-local-work-dir = "/home1/prime_share"
+prime-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"
+prime-gbsa-local-cpus = 192  # 준비된 계산이 충분하면 전체 코어 사용
+
+prime-gbsa-input-count = 100
+prime-gbsa-flexdist = 6.0
+prime-gbsa-license-retry-seconds = 300
+prime-gbsa-license-retries = 3
+# 로컬 Prime은 화합물당 한 subjob; 동시 실행은 local-cpus와 화합물 수 중 작은 값.
+# 유연한 receptor는 화합물별 complex 입력으로 처리하여 각 ligand 주변 6 Å 설정을 유지합니다.
+# Iteration 0은 입력 reference 전체를 평가하므로 500/50 제한을 적용하지 않습니다.
+
+
+md-gbsa = true
+md-gbsa-input-count = 24  # Prime 점수 상위 24개; 비율 설정보다 우선
+md-gbsa-snapshots = 20  # 추출 목표; NJOBS는 실제 입력 MAEGZ 프레임 수로 결정
+md-gbsa-production-ns = 5.0
+
+md-gbsa-local-compute = true
+md-gbsa-local-host = "prime"
+md-gbsa-local-work-dir = "/home1/prime_share"
+md-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"
+md-gbsa-local-cpus = 192  # 준비된 여러 분자의 프레임을 공통 큐에서 처리
+
+
+# 7. FEP 후보 export / 결과 import; 실제 FEP 계산은 외부 protocol로 별도 수행
+# Prime 결과가 있으면 Prime best 20, 없으면 Amber best 20, 둘 다 없으면 Glide best 20
+# 한 score source만 사용하며 후보 ID·source·순위를 저장하여 restart/import 시 유지합니다.
+fep-enabled = true
+fep-input-count = 24
+
+[combichem-3d]
+generation-backend = "crem"
+crem-db = "/home1/crem/database/chembl22_sa2_hac12.db"
+crem-radius = 3
+crem-min-freq = 0
+# One fragment per child per GRAFT iteration; no internal CReM cycles.
+sidechains-per-site = 1000 # upper bound; context may provide fewer replacements
+sidechain-min-heavy-atoms = 3
+sidechain-max-heavy-atoms = 8
+processes = 116
+max-seconds = 18000
+# Fast finite searches; increase these explicitly for more exploration.
+conformers = 2
+torsion-trials = 2
+optimization-iterations = 50
+core-constraint = "fixed"

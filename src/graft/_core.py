@@ -4888,6 +4888,10 @@ def configure_project(project_toml, schrodinger=None, *, elite_mcs=None):
     args.iteration_mcs = True
     args.automatic_mcs = args.mcs_smarts is None
     args.output = cfg["output"]
+    if getattr(args, 'generation_method', None) == 'crem' and getattr(args, 'elite_mcs_smarts', None) is not None:
+        raise ValueError('CReM pipeline uses a fixed reference-mcs; omit --elite-mcs')
+    if getattr(args, 'generation_method', None) == 'crem' and (args.output / 'combichem3d.sqlite').exists():
+        raise RuntimeError('Use a separate pipeline out-dir; existing standalone CReM results are retained')
     args.libinvent_prior = cfg["libinvent_prior"]
     args.poll_interval = int(cfg.get("poll_interval", 30)) if isinstance(cfg, dict) else 30
     args.completion_fraction = float(cfg.get("completion_fraction", 0.95)) if isinstance(cfg, dict) else 0.95

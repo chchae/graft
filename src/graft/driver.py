@@ -197,6 +197,9 @@ def choose_iteration(args, requested=None):
         return requested
     if reference_work_pending(args):
         return 0
+    pending_crem = database.crem_pending_iteration(args.db_path)
+    if pending_crem is not None:
+        return pending_crem
     with database.connect(args.db_path) as conn:
         latest_retry = conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0]
     retry_stages = ('prime_gbsa','md_gbsa') if getattr(args,'prime_gbsa_enabled',True) else ('md_gbsa',)
@@ -207,6 +210,7 @@ def choose_iteration(args, requested=None):
         iterations = [row[0] for row in conn.execute(
             "SELECT DISTINCT iteration FROM compound WHERE iteration>0 ORDER BY iteration"
         )]
+    iterations = sorted(set(iterations) | set(database.crem_iterations(args.db_path)))
     for iteration in iterations:
         if (database.md_gbsa_selection(args.db_path,iteration) is not None and
                 database.md_gbsa_completion_reason(args.db_path,iteration)):
@@ -224,6 +228,9 @@ def choose_iteration(args, requested=None):
                 and external_completion_reason(args, iteration, 'glide') is not None):
             return iteration
     latest = max(iterations, default=0)
+    crem = database.crem_generation(args.db_path, latest)
+    if crem and crem['population_count'] == 0:
+        return None  # Explicitly exhausted zero-candidate search has no next parent.
     if latest and getattr(args,'md_gbsa_enabled',False) and database.md_gbsa_selection(args.db_path,latest) is None:
         return latest
     following = latest + 1
@@ -347,6 +354,10 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
         if stop.is_set():
             return False
         stage, module = pending_stages.pop(0)
+        crem = database.crem_generation(args.db_path, iteration)
+        if crem and crem['population_count'] == 0:
+            print(f'[driver  ] iteration {iteration}: CReM search exhausted with no new compounds.', flush=True)
+            return True
         if (iteration > 0 and stage != 'generate'
                 and database.iteration_was_deleted(args.db_path, iteration)
                 and database.md_gbsa_selection(args.db_path, iteration) is None):
