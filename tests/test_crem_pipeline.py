@@ -262,3 +262,43 @@ def test_glide_receives_fixed_dummy_free_reference_constraint(project):
     assert query.GetNumAtoms()==6 and all(atom.GetAtomicNum()>0 for atom in query.GetAtoms())
     initial=database.iteration_scaffold(project.db_path,0)
     assert initial['mcs_smarts']==project.mcs_smarts
+
+
+@pytest.mark.parametrize('entry', ['stage', 'cli'])
+@pytest.mark.parametrize('flags', [[], ['--debug'], ['--trace']])
+def test_standalone_command_rejects_pipeline_before_reset_or_dispatch(project,monkeypatch,capsys,entry,flags):
+    from graft.stages import combichem_3d as standalone
+    from graft import cli
+    sentinel=Path(project.output)/'combichem-3d/preserved-result.txt'
+    sentinel.parent.mkdir(exist_ok=True)
+    sentinel.write_text('saved scientific results')
+    def unexpected(*args,**kwargs):
+        pytest.fail('Standalone preflight/reset/dispatch must not run for pipeline TOML')
+    monkeypatch.setattr(standalone,'combichem_3d_settings',unexpected)
+    monkeypatch.setattr(standalone,'reset_crem_output',unexpected)
+    monkeypatch.setattr(standalone,'configure',unexpected)
+    from graft.stages import combichem_remote
+    monkeypatch.setattr(combichem_remote,'dispatch',unexpected)
+    with pytest.raises(SystemExit) as exc:
+        if entry=='stage':
+            standalone._main([str(project.toml_file),*flags])
+        else:
+            cli.main(['combichem-3d',str(project.toml_file),*flags])
+    assert exc.value.code==2
+    assert 'graft run' in capsys.readouterr().err
+    assert sentinel.read_text()=='saved scientific results'
+    assert database.iteration_compound_count(project.db_path,0)==1
+    assert database.crem_generation(project.db_path,1) is None
+
+
+def test_standalone_export_only_keeps_pipeline_and_old_growth_results(project):
+    from graft.stages import combichem_3d as standalone
+    from graft.config import combichem_3d_settings
+    cfg=combichem_3d_settings(project.toml_file)
+    db,_=standalone.prepare_project(cfg)
+    before=database.growth_rows(db,'combichem3d_pose')
+    standalone._main([str(project.toml_file),'--export-only'])
+    assert database.growth_rows(db,'combichem3d_pose')==before
+    assert (Path(cfg['out-dir'])/'summary.json').exists()
+    assert database.iteration_compound_count(project.db_path,0)==1
+    assert database.crem_generation(project.db_path,1) is None

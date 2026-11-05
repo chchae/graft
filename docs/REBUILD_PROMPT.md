@@ -1,5 +1,31 @@
 # Independent Graft reconstruction prompt
 
+## Reject standalone growth for scored CReM pipeline TOMLs (2026-11-05)
+
+**Observed user report:** after reference scoring, logs showed repeated CReM
+cycles without docking/GBSA. Read-only inspection found only 24 scored iteration-0
+references in the main project DB; generated molecules were in a separate
+standalone `output/combichem-3d` DB with no scoring results. The traceback and log
+paths identified the standalone `graft combichem-3d` entrypoint, not the pipeline
+Generate worker under `iterNN/02-generate/crem/`.
+
+**Implementation repair:** refuse a non-export standalone invocation when the
+TOML has top-level `generation-method="crem"`. Explain that standalone growth
+has no scoring stages and print the corresponding `graft run` command. Check
+before configuration/preflight, SSH dispatch, locking, output reset or calculation.
+Keep `--export-only` available to recover saved standalone results and leave
+legacy standalone TOMLs and the normal integrated pipeline unchanged. Preserve
+both DBs, reference scores, jobs and all existing growth outputs. Do not relabel
+standalone internal cycles as scored GRAFT iterations or import them implicitly.
+Resume via the normal driver, which retains reference recovery/readiness checks.
+
+**Verification:** 53 integrated/standalone CReM regressions passed, including
+rejection through both CLI entrypoints at normal/debug/trace verbosity before
+configuration or mutation, export-only preservation, and the existing integrated
+scoring/generation tests. Compileall, package/CLI imports and diff checks pass.
+Live project inspection was read-only; no production results were reset, imported,
+recomputed or submitted during this repair.
+
 ## CReM generation in the scored GRAFT pipeline (2026-11-05)
 
 **Confirmed user request and interview decisions:** replace REINVENT generation

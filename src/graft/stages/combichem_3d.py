@@ -459,6 +459,19 @@ def _main(argv=None):
     parser.add_argument('--debug',action='store_true',help='Compact parent and worker diagnostics')
     parser.add_argument('--trace',action='store_true',help='Verbose per-probe/product diagnostics')
     ns = parser.parse_args(argv)
+    if not ns.export_only:
+        import shlex
+        import tomllib
+        with ns.project_toml.open('rb') as stream:
+            method = tomllib.load(stream).get('generation-method')
+        if method == 'crem':
+            parser.error(
+                'This TOML configures the scored GRAFT CReM pipeline. '
+                'combichem-3d runs standalone growth without Drug likeness, Glide or GBSA. '
+                f'Use `graft run {shlex.quote(str(ns.project_toml))}` instead. '
+                'No output was reset and no calculation was started. '
+                '--export-only remains available for existing standalone results.'
+            )
     cfg = combichem_3d_settings(ns.project_toml)
     from graft.stages.combichem_remote import dispatch
     if dispatch(cfg, ns):

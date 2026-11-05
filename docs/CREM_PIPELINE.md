@@ -14,6 +14,18 @@ same command again to resume unfinished work or select the next iteration. This
 mode preserves saved results/jobs on restart; it does not invoke the standalone
 `graft combichem-3d` command or clear its output.
 
+Do not run `graft combichem-3d` with this pipeline TOML: that command performs
+standalone growth and has no scoring stages. It now rejects top-level
+`generation-method="crem"` before dispatch, output creation or reset and prints
+the correct `graft run` command. Existing standalone results remain exportable
+with `--export-only`.
+
+If a standalone calculation was accidentally run after iteration 0, keep both
+DBs and its output. From the project folder, use `graft run egfr.toml --iteration 1`
+to select the pipeline's iteration 1. The normal driver checks and recovers any
+remaining reference work before proceeding. Standalone internal-cycle results
+are not automatically imported as scored pipeline iterations.
+
 Iteration 0 keeps the existing reference calculation protocol unchanged. Starting
 at iteration 1, the sequence is:
 
