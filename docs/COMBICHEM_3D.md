@@ -699,6 +699,7 @@ example is not a throughput benchmark.
 | --- | --- |
 | `combichem3d.sqlite` | Durable unique compound identities, all poses/lineages, plans, ordinal batches, probes, attempts and failures |
 | `compounds.csv` | Output-passing unique isomeric SMILES, properties/QED/similarity, iteration memberships and pose counts |
+| `cycleNN.smi` / `cycleNN.sdf` | CReM: passing compounds per cycle; SMI deduplicates identities within the cycle, SDF retains all passing poses. Written after each cycle and rebuilt at final/partial/export-only export |
 | `compounds.smi` | CReM: one `SMILES<TAB>cycle_name` line per passing cycle/compound identity |
 | `poses.sdf` | Every retained input/intermediate/passing pose; properties distinguish output membership |
 | `passed_poses.sdf` | Output-passing poses, named CMPID_id; metadata includes history, iteration, parent pose and properties |
@@ -825,6 +826,16 @@ analysis lists worker errors separately from attachment sites. Real two-host
 synthetic smoke tests do not establish full 384-slot throughput.
 
 ## Buffered result writes
+
+For the CReM backend, defaults are `batch-size=64`, `result-buffer-size=64`
+and `result-buffer-seconds=5.0`. Explicit settings override these defaults;
+the following example remains valid for either backend. CReM also journals
+probe decisions and candidate pools before committing bounded groups in one
+transaction, flushing at parent-plan completion or exit. Probe journals recover
+before claims resume, preserve decision history and do not mark unfinished
+plans ready. The interval is checked after completed updates. Per-record durable
+journaling remains enabled; these changes do not eliminate filesystem writes
+or establish a measured throughput gain.
 
 ```toml
 [combichem-3d]

@@ -91,7 +91,8 @@ def combichem_3d_settings(filename):
         cfg['growth-mode']='fixed-frame'
         for key,value in {'elite-count':100,'elite-rank-by':'qed','stop-mode':'cycles',
                           'conformers':2,'torsion-trials':2,'optimization-iterations':100,
-                          'sidechain-min-heavy-atoms':5,'sidechain-max-heavy-atoms':10}.items():
+                          'sidechain-min-heavy-atoms':5,'sidechain-max-heavy-atoms':10,
+                          'batch-size':64,'result-buffer-size':64,'result-buffer-seconds':5.}.items():
             # Legacy pipeline limits do not define this new scientific protocol.
             explicit = section if project_mode else raw
             if key not in explicit:

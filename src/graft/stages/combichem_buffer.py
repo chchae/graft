@@ -16,6 +16,19 @@ def _sync_directory(path):
         os.close(descriptor)
 
 
+def _append_journal(path, row):
+    created = not path.exists()
+    path.parent.mkdir(exist_ok=True)
+    encoded = (json.dumps(row) + '\n').encode('utf-8')
+    with path.open('ab') as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if created:
+        _sync_directory(path.parent)
+        _sync_directory(path.parent.parent)
+
+
 class ResultBuffer:
     def __init__(self, db, batch, cfg):
         self.db, self.batch = db, batch
@@ -33,17 +46,8 @@ class ResultBuffer:
     def append(self, ordinal, report, payload):
         # Each journal is owned by one claimed batch. Fsync before exposing the
         # result as buffered, so SIGKILL/failed DB commits retain completed work.
-        created = not self.path.exists()
-        self.path.parent.mkdir(exist_ok=True)
         row = dict(batch=self.batch, ordinal=ordinal, report=report, payload=payload)
-        encoded = (json.dumps(row) + '\n').encode('utf-8')
-        with self.path.open('ab') as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if created:
-            _sync_directory(self.path.parent)
-            _sync_directory(self.path.parent.parent)
+        _append_journal(self.path, row)
         self.records.append((ordinal, report, payload))
         if len(self.records) >= self.limit or time.monotonic() - self.started >= self.interval:
             self.flush()
@@ -63,9 +67,62 @@ class ResultBuffer:
         self.flush()
 
 
+class ProbeBuffer:
+    """One claimed CReM parent's probe updates, durable before generation."""
+    def __init__(self, db, parent_pose, cfg):
+        self.db, self.parent_pose = db, parent_pose
+        self.limit = cfg.get('result-buffer-size', 64)
+        self.interval = cfg.get('result-buffer-seconds', 5.)
+        self.path = Path(db).parent / 'result-buffer' / f'probe-{parent_pose}.jsonl'
+        self.records = []
+        self.started = time.monotonic()
+
+    def __enter__(self):
+        if self.path.exists():
+            raise RuntimeError('Unrecovered probe journal; restart under the stage lock')
+        return self
+
+    def save(self, uid, report):
+        # Snapshot before callers add candidates to the same report dictionary.
+        row = json.loads(json.dumps(dict(parent_pose=self.parent_pose, site=uid, report=report)))
+        _append_journal(self.path, row)
+        self.records.append((uid, row['report']))
+        if len(self.records) >= self.limit or time.monotonic()-self.started >= self.interval:
+            self.flush()
+
+    def flush(self):
+        if not self.records:
+            return
+        database.growth_save_probes(self.db, self.parent_pose, self.records)
+        self.path.unlink()
+        _sync_directory(self.path.parent)
+        logger.debug('probe buffer committed parent_pose=%s count=%s', self.parent_pose, len(self.records))
+        self.records.clear()
+        self.started = time.monotonic()
+
+    def __exit__(self, *exc):
+        self.flush()
+
+
 def recover(db):
     """Recovery worker runs alone, before session claims can be rearmed."""
     directory = Path(db).parent / 'result-buffer'
+    for path in sorted(directory.glob('probe-*.jsonl')):
+        rows = []
+        with path.open('rb') as stream:
+            for line in stream:
+                if not line.endswith(b'\n'):
+                    logger.warning('Incomplete probe journal tail retained for recalculation: %s', path.name)
+                    break
+                rows.append(json.loads(line))
+        if rows:
+            parent = rows[0]['parent_pose']
+            if path.name != f'probe-{parent}.jsonl' or any(r['parent_pose']!=parent for r in rows):
+                raise ValueError(f'Inconsistent probe journal: {path}')
+            database.growth_save_probes(db, parent, [(r['site'], r['report']) for r in rows])
+            logger.info('recovered probe buffer parent_pose=%s count=%s', parent, len(rows))
+        path.unlink()
+        _sync_directory(directory)
     for path in sorted(directory.glob('batch-*.jsonl')):
         rows = []
         with path.open('rb') as stream:

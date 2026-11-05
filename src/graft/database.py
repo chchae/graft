@@ -2536,17 +2536,38 @@ def growth_parent(path, pose_id):
     return dict(id=pose_id,compound_id=row[3],molblock=row[0],history=json.loads(row[1]),plan=json.loads(row[2]) if row[2] else None,probes=probes)
 
 
-@_growth_retry_locked
 def growth_save_probe(path, pose_id, uid, report):
+    growth_save_probes(path, pose_id, [(uid, report)])
+
+
+@_growth_retry_locked
+def growth_save_probes(path, pose_id, reports):
+    """Persist a bounded probe journal in one transaction; replay is idempotent."""
     import json
     with growth_connection(path) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        old = conn.execute('SELECT report FROM combichem3d_probe WHERE parent_pose=? AND site=?',(pose_id,uid)).fetchone()
-        if old and json.loads(old[0]) != report:
-            prior = json.loads(old[0])
-            previous = prior.pop('previous_reports',[])
-            report = dict(report,previous_reports=previous+[prior])
-        conn.execute('INSERT OR REPLACE INTO combichem3d_probe VALUES (?,?,?)', (pose_id,uid,json.dumps(report)))
+        if not conn.execute('SELECT 1 FROM combichem3d_pose WHERE id=?', (pose_id,)).fetchone():
+            raise ValueError('Probe buffer does not match a saved parent')
+        grouped = {}
+        for uid, report in reports:
+            grouped.setdefault(uid, []).append(report)
+        for uid, updates in grouped.items():
+            row = conn.execute('SELECT report FROM combichem3d_probe WHERE parent_pose=? AND site=?',
+                               (pose_id,uid)).fetchone()
+            old = json.loads(row[0]) if row else None
+            # A replay after commit must not restore earlier probe decisions or
+            # duplicate their history. Each journal transaction commits atomically.
+            if old is not None and {k:v for k,v in old.items() if k!='previous_reports'} == {
+                    k:v for k,v in updates[-1].items() if k!='previous_reports'}:
+                continue
+            for report in updates:
+                if old is not None and old != report:
+                    prior = dict(old)
+                    previous = prior.pop('previous_reports', [])
+                    report = dict(report, previous_reports=previous+[prior])
+                old = report
+            conn.execute('INSERT OR REPLACE INTO combichem3d_probe VALUES (?,?,?)',
+                         (pose_id,uid,json.dumps(old)))
 
 
 @_growth_retry_locked
@@ -2717,6 +2738,16 @@ def growth_structure_rows(path, iteration, after=0, limit=256, results=False, fr
             f'{history} AS history,c.smiles FROM combichem3d_pose p JOIN compound c ON c.id=p.compound_id '
             'WHERE p.iteration=? AND p.id>? AND (?=0 OR p.generated=1) AND (?=0 OR p.generated=0) ORDER BY p.id LIMIT ?',
             (iteration,after,int(results),int(frames_only),limit))]
+
+
+def growth_cycle_output_poses(path, iteration):
+    """Stream only generated, output-passing poses from the requested cycle."""
+    with growth_connection(path) as conn:
+        conn.row_factory = sqlite3.Row
+        for row in conn.execute(
+            'SELECT * FROM combichem3d_pose WHERE iteration=? AND generated=1 '
+            'AND output_passed=1 ORDER BY id', (iteration,)):
+            yield dict(row)
 
 
 def growth_iteration_counts(path, iteration, source_iteration=None, frames_only=False):

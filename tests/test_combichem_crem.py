@@ -18,7 +18,7 @@ from graft.config import combichem_3d_settings
 from graft.chemistry.combichem3d import crem_growth, frames, history as provenance
 from graft.chemistry.combichem3d.assembly import assemble
 from graft.chemistry.combichem3d.attachment_policy import growth_available, root_for_site
-from graft.chemistry.combichem3d.output import export_results
+from graft.chemistry.combichem3d.output import export_results, export_cycle_results
 from graft.stages import combichem_3d as stage
 
 
@@ -68,6 +68,8 @@ def test_existing_project_inputs_and_crem_defaults(project):
     assert cfg['stop-mode']=='cycles'
     assert cfg['elite-rank-by']=='qed'
     assert cfg['conformers']==2 and cfg['optimization-iterations']==100
+    assert cfg['batch-size']==1  # explicit project override is retained
+    assert cfg['result-buffer-size']==64 and cfg['result-buffer-seconds']==5.
     assert cfg['sidechain-library']==cfg['crem-db']
     assert cfg['out-dir'].endswith('output/combichem-3d')
     path=cfg['config-path']
@@ -75,6 +77,11 @@ def test_existing_project_inputs_and_crem_defaults(project):
     with open(path,'w') as stream:stream.write(text)
     defaults=combichem_3d_settings(path)
     assert defaults['elite-count']==100 and defaults['sidechain-max-heavy-atoms']==10
+    with open(path,'w') as stream:
+        stream.write(text.replace('batch-size = 1\n','')+'\nresult-buffer-size = 32\nresult-buffer-seconds = 7.0\n')
+    defaults=combichem_3d_settings(path)
+    assert defaults['batch-size']==64
+    assert defaults['result-buffer-size']==32 and defaults['result-buffer-seconds']==7.
 
 
 @pytest.mark.parametrize('setting,message',[
@@ -189,6 +196,39 @@ def test_probe_rejection_blocks_crem_and_saved_pass_pools_resume(project,monkeyp
     monkeypatch.setattr(crem_growth,'methyl_probe',lambda *a:pytest.fail('saved probe rerun'))
     crem_growth.plan_parent(db,job,project,None,time.time()+30)
     assert calls==[sites[0]] and database.growth_parent(db,1)['plan']==plan
+
+
+def test_parent_probes_are_journaled_before_candidates_and_committed_together(project,monkeypatch):
+    cfg=project | {'result-buffer-size':64,'result-buffer-seconds':1000}
+    db,_=stage.prepare_project(cfg);database.growth_start_session(db,cfg)
+    sites=database.growth_parent(db,1)['history']['attachments']
+    monkeypatch.setattr(crem_growth,'methyl_probe',lambda *args:dict(status='PASS',reason='synthetic',pose=None))
+    original_candidates=crem_growth.site_candidates
+    original_save=database.growth_save_probes
+    commits=[]
+    def candidates(parent,h,uid,cfg):
+        # Probe is durable, but the shared SQLite writer has not been acquired.
+        assert uid not in database.growth_parent(db,1)['probes']
+        journal=Path(db).parent/'result-buffer/probe-1.jsonl'
+        saved=[json.loads(line) for line in journal.read_text().splitlines()]
+        assert saved[-1]['site']==uid and saved[-1]['report']['status']=='PASS'
+        return original_candidates(parent,h,uid,cfg)
+    def save(db,parent,records):
+        commits.append(len(records))
+        return original_save(db,parent,records)
+    monkeypatch.setattr(crem_growth,'site_candidates',candidates)
+    monkeypatch.setattr(database,'growth_save_probes',save)
+    crem_growth.plan_parent(db,dict(parent_pose=1),cfg,None,time.time()+30)
+    row=database.growth_parent(db,1)
+    assert commits==[4]  # two probe decisions plus two candidate-pool updates
+    assert set(row['probes'])==set(sites)
+    assert all('crem_candidates' in probe for probe in row['probes'].values())
+    assert row['plan']['total']==sum(len(probe['crem_candidates']) for probe in row['probes'].values())
+    assert not (Path(db).parent/'result-buffer/probe-1.jsonl').exists()
+    monkeypatch.setattr(crem_growth,'methyl_probe',lambda *args:pytest.fail('saved probe recalculated'))
+    monkeypatch.setattr(crem_growth,'site_candidates',lambda *args:pytest.fail('saved candidates regenerated'))
+    crem_growth.plan_parent(db,dict(parent_pose=1),cfg,None,time.time()+30)
+    assert commits==[4] and database.growth_parent(db,1)['plan']==row['plan']
 
 
 def test_cpu_workers_real_crem_fixed_core_single_additions_and_resume(project):
@@ -357,12 +397,29 @@ def test_cycle_names_smiles_and_pose_exports_keep_internal_identity(project):
     before=database.growth_rows(db,'compound')
     history_before=database.growth_rows(db,'combichem3d_pose')
     root=Path(project['out-dir'])
+    # Cycle completion publishes files before the final aggregate export.
+    log_iteration_results(db,project,1,0)
+    assert not (root/'compounds.smi').exists()
+    cycle1_smi=(root/'cycle01.smi').read_text()
+    cycle1_sdf=(root/'cycle01.sdf').read_bytes()
     export_results(db,root,batch=1)
     smi=(root/'compounds.smi').read_text()
     lines=[line.split() for line in smi.splitlines()]
     assert [line[1] for line in lines]==['01_0001','01_0002','02_0001']
     assert lines[1][0]==lines[2][0] and len(lines)==3
     assert rejected['smiles'] not in {line[0] for line in lines}
+    for cycle,expected_names in ((1,['01_0001','01_0001','01_0002']),(2,['02_0001'])):
+        stem=f'cycle{cycle:02d}'
+        cycle_lines=[line.split() for line in (root/f'{stem}.smi').read_text().splitlines()]
+        assert cycle_lines==[line for line in lines if line[1].startswith(f'{cycle:02d}_')]
+        cycle_poses=list(Chem.SDMolSupplier(str(root/f'{stem}.sdf'),removeHs=False))
+        assert [mol.GetProp('_Name') for mol in cycle_poses]==expected_names
+        assert all(json.loads(m.GetProp('iteration'))==cycle for m in cycle_poses)
+        assert all(m.GetProp('cmpid').startswith('CMPID_') for m in cycle_poses)
+        assert all(m.GetConformer().Is3D() for m in cycle_poses)
+        assert all(m.HasProp('atom.iprop.graft_added_cycle') for m in cycle_poses)
+    assert (root/'cycle01.smi').read_text()==cycle1_smi
+    assert (root/'cycle01.sdf').read_bytes()==cycle1_sdf
     with (root/'compounds.csv').open() as stream:records=list(csv.DictReader(stream))
     assert [r['name'] for r in records]==['01_0001','01_0002']
     assert all(r['cmpid']==f"CMPID_{r['id']}" for r in records)
@@ -373,6 +430,8 @@ def test_cycle_names_smiles_and_pose_exports_keep_internal_identity(project):
     assert database.growth_rows(db,'combichem3d_pose')==history_before
     export_results(db,root,batch=2)
     assert (root/'compounds.smi').read_text()==smi
+    assert (root/'cycle01.smi').read_text()==cycle1_smi
+    assert (root/'cycle01.sdf').read_bytes()==cycle1_sdf
     log_iteration_results(db,project,1,0)
     inventory=[json.loads(line) for line in (root/'iteration01-structures.jsonl').read_text().splitlines()]
     outputs=[r for r in inventory if r['kind']=='result' and r['output_passed']]
@@ -383,3 +442,16 @@ def test_no_passing_compounds_exports_empty_smiles(project):
     db,_=stage.prepare_project(project)
     export_results(db,project['out-dir'])
     assert (Path(project['out-dir'])/'compounds.smi').read_text()==''
+
+
+def test_empty_cycle_export_replaces_old_files_without_changing_db(project):
+    db,_=stage.prepare_project(project)
+    root=Path(project['out-dir'])
+    for suffix in ('smi','sdf'):
+        (root/f'cycle01.{suffix}').write_text('old export')
+    before=database.growth_rows(db,'combichem3d_pose')
+    export_cycle_results(db,root,1)
+    assert (root/'cycle01.smi').read_text()==''
+    assert (root/'cycle01.sdf').read_text()==''
+    assert not list(root.glob('.export-cycle-*'))
+    assert database.growth_rows(db,'combichem3d_pose')==before

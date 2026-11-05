@@ -1,5 +1,73 @@
 # Graft specification
 
+## Progress polling messages only in verbose logging (2026-11-05)
+
+**Confirmed user request:** log periodic `progress iteration=... attempted=...`
+messages at DEBUG, visible with `--debug`, `--trace` or the corresponding
+configured log level. Keep polling, SQLite state and iteration summaries unchanged.
+
+## Batched CReM probe and result persistence (2026-11-05)
+
+**Confirmed user request:** keep worker results in memory temporarily and write
+results/probe records to SQLite in groups, retaining short DB claim/completion
+operations and restart recovery.
+
+**Implementation choice:** CReM defaults are `batch-size=64`,
+`result-buffer-size=64` and `result-buffer-seconds=5.0`; explicit TOML values
+remain authoritative and legacy fragment defaults are unchanged. Probe updates
+use the same bounded count/time policy, flushing on parent-plan completion or
+exit. The interval is checked between completed updates, never by interrupting
+a scientific calculation. Journal every completed probe decision before CReM
+generation and every completed result before buffering; keep per-record fsync.
+Bulk probe commits retain decision history and idempotently replay after a
+crash between commit and journal deletion. A separate recovery worker imports
+both probe and result journals under the stage lock before claims resume.
+Only a fully persisted parent plan becomes ready for allocation. Keep SQLite
+WAL/busy timeout/foreign keys, atomic claims, cycle barriers, scientific gates,
+selection and existing saved results intact. Do not reset or restart live runs.
+Progress reflects committed work and may lag buffered calculations. These
+changes reduce transaction frequency; production throughput is not benchmarked.
+
+**Verification:** 544 related combichem/configuration regressions passed, with
+the previously documented real-fragment collision assertion explicitly
+excluded. Added coverage checks grouped probe commits, decision-history replay,
+worker termination, failed commits/transaction rollback, partial/corrupt journals,
+recovery before claims, count/time/exit flushing, CReM pool reuse and explicit
+configuration overrides. Compileall, package/CLI imports and diff checks passed.
+These tests do not validate production receptor accuracy or performance. Existing
+scientific projects and running jobs were not changed or restarted.
+
+## CReM parent diagnostics only in verbose logging (2026-11-05)
+
+**Confirmed user request:** suppress the repetitive `CReM parent_pose=...`
+planning messages at normal verbosity. Log these messages at DEBUG, visible
+with `--debug`, `--trace` or the corresponding configured log level. Keep
+scientific processing, persistence and other log messages unchanged.
+
+## Per-cycle CReM SMILES and SDF exports (2026-11-05)
+
+**Confirmed user request:** save passing compounds separately for each cycle,
+in both SMI and SDF format.
+
+**Implementation choice:** publish `cycle01.smi`, `cycle01.sdf`, etc. in the
+configured output directory after each cycle's workers finish and during final,
+partial and export-only exports. SMI contains one `SMILES<TAB>cycle_name` row per
+passing generated identity within that cycle. SDF preserves all passing generated
+poses, their coordinates, cycle names, CMPID, lineage and atom-cycle metadata.
+Exclude input frames and output-filter failures; keep repeated identities in
+separate cycles. Empty exported cycles have empty files. Replace each file
+atomically after staging; retain existing aggregate exports. Exporting never
+resets calculations or modifies saved scientific results. Regression tests check
+export grouping and metadata, not scientific accuracy.
+
+**Verification:** 243 related regressions passed, with the previously documented
+real-fragment collision assertion deselected. Compileall, package/CLI imports
+and diff checks passed. Export tests cover cycle grouping, repeated identities,
+multiple poses, 3D and atom metadata, filtered/input exclusion, empty replacement,
+repeatable exports and unchanged saved compound/pose records. Existing active
+supervisors retain their loaded code; do not restart/reset them to load this change.
+
+
 ## Cycle names and final SMILES export for CReM (2026-11-05)
 
 **Confirmed user request:** display passing compounds by cycle as `01_0001`,

@@ -112,7 +112,7 @@ def site_candidates(parent, history, uid, cfg):
 
 
 def plan_parent(db, job, cfg, checker, deadline):
-    """Persist independent probe decisions before requesting each site's fragments."""
+    """Journal probe decisions before generation; commit them in bounded groups."""
     row=database.growth_parent(db,job['parent_pose'])
     parent=Chem.MolFromMolBlock(row['molblock'],removeHs=False)
     history=row['history']
@@ -120,31 +120,33 @@ def plan_parent(db, job, cfg, checker, deadline):
     reports=[]
     operations=[]
     sites=candidate_sites(parent,history)
-    for uid in sites:
-        if database.growth_should_stop(db) or time.time()>=deadline:
-            return
-        report=row['probes'].get(uid)
-        if report is None or report.get('budget_interrupted'):
-            seed=int.from_bytes(hashlib.sha256(f'{cfg["seed"]}:probe:{history["lineage_id"]}:{uid}'.encode()).digest()[:4],'big')%2147483646
-            result=methyl_probe(parent,history,uid,checker,cfg,seed,deadline)
-            report={key:value for key,value in result.items() if key!='pose'}
-            report.update(root_attachment=root_for_site(history,uid),gates_enumeration=True,
-                          budget_interrupted=time.time()>=deadline)
-            database.growth_save_probe(db,job['parent_pose'],uid,report)
-        if report.get('budget_interrupted'):
-            return
-        if report['status']==PoseVerdict.PASS:
-            if 'crem_candidates' not in report:
-                try:
-                    report['crem_candidates']=site_candidates(parent,history,uid,cfg)
-                except (ValueError,RuntimeError,sqlite3.Error) as exc:
-                    report.update(status=PoseVerdict.UNRESOLVED,reason=str(exc),failed_stage='crem_generation')
-                database.growth_save_probe(db,job['parent_pose'],uid,report)
-            operations.extend(report.get('crem_candidates',[]))
-        reports.append((uid,report))
+    from graft.stages.combichem_buffer import ProbeBuffer
+    with ProbeBuffer(db,job['parent_pose'],cfg) as buffer:
+        for uid in sites:
+            if database.growth_should_stop(db) or time.time()>=deadline:
+                return
+            report=row['probes'].get(uid)
+            if report is None or report.get('budget_interrupted'):
+                seed=int.from_bytes(hashlib.sha256(f'{cfg["seed"]}:probe:{history["lineage_id"]}:{uid}'.encode()).digest()[:4],'big')%2147483646
+                result=methyl_probe(parent,history,uid,checker,cfg,seed,deadline)
+                report={key:value for key,value in result.items() if key!='pose'}
+                report.update(root_attachment=root_for_site(history,uid),gates_enumeration=True,
+                              budget_interrupted=time.time()>=deadline)
+                buffer.save(uid,report)
+            if report.get('budget_interrupted'):
+                return
+            if report['status']==PoseVerdict.PASS:
+                if 'crem_candidates' not in report:
+                    try:
+                        report['crem_candidates']=site_candidates(parent,history,uid,cfg)
+                    except (ValueError,RuntimeError,sqlite3.Error) as exc:
+                        report.update(status=PoseVerdict.UNRESOLVED,reason=str(exc),failed_stage='crem_generation')
+                    buffer.save(uid,report)
+                operations.extend(report.get('crem_candidates',[]))
+            reports.append((uid,report))
     plan=dict(kind='crem_single_addition',operations=operations,total=len(operations),
               sites=sites,pools=[],reason='One fragment per child at a methyl-PASS site; fixed original frame')
     database.growth_save_plan(db,job['parent_pose'],plan,reports)
-    logger.info('CReM parent_pose=%s cycle=%s eligible_sites=%s probe_PASS=%s operations=%s growth_counts=%s',
+    logger.debug('CReM parent_pose=%s cycle=%s eligible_sites=%s probe_PASS=%s operations=%s growth_counts=%s',
                 job['parent_pose'],history['iteration']+1,len(sites),
                 sum(report['status']==PoseVerdict.PASS for _,report in reports),len(operations),history['growth_counts'])

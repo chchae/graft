@@ -183,3 +183,133 @@ def test_idle_frame_wait_does_not_take_writer_lock(project):
     with database.growth_connection(db) as writer:
         writer.execute('BEGIN IMMEDIATE')
         assert database.growth_claim(db,2,16,999)==dict(kind='wait')
+
+
+def test_probe_updates_share_transaction_and_replay_preserves_history(project, monkeypatch):
+    db, job, cfg = project
+    parent = job['parent_pose']
+    original = database.connect
+    transactions = []
+    def connect(path):
+        conn = original(path)
+        conn.set_trace_callback(lambda sql: transactions.append(sql) if sql=='BEGIN IMMEDIATE' else None)
+        return conn
+    monkeypatch.setattr(database, 'connect', connect)
+    with buffering.ProbeBuffer(db, parent, cfg | {'result-buffer-size':64, 'result-buffer-seconds':1000}) as buffer:
+        probe = dict(status='PASS', reason='synthetic probe')
+        buffer.save('a', probe)
+        probe['crem_candidates'] = [dict(fragment='*C')]
+        buffer.save('a', probe)
+        buffer.save('b', dict(status='CLASH_REJECT', reason='synthetic clash'))
+        assert 'a' not in database.growth_parent(db, parent)['probes']
+        assert transactions == []
+        journal = buffer.path.read_bytes()
+    assert transactions == ['BEGIN IMMEDIATE']
+    saved = database.growth_parent(db, parent)['probes']
+    assert saved['a']['crem_candidates'] == [dict(fragment='*C')]
+    assert saved['a']['previous_reports'] == [dict(status='PASS', reason='synthetic probe')]
+    buffer.path.write_bytes(journal)  # Killed after commit, before journal removal.
+    buffering.recover(db)
+    assert database.growth_parent(db, parent)['probes'] == saved
+    assert not buffer.path.exists()
+
+
+def test_killed_probe_worker_recovers_before_claims_without_marking_plan_ready(project, monkeypatch):
+    db, job, cfg = project
+    parent = job['parent_pose']
+    before = database.growth_rows(db, 'combichem3d_pose')[0]['plan_state']
+    def interrupted():
+        buffer = buffering.ProbeBuffer(db, parent, cfg | {'result-buffer-seconds':1000})
+        buffer.save('a', dict(status='PASS', reason='completed probe'))
+        os._exit(1)
+    process = multiprocessing.get_context('fork').Process(target=interrupted)
+    process.start(); process.join(10)
+    assert process.exitcode == 1
+    assert 'a' not in database.growth_parent(db, parent)['probes']
+    original = database.growth_start_session
+    def start(db, cfg):
+        assert database.growth_parent(db, parent)['probes']['a']['status']=='PASS'
+        return original(db, cfg)
+    monkeypatch.setattr(database, 'growth_start_session', start)
+    with database.stage_lock(db, 'combichem3d'):
+        stage.supervise(cfg | {'max-iteration':0}, db, 1)
+    assert database.growth_rows(db, 'combichem3d_pose')[0]['plan_state'] == before
+    assert not list((Path(db).parent/'result-buffer').glob('*.jsonl'))
+
+
+def test_probe_buffer_threshold_interval_and_early_exit(project, monkeypatch):
+    db, job, cfg = project
+    clock = [0.]
+    monkeypatch.setattr(buffering.time, 'monotonic', lambda: clock[0])
+    with pytest.raises(RuntimeError, match='early stop'):
+        with buffering.ProbeBuffer(db, job['parent_pose'], cfg | {'result-buffer-size':2}) as buffer:
+            buffer.save('a', dict(status='PASS'))
+            assert 'a' not in database.growth_parent(db, job['parent_pose'])['probes']
+            buffer.save('b', dict(status='UNRESOLVED'))
+            assert not buffer.path.exists()
+            clock[0] = 3.
+            buffer.save('c', dict(status='CLASH_REJECT'))
+            assert not buffer.path.exists()
+            buffer.save('d', dict(status='PASS', budget_interrupted=True))
+            raise RuntimeError('early stop')
+    probes = database.growth_parent(db, job['parent_pose'])['probes']
+    assert all(uid in probes for uid in 'abcd')
+    assert probes['d']['budget_interrupted']
+
+
+def test_probe_commit_failure_keeps_journal_for_recovery(project, monkeypatch):
+    db, job, cfg = project
+    buffer = buffering.ProbeBuffer(db, job['parent_pose'], cfg)
+    buffer.save('a', dict(status='PASS'))
+    with monkeypatch.context() as patch:
+        def fail(*args):
+            raise sqlite3.OperationalError('synthetic commit failure')
+        patch.setattr(database, 'growth_save_probes', fail)
+        with pytest.raises(sqlite3.OperationalError):
+            buffer.flush()
+    assert buffer.path.exists()
+    assert 'a' not in database.growth_parent(db, job['parent_pose'])['probes']
+    buffering.recover(db)
+    assert database.growth_parent(db, job['parent_pose'])['probes']['a']['status']=='PASS'
+
+
+def test_probe_bulk_busy_rolls_back_and_retries_all_updates(project, monkeypatch):
+    db, job, cfg = project
+    writes = []
+    class Busy(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql.startswith('INSERT OR REPLACE INTO combichem3d_probe'):
+                writes.append(1)
+                if len(writes)==2:
+                    exc = sqlite3.OperationalError('database is locked')
+                    exc.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                    raise exc
+            return super().execute(sql, parameters)
+    monkeypatch.setattr(database, 'connect', lambda path: sqlite3.connect(path, factory=Busy))
+    database.growth_save_probes(db, job['parent_pose'], [('a', dict(status='PASS')), ('b', dict(status='UNRESOLVED'))])
+    assert len(writes)==4
+    probes = database.growth_parent(db, job['parent_pose'])['probes']
+    assert probes['a']==dict(status='PASS') and probes['b']==dict(status='UNRESOLVED')
+
+
+def test_probe_incomplete_tail_recovers_only_complete_records(project):
+    db, job, cfg = project
+    buffer = buffering.ProbeBuffer(db, job['parent_pose'], cfg)
+    buffer.save('a', dict(status='PASS'))
+    with buffer.path.open('ab') as stream:
+        stream.write(b'{"site":"b"')
+    buffering.recover(db)
+    probes = database.growth_parent(db, job['parent_pose'])['probes']
+    assert 'a' in probes and 'b' not in probes
+
+
+def test_mismatched_probe_journal_is_retained(project):
+    db, job, cfg = project
+    buffer = buffering.ProbeBuffer(db, job['parent_pose'], cfg)
+    buffer.save('a', dict(status='PASS'))
+    with buffer.path.open('a') as stream:
+        stream.write(json.dumps(dict(parent_pose=999, site='b', report=dict(status='PASS')))+'\n')
+    with pytest.raises(ValueError, match='Inconsistent probe journal'):
+        buffering.recover(db)
+    assert buffer.path.exists()
+    assert 'a' not in database.growth_parent(db, job['parent_pose'])['probes']

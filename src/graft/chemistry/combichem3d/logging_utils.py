@@ -30,5 +30,5 @@ def configure(output, level='INFO'):
 
 def progress(info, iteration, workers):
     remaining=max(0.,(info.get('deadline') or 0)-time.time())
-    logger.info('progress iteration=%s attempted=%s unique=%s remaining=%.1fs',
+    logger.debug('progress iteration=%s attempted=%s unique=%s remaining=%.1fs',
                 iteration,info['attempted'],info['unique_count'],remaining)

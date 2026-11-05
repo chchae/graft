@@ -40,6 +40,46 @@ def passing_names(db, iteration=None):
     return result
 
 
+def pose_molecule(row, display_name=None, crem_mode=False):
+    """Restore one saved pose and the metadata shared by all SDF exports."""
+    metadata = json.loads(row['history'])
+    mol = Chem.MolFromMolBlock(row['molblock'],removeHs=False)
+    if mol is None:
+        raise RuntimeError(f"Cannot reconstruct saved pose {row['id']}")
+    from graft.chemistry.combichem3d.history import restore
+    restore(mol,metadata)
+    Chem.CreateAtomIntPropertyList(mol,'graft_added_cycle')
+    mol.SetProp('_Name',f"CMPID_{row['compound_id']}")
+    if crem_mode:
+        mol.SetProp('cmpid',f"CMPID_{row['compound_id']}")
+    if display_name:
+        mol.SetProp('_Name',display_name)
+        mol.SetProp('display_name',display_name)
+    for key,value in dict(pose_id=row['id'],parent_pose=row['parent_pose'],iteration=row['iteration'],
+                          output_passed=bool(row['output_passed']),history=metadata,
+                          properties=json.loads(row['properties'] or '{}')).items():
+        mol.SetProp(key,json.dumps(value,sort_keys=True))
+    return mol
+
+
+def export_cycle_results(db, output, iteration):
+    """Publish passing CReM identities and all their saved poses for one cycle."""
+    root = Path(output)
+    root.mkdir(parents=True,exist_ok=True)
+    labels = passing_names(db,iteration)
+    stem = f'cycle{iteration:02d}'
+    with tempfile.TemporaryDirectory(prefix='.export-cycle-',dir=root) as directory:
+        temporary = Path(directory)
+        with (temporary/f'{stem}.smi').open('w') as stream:
+            for row in database.growth_output_compounds(db,iteration):
+                stream.write(f"{row['smiles']}\t{labels[(iteration,row['compound_id'])]}\n")
+        with Chem.SDWriter(str(temporary/f'{stem}.sdf')) as writer:
+            for row in database.growth_cycle_output_poses(db,iteration):
+                writer.write(pose_molecule(row,labels[(iteration,row['compound_id'])],True))
+        for suffix in ('smi','sdf'):
+            os.replace(temporary/f'{stem}.{suffix}',root/f'{stem}.{suffix}')
+
+
 def export_results(db, output, batch=256):
     root = Path(output)
     root.mkdir(parents=True,exist_ok=True)
@@ -47,6 +87,7 @@ def export_results(db, output, batch=256):
     info = database.growth_run_info(db)
     crem_mode=info['settings'].get('generation-backend')=='crem'
     display_names=passing_names(db) if crem_mode else {}
+    cycle_iterations={iteration for iteration,_ in display_names}
     names = ['probes.jsonl','failures.jsonl','growth_history.jsonl','compounds.csv','poses.sdf','passed_poses.sdf','summary.json']
     try:
         if crem_mode:
@@ -59,6 +100,8 @@ def export_results(db, output, batch=256):
             names.append('cycles.jsonl')
             with (temporary/'cycles.jsonl').open('w') as stream:
                 for row in rows(db,'combichem3d_cycle',batch):
+                    if row['iteration'] > 0:
+                        cycle_iterations.add(row['iteration'])
                     stream.write(json.dumps(dict(iteration=row['iteration'],state=row['state'],frame_pose=row['frame_pose'],
                                                  **json.loads(row['report'])))+'\n')
         with (temporary/'probes.jsonl').open('w') as probes, (temporary/'failures.jsonl').open('w') as failures:
@@ -90,23 +133,8 @@ def export_results(db, output, batch=256):
                     if row['input_state']!=Growth.DONE or (row['iteration'] < info['settings']['max-iteration'] and unfinished):
                         failures.write(json.dumps(dict(kind='deferred_parent',status='UNRESOLVED',
                             parent_pose=row['id'],allocated=row['allocated'],total=row['total'],reason=info['stop_reason']))+'\n')
-                    mol = Chem.MolFromMolBlock(row['molblock'],removeHs=False)
-                    if mol is None:
-                        raise RuntimeError(f"Cannot reconstruct saved pose {row['id']}")
-                    from graft.chemistry.combichem3d.history import restore
-                    restore(mol,metadata)
-                    Chem.CreateAtomIntPropertyList(mol,'graft_added_cycle')
-                    mol.SetProp('_Name',f"CMPID_{row['compound_id']}")
                     display_name=display_names.get((row['iteration'],row['compound_id'])) if row['output_passed'] else None
-                    if crem_mode:
-                        mol.SetProp('cmpid',f"CMPID_{row['compound_id']}")
-                    if display_name:
-                        mol.SetProp('_Name',display_name)
-                        mol.SetProp('display_name',display_name)
-                    for key,value in dict(pose_id=row['id'],parent_pose=row['parent_pose'],iteration=row['iteration'],
-                                          output_passed=bool(row['output_passed']),history=metadata,
-                                          properties=json.loads(row['properties'] or '{}')).items():
-                        mol.SetProp(key,json.dumps(value,sort_keys=True))
+                    mol = pose_molecule(row,display_name,crem_mode)
                     all_poses.write(mol)
                     if row['output_passed']:
                         passed_poses.write(mol)
@@ -151,6 +179,10 @@ def export_results(db, output, batch=256):
         info['target_overshoot'] = max(0,info['unique_count']-info['settings']['target-count']) if info['count_limit_active'] else 0
         info['interpretation'] = 'MCS-constrained sidechain conformational search + receptor clash filtering; no docking/affinity claim'
         (temporary/'summary.json').write_text(json.dumps(info,indent=2,sort_keys=True)+'\n')
+        if crem_mode:
+            for iteration in sorted(cycle_iterations):
+                export_cycle_results(db,temporary,iteration)
+                names.extend([f'cycle{iteration:02d}.smi',f'cycle{iteration:02d}.sdf'])
         for name in names:
             os.replace(temporary/name,root/name)
         return info
@@ -207,6 +239,8 @@ def log_iteration_results(db, cfg, iteration, source_iteration):
                         seen.add(row['compound_id']);previews.append(row)
                 after=chunk[-1]['pose_id']
     os.replace(temporary,destination)
+    if cfg.get('generation-backend')=='crem' and iteration > 0:
+        export_cycle_results(db,cfg['out-dir'],iteration)
     statuses=counts['statuses']
     logger.info('iteration %s result: frames=%s attempted=%s passed_unique=%s passed_poses=%s CLASH_REJECT=%s UNRESOLVED=%s partial=%s',
                 iteration,counts['frames'],counts['attempted'],counts['passed_unique'],counts['passed_poses'],

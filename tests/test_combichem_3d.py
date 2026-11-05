@@ -1061,9 +1061,10 @@ def test_cli_logs_progress_worker_diagnostics_and_appends_on_resume(inputs,debug
     result=subprocess.run(command+flags,capture_output=True,text=True,timeout=30)
     assert result.returncode==0,result.stderr
     for text in ('starting config=','preflight:','sidechain library ready:',
-                 'FRAME CMPID_', 'RESULT CMPID_', 'iteration 2 result:', 'progress iteration=',
-                 'CLASH_REJECT=','UNRESOLVED=','remaining=','exports ready'):
+                 'FRAME CMPID_', 'RESULT CMPID_', 'iteration 2 result:',
+                 'CLASH_REJECT=','UNRESOLVED=','exports ready'):
         assert text in result.stdout
+    assert ('progress iteration=' in result.stdout)==bool(debug)
     assert ('probe start parent_pose=' in result.stdout)==(debug=='trace')
     assert ('product start parent_pose=' in result.stdout)==(debug=='trace')
     assert ('baseline parent_pose=' in result.stdout)==bool(debug)
@@ -1071,7 +1072,8 @@ def test_cli_logs_progress_worker_diagnostics_and_appends_on_resume(inputs,debug
         assert 'errors=[' not in result.stdout and 'internal_examples' not in result.stdout
     log=Path(cfg['out-dir'])/'run.log'
     original=log.read_text()
-    assert 'pid=' in original and 'progress iteration=' in original
+    assert 'pid=' in original
+    assert ('progress iteration=' in original)==bool(debug)
     assert original.count('starting config=')==1
     inventory=[json.loads(line) for line in (Path(cfg['out-dir'])/'iteration02-structures.jsonl').read_text().splitlines()]
     assert inventory[0]['kind']=='summary' and inventory[0]['frames']==1

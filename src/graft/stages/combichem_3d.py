@@ -372,7 +372,7 @@ def supervise(cfg, db, first_iteration):
     """Only lifecycle supervision here: every scientific calculation is a worker."""
     # Recovery does no scientific calculation. An independent stage process
     # persists orphaned journals before any calculator can reclaim their jobs.
-    if any((Path(db).parent/'result-buffer').glob('batch-*.jsonl')):
+    if any((Path(db).parent/'result-buffer').glob('*.jsonl')):
         from graft.stages.combichem_buffer import recover
         recovery = multiprocessing.get_context('fork').Process(target=recover, args=(db,))
         recovery.start()
