@@ -14,7 +14,8 @@ from graft.states import GrowthTaskState as Growth
 
 def versions():
     return dict(python=platform.python_version(), rdkit=rdBase.rdkitVersion,
-                numpy=np.__version__, graft=importlib.metadata.version('graft'))
+                numpy=np.__version__, scipy=importlib.metadata.version('scipy'),
+                graft=importlib.metadata.version('graft'))
 
 
 def rows(path, table, batch):

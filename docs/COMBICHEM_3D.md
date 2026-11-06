@@ -625,9 +625,38 @@ silently guessed to be water.
 This radius model has no special hydrogen-bond directionality or metal coordination
 terms. Tight polar contacts may be rejected and favorable coordination is not
 recognized. Input preparation, protonation, tautomers, metals, conserved waters
-and cofactors remain user protocol choices. **Ligand-only MMFF/UFF minimization
-does not include receptor repulsion.** The receptor is used in the independent
-post-optimization clash filter. No affinity/convergence claim follows from PASS.
+and cofactors remain user protocol choices. By default, ligand-only MMFF/UFF
+minimization uses the receptor only in the independent post-optimization clash
+filter. No affinity/convergence claim follows from PASS.
+
+### Optional receptor-aware steric optimization
+
+Set `[combichem-3d].receptor-repulsion-strength` to a positive value to optimize
+ligand MMFF/UFF energy plus a fixed-receptor steric penalty. The default is `0.0`,
+preserving the ligand-only optimizer. For an isolated comparison, `100.0` is an
+initial trial strength, not a calibrated physical parameter; consider allowing
+250 optimization iterations and measure rescue rate and runtime on your inputs.
+
+The penalty is `k/2 * sum(max(0, R_lig + R_rec - distance)^2)` over ligand/receptor
+atom pairs, with vdW radii in angstroms and `k` in nominal kcal/mol/angstrom².
+It uses the same water/cofactor/hydrogen atom policy as the final bump checker,
+but starts penalizing at vdW contact rather than relaxing the clash threshold.
+Neighbours are recomputed during each objective evaluation. SciPy L-BFGS-B
+minimizes the combined objective using analytic ligand and penalty gradients.
+Fixed core atoms are excluded from optimization variables; restrained cores
+retain their MMFF/UFF positional constraints. The receptor never moves.
+
+Methyl probes and full products both use this optimizer when enabled. Existing
+stereo, displacement, internal/receptor clash and output gates still apply.
+`ligand_energy` retains its ligand-only meaning; optimization reports additionally
+record the combined objective, strength, receptor penalty and convergence.
+Iteration limits remain explicit; numerical errors remain unresolved.
+
+This is an overlap-rescue model, without electrostatics, attraction, directional
+hydrogen bonds, metal coordination, solvent or receptor relaxation. It is not a
+binding energy or replacement for constrained Glide/GBSA. The strength is frozen
+with scientific settings and implementation hashes. Use a new output for changed
+protocol comparisons; never reset or extend an already frozen population.
 
 ## Resource bounds, stopping and restart
 

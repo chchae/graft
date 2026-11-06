@@ -240,7 +240,8 @@ def test_existing_population_is_rejected_before_generation_or_native_queries(pro
     assert database.crem_generation(project.db_path,1) is None
 
 
-def test_changed_scientific_settings_cannot_resume_frozen_generation(project,monkeypatch):
+@pytest.mark.parametrize('change', ['conformers = 3', 'receptor-repulsion-strength = 100.0'])
+def test_changed_scientific_settings_cannot_resume_frozen_generation(project,monkeypatch,change):
     with monkeypatch.context() as patch:
         def interrupted(*args):
             raise RuntimeError('before import')
@@ -248,7 +249,7 @@ def test_changed_scientific_settings_cannot_resume_frozen_generation(project,mon
         with pytest.raises(RuntimeError,match='before import'):
             generate._run_stage(project,1)
     before=database.crem_generation(project.db_path,1)
-    project.toml_file.write_text(project.toml_file.read_text()+'\nconformers = 3\n')
+    project.toml_file.write_text(project.toml_file.read_text()+'\n'+change+'\n')
     with pytest.raises(RuntimeError,match='settings/parents changed'):
         generate._run_stage(project,1)
     assert database.crem_generation(project.db_path,1)==before

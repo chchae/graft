@@ -90,7 +90,7 @@ def embedded(product, fixed, seed, cfg, deadline):
     return mol
 
 
-def optimize(mol, fixed, cfg, hard_fixed=False):
+def optimize(mol, fixed, cfg, hard_fixed=False, checker=None):
     field = cfg['force-field']
     if field in ('auto', 'MMFF') and AllChem.MMFFHasAllMoleculeParams(mol):
         props = AllChem.MMFFGetMoleculeProperties(mol)
@@ -113,6 +113,11 @@ def optimize(mol, fixed, cfg, hard_fixed=False):
                 method = ff.MMFFAddPositionConstraint if kind == 'MMFF' else ff.UFFAddPositionConstraint
                 method(index, 0., cfg['restraint-force'])
     ff.Initialize()
+    if cfg.get('receptor-repulsion-strength', 0.) > 0:
+        if checker is None:
+            raise ValueError('Receptor-aware optimization requires the fixed receptor')
+        from graft.chemistry.combichem3d.repulsion import minimize
+        return minimize(mol, ff, kind, fixed if mode == 'fixed' else {}, checker, cfg)
     return_code=ff.Minimize(maxIts=cfg['optimization-iterations'])
     # RDKit code 1 means the iteration limit was reached, not a broken
     # force field. Keep that evidence and still test geometry/stereo/clashes.
@@ -177,7 +182,8 @@ def search(product, history, checker, cfg, seed, *, parent_fixed=None, starts=()
                     for quartet in flexible:
                         rdMolTransforms.SetDihedralDeg(candidate.GetConformer(), *quartet, rng.uniform(-180, 180))
                 with rdBase.BlockLogs():
-                    kind, energy, optimization = optimize(candidate, fixed, cfg, hard_fixed=parent_fixed is not None)
+                    options = {'checker': checker} if cfg.get('receptor-repulsion-strength', 0.) > 0 else {}
+                    kind, energy, optimization = optimize(candidate, fixed, cfg, hard_fixed=parent_fixed is not None, **options)
                 optimization_counts[optimization['status']]+=1
                 displacement = core_deviation(candidate, history)
                 if displacement > cfg['core-displacement']:

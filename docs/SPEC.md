@@ -1,5 +1,41 @@
 # Graft specification
 
+## Optional fixed-receptor repulsion during 3D optimization (2026-11-06)
+
+**Confirmed user request:** account for the receptor during energy optimization
+so that generated poses can avoid steric collisions.
+
+**Implementation choice:** add opt-in `[combichem-3d].receptor-repulsion-strength`
+(default 0.0; finite nonnegative). Positive values minimize ligand MMFF/UFF plus
+`k/2 * sum(max(0, R_lig + R_rec - distance)^2)` with SciPy L-BFGS-B and analytic
+gradients. The receptor is fixed and uses the final bump checker's atom policy;
+all vdW overlap contributes, while the independent final overlap tolerance and
+all existing geometry/stereo/internal-clash gates remain unchanged. Neighbours
+are recalculated every evaluation. Hard-fixed core atoms are excluded from
+optimization variables; restrained cores retain their force-field constraints.
+Apply to methyl probes and products. Preserve ligand-only energy reporting and
+record the total objective, penalty, strength and convergence separately. Keep
+iteration-limit evidence and unresolved numerical failures. Freeze the strength,
+implementation and SciPy version under existing restart checks. Never reset,
+extend or relabel completed/frozen populations to apply the new protocol.
+
+**Evidence limits:** this is a steric rescue term, without receptor relaxation,
+electrostatics, attraction, solvent or directional H-bond/metal terms. It is not
+an affinity calculation. A trial strength of 100.0 and 250 iterations are
+implementation experiment values, not calibrated or user-required defaults.
+Real RDKit synthetic tests check gradients, clash rescue, fixed coordinates,
+MMFF/UFF support and final rejection of immovable clashes. A read-only sample
+of 12 evenly spaced iter3 rejected attempts, retaining each seed and candidate,
+passed 0/12 at original ligand-only 50 iterations, 3/12 at ligand-only 250 and
+12/12 at receptor-aware 250 (strength 100). This small selected sample does not
+establish whole-population rescue, binding accuracy or production throughput.
+No external programs, production DB writes or job submissions were used.
+
+**Verification:** 397 related configuration, 3D, CReM and pipeline regressions
+passed; the previously documented real-fragment collision assertion was explicitly
+excluded. Editable installation, compileall, package/CLI imports and diff checks
+passed. The full suite was not rerun. The EGFR TOML was not changed by this work.
+
 ## Reject standalone growth for scored CReM pipeline TOMLs (2026-11-05)
 
 **Observed user report:** after reference scoring, logs showed repeated CReM

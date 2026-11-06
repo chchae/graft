@@ -60,6 +60,105 @@ def parent(smiles, core=(0,)):
     return provenance.annotate(mol,history)
 
 
+@pytest.mark.parametrize('strength', [-1, float('inf'), float('nan'), True, '100'])
+def test_receptor_repulsion_strength_validation(tmp_path, strength):
+    filename, cfg = toy(tmp_path/'toy')
+    assert cfg['receptor-repulsion-strength'] == 0.
+    literal = str(strength).lower() if not isinstance(strength, str) else '"100"'
+    filename.write_text(f'receptor-repulsion-strength = {literal}\n' + filename.read_text())
+    with pytest.raises(ValueError, match='receptor-repulsion-strength'):
+        combichem_3d_settings(filename)
+
+
+def test_receptor_repulsion_gradient_and_dynamic_neighbours(inputs):
+    from graft.chemistry.combichem3d.repulsion import ReceptorRepulsion
+    _, cfg, _, _ = inputs
+    ligand = positioned('CC', [(0., 0., 0.), (20., 0., 0.)])
+    checker = BumpChecker(positioned('[Ne]', [(2., .3, .1)]), cfg)
+    penalty = ReceptorRepulsion(ligand, checker, 100.)
+    xyz = np.array(ligand.GetConformer().GetPositions())
+    energy, gradient = penalty.energy_gradient(xyz)
+    assert energy > 0 and np.isfinite(gradient).all()
+    for atom in range(2):
+        for axis in range(3):
+            plus, minus = xyz.copy(), xyz.copy()
+            plus[atom, axis] += 1e-5
+            minus[atom, axis] -= 1e-5
+            numeric = (penalty.energy_gradient(plus)[0] - penalty.energy_gradient(minus)[0]) / 2e-5
+            assert gradient[atom, axis] == pytest.approx(numeric, abs=1e-5)
+    xyz[0] = (20., 0., 0.)
+    assert penalty.energy_gradient(xyz)[0] == 0.
+    xyz[1] = (1., 0., 0.)
+    assert penalty.energy_gradient(xyz)[0] > 0  # previously distant atom enters range
+
+
+@pytest.mark.parametrize('field', ['MMFF', 'UFF'])
+def test_real_receptor_aware_optimization_resolves_clash_preserving_core(inputs, field):
+    _, cfg, _, _ = inputs
+    ligand = Chem.AddHs(Chem.MolFromSmiles('CCCC'))
+    assert AllChem.EmbedMolecule(ligand, randomSeed=37) >= 0
+    for atom in ligand.GetAtoms():
+        atom.SetProp('_mn_uid', str(atom.GetIdx()))
+    fixed = {'0': list(ligand.GetConformer().GetAtomPosition(0))}
+    point = list(ligand.GetConformer().GetAtomPosition(3))
+    point[1] += 1.8
+    checker = BumpChecker(positioned('[Ne]', [point]), cfg)
+    receptor_before = checker.xyz.copy()
+    cfg['force-field'] = field
+    baseline = Chem.Mol(ligand)
+    conformations.optimize(baseline, fixed, cfg)
+    assert not checker.check(baseline)['passed']
+    cfg['receptor-repulsion-strength'] = 100.
+    _, energy, report = conformations.optimize(ligand, fixed, cfg, checker=checker)
+    assert checker.check(ligand)['passed']
+    assert list(ligand.GetConformer().GetAtomPosition(0)) == fixed['0']
+    assert np.array_equal(checker.xyz, receptor_before)
+    assert math.isfinite(energy)
+    assert report['total_energy'] == pytest.approx(energy + report['receptor_repulsion_energy'])
+    assert report['objective'] == 'ligand_ff_plus_fixed_receptor_repulsion_v1'
+
+
+def test_receptor_aware_search_still_rejects_immovable_core_clash(inputs):
+    _, cfg, mol, h = inputs
+    cfg['receptor-repulsion-strength'] = 100.
+    checker = BumpChecker(positioned('[Ne]', [h['core'][0]['xyz']]), cfg)
+    result = conformations.search(mol, h, checker, cfg, 37, starts=[Chem.AddHs(mol, addCoords=True)])
+    assert result['status'] == PoseVerdict.CLASH_REJECT
+    assert not result['clashes']['passed']
+    assert result['last_optimization']['objective'] == 'ligand_ff_plus_fixed_receptor_repulsion_v1'
+
+
+def test_receptor_aware_optimizer_missing_receptor_is_error(inputs):
+    _, cfg, mol, h = inputs
+    cfg['receptor-repulsion-strength'] = 100.
+    with pytest.raises(ValueError, match='requires the fixed receptor'):
+        conformations.optimize(Chem.AddHs(mol, addCoords=True), conformations.fixed_coordinates(mol, h), cfg)
+
+
+def test_receptor_aware_numerical_failure_remains_unresolved(inputs, monkeypatch):
+    from types import SimpleNamespace
+    from graft.chemistry.combichem3d import repulsion
+    _, cfg, mol, h = inputs
+    cfg['receptor-repulsion-strength'] = 100.
+    checker = BumpChecker(positioned('[Ne]', [(100., 100., 100.)]), cfg)
+    monkeypatch.setattr(repulsion, 'scipy_minimize', lambda *a, **kw: SimpleNamespace(
+        success=False, status=2, message='line search failed'))
+    result = conformations.search(mol, h, checker, cfg, 37, starts=[Chem.AddHs(mol, addCoords=True)])
+    assert result['status'] == PoseVerdict.UNRESOLVED
+    assert any('line search failed' in error for error in result['errors'])
+
+
+def test_receptor_aware_iteration_limit_keeps_convergence_evidence(inputs):
+    _, cfg, mol, h = inputs
+    cfg.update({'receptor-repulsion-strength': 100., 'optimization-iterations': 1})
+    checker = BumpChecker(positioned('[Ne]', [(100., 100., 100.)]), cfg)
+    _, _, report = conformations.optimize(Chem.AddHs(mol, addCoords=True),
+        conformations.fixed_coordinates(mol, h), cfg, checker=checker)
+    assert not report['converged']
+    assert report['status'] == 'iteration_limit'
+    assert report['iterations'] == 1
+
+
 @pytest.mark.parametrize('count',[1,2,3,4])
 def test_iteration_one_uses_every_core_attachment_and_full_cartesian_space(tmp_path,count):
     _,cfg = toy(tmp_path/f'toy{count}',0,count)

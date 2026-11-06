@@ -56,6 +56,7 @@ def combichem_3d_settings(filename):
         'one-four-policy': 'exclude', 'one-four-scale': .8,
         'include-water': False, 'include-cofactors': True, 'include-hydrogens': False,
         'force-field': 'auto', 'core-constraint': 'fixed', 'restraint-force': 1000.,
+        'receptor-repulsion-strength': 0.,
         'max-seconds': 1800., 'stop-mode': 'target', 'target-count': 10,
         'processes': min(16, os.cpu_count() or 1), 'seed': 20261025,
         'batch-size': 16, 'result-buffer-size': 16, 'result-buffer-seconds': 2., 'grace-seconds': 5., 'embed-timeout': 5,
@@ -176,7 +177,7 @@ def combichem_3d_settings(filename):
             raise ValueError(f'{key} must be an integer >= {minimum}')
     if (cfg['execution-backend']!='slurm' and cfg['processes'] > 384) or cfg['seed'] > 2147483646:
         raise ValueError('processes must be <=384 and seed <=2147483646')
-    for key in ('core-displacement', 'overlap-tolerance', 'one-four-scale', 'restraint-force', 'max-seconds', 'grace-seconds', 'log-interval', 'result-buffer-seconds'):
+    for key in ('core-displacement', 'overlap-tolerance', 'one-four-scale', 'restraint-force', 'receptor-repulsion-strength', 'max-seconds', 'grace-seconds', 'log-interval', 'result-buffer-seconds'):
         value = cfg[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise ValueError(f'{key} must be a finite nonnegative number')
