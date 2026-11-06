@@ -119,7 +119,7 @@ crem-db = "/home1/crem/database/chembl22_sa2_hac12.db"
 crem-radius = 3
 crem-min-freq = 0
 # One fragment per child per GRAFT iteration; no internal CReM cycles.
-sidechains-per-site = 1000 # upper bound; context may provide fewer replacements
+sidechains-per-site = 10000 # upper bound; context may provide fewer replacements
 sidechain-min-heavy-atoms = 3
 sidechain-max-heavy-atoms = 8
 processes = 116
@@ -127,5 +127,6 @@ max-seconds = 18000
 # Fast finite searches; increase these explicitly for more exploration.
 conformers = 2
 torsion-trials = 2
-optimization-iterations = 50
+receptor-repulsion-strength = 100.0
+optimization-iterations = 100
 core-constraint = "fixed"
