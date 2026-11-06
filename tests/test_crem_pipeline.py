@@ -1,5 +1,6 @@
 """Single-expansion integration; synthetic receptors/scores do not validate affinity."""
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,6 +144,46 @@ def test_deleted_frozen_crem_population_is_not_silently_regenerated(project):
         conn.execute('DELETE FROM compound WHERE iteration=1')
     with pytest.raises(RuntimeError,match='population changed'):
         generate._run_stage(args,1)
+
+
+def test_explicit_deleted_crem_reconciliation_backs_up_and_retains_previous_results(project, tmp_path):
+    generate._run_stage(project, 1)
+    druglike._run_stage(project, 1)
+    before = database.crem_generation(project.db_path, 1)
+    with sqlite3.connect(project.db_path) as conn:
+        earlier = conn.execute('SELECT * FROM compound WHERE iteration=0').fetchall()
+        conn.execute('DELETE FROM compound WHERE iteration=1')  # simulate manual deletion with FK checks off
+    assert not database.iteration_was_deleted(project.db_path, 1)  # never an automatic reset
+    backup = tmp_path/'before-explicit-reset.sqlite'
+    database.reset_deleted_iteration(project.db_path, 1, backup, allow_deleted_crem=True)
+    assert database.crem_generation(project.db_path, 1) is None
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT * FROM compound WHERE iteration=0').fetchall() == earlier
+        assert conn.execute('SELECT COUNT(*) FROM crem_compound_pose WHERE iteration=1').fetchone()[0] == 0
+        assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
+    assert database.crem_generation(backup, 1) == before
+    with sqlite3.connect(backup) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM crem_compound_pose').fetchone()[0] == before['population_count']
+
+
+@pytest.mark.parametrize('problem', ['nonempty', 'partial_provenance', 'md_work', 'later_plan'])
+def test_explicit_deleted_crem_reconciliation_refuses_uncertain_state(project, tmp_path, problem):
+    generate._run_stage(project, 1)
+    before = database.crem_generation(project.db_path, 1)
+    with sqlite3.connect(project.db_path) as conn:
+        if problem != 'nonempty':
+            conn.execute('DELETE FROM compound WHERE iteration=1')
+        if problem == 'partial_provenance':
+            conn.execute('DELETE FROM crem_compound_pose WHERE compound_id=(SELECT MIN(compound_id) FROM crem_compound_pose)')
+        if problem == 'md_work':
+            conn.execute("INSERT INTO iteration_md_gbsa_selection VALUES (1,'[]','{}')")
+        if problem == 'later_plan':
+            conn.execute("INSERT INTO iteration_crem VALUES (2,'{}','running',NULL,NULL)")
+    backup = tmp_path/'must-not-reset.sqlite'
+    with pytest.raises(RuntimeError):
+        database.reset_deleted_iteration(project.db_path, 1, backup, allow_deleted_crem=True)
+    assert database.crem_generation(project.db_path, 1) == before
+    assert not backup.exists()
 
 
 def test_active_reference_blocks_generation(project,monkeypatch):

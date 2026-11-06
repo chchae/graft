@@ -529,7 +529,10 @@ def _generation_readiness_reason(conn, iteration, target_count):
         if saved['state'] != Growth.DONE:
             return 'CReM generation/import incomplete'
         if count != saved['population_count']:
-            raise RuntimeError('Frozen CReM population changed; existing results retained')
+            raise RuntimeError(f'Frozen CReM population changed for iteration {iteration} '
+                               f"(expected={saved['population_count']}, actual={count}); "
+                               'existing results retained. Restore the original population or explicitly '
+                               'reconcile a confirmed deletion after backing up and checking native jobs.')
         return None
     return f'generation incomplete ({count}/{target_count} compounds)' if count < target_count else None
 
@@ -1089,27 +1092,48 @@ def iteration_was_deleted(path, iteration):
         return _deleted_iteration(conn, iteration)
 
 
-def reset_deleted_iteration(path, iteration, backup, report_ids=()):
+def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_deleted_crem=False):
     """Under all stage locks, back up SQLite/WAL and reset only a deleted iteration.
 
     The caller verifies native jobs and archives working files. Membership IDs
     must come from saved selection ownership, combichem origins or the original
     druglike report, never guessed ID ranges. Existing compounds are never removed.
+    allow_deleted_crem is only for explicit user-directed reconciliation after
+    native/remote jobs are terminal and archived. Automatic workspace recovery
+    never sets it; incomplete, nonempty or provenance-inconsistent runs stop.
     """
     if iteration < 1:
         raise ValueError('Cannot reset iteration zero')
     with connect(path) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        if not _deleted_iteration(conn, iteration):
+        crem = _crem_record(conn, iteration)
+        crem_ids = set()
+        if allow_deleted_crem and crem is not None:
+            if (crem['state'] != Growth.DONE or not crem['population_count']
+                    or conn.execute('SELECT 1 FROM compound WHERE iteration=? LIMIT 1', (iteration,)).fetchone()):
+                raise RuntimeError('Only a fully deleted, completed CReM population can be explicitly reset')
+            crem_ids = {row[0] for row in conn.execute(
+                'SELECT compound_id FROM crem_compound_pose WHERE iteration=?', (iteration,))}
+            if len(crem_ids) != crem['population_count']:
+                raise RuntimeError('Deleted CReM provenance does not match its frozen population; reset blocked')
+        elif not _deleted_iteration(conn, iteration):
             raise RuntimeError('Iteration is no longer empty/deleted; files and database retained')
         if conn.execute('SELECT 1 FROM compound WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
             raise RuntimeError('Later iteration compounds depend on this iteration; reset blocked')
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if crem_ids:
+            for table in ('iteration_crem', 'iteration_scaffold', 'iteration_md_gbsa_selection', 'iteration_fep_selection'):
+                if table in tables and conn.execute(f'SELECT 1 FROM {table} WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
+                    raise RuntimeError('Later saved iteration work depends on this iteration; reset blocked')
         if 'iteration_md_gbsa_selection' in tables and conn.execute('SELECT 1 FROM iteration_md_gbsa_selection WHERE iteration=?',(iteration,)).fetchone():
             raise RuntimeError('Deleted iteration has durable MD work; reconcile remote jobs before reset')
         ids = {row[0] for row in conn.execute(
             'SELECT compound_id FROM combichem_compound_origin WHERE iteration=?', (iteration,))
                } if 'combichem_compound_origin' in tables else set()
+        if crem_ids:
+            if ids and ids != crem_ids:
+                raise RuntimeError('Deleted CReM provenance and compound origins disagree; reset blocked')
+            ids = crem_ids
         if ('compound_druglike_selection' in tables and 'iteration' in
                 {row[1] for row in conn.execute('PRAGMA table_info(compound_druglike_selection)')}):
             selected = {row[0] for row in conn.execute(
@@ -1140,6 +1164,9 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=()):
         with sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True) as source:
             with sqlite3.connect(backup) as target:
                 source.backup(target)
+        if crem_ids:
+            conn.execute('DELETE FROM crem_compound_pose WHERE iteration=?', (iteration,))
+            conn.execute('DELETE FROM iteration_crem WHERE iteration=?', (iteration,))
         for table in ('compound_druglike_selection', 'amber_failure'):
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM reset_compound_ids)')

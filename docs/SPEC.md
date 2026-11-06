@@ -1,5 +1,36 @@
 # Graft specification
 
+## Explicit reconciliation of a user-deleted CReM iteration (2026-11-06)
+
+**Observed report and user confirmation:** the user deleted the iter04 folder and
+compound rows. SQLite retained a completed 36-member CReM population and orphaned
+pose/druglike records. The normal frozen-population guard correctly stopped.
+Remote Amber array 188500 still owned the deleted identities; no reset was
+permitted while it was active. Read-only status and task-lock checks subsequently
+confirmed all 18 tasks terminal, with 18 saved results.
+
+**Implementation repair:** retain automatic CReM deletion guards. Extend the
+existing DB reset helper with explicit `allow_deleted_crem=True`, solely for
+user-directed reconciliation after stage/driver locks, native job checks and
+archives. Require zero remaining compounds, a completed positive frozen count,
+exact retained provenance membership, consistent selection ownership, no later
+saved generation/ranking work and no durable MD selection. Back up committed
+SQLite/WAL before removing orphaned CReM pose/plan and existing reset-scope
+selection/scaffold/workspace records. Preserve previous compounds and native
+results in backups; never cancel jobs, silently reset frozen work, or recover
+from ID-range guesses. Normal execution never enables the explicit option.
+Include iteration and expected/actual counts in mismatch diagnostics.
+
+**Verification and operational result:** 174 CReM/MD/workspace regressions passed,
+including explicit-reset backup, prior-result preservation and rejection of
+nonempty, incomplete-provenance, MD-owned and later-plan cases. Compileall,
+package/CLI imports and diff checks passed. After array 188500 was terminal,
+reconciliation held the driver and all stage locks, archived the full remote
+Amber run, 18 results and SQLite backups under output/.previous/, and removed
+only orphaned iter04 metadata. All 2,980 remaining compound rows were unchanged;
+foreign-key/integrity checks passed and read-only driver selection returned 4.
+No calculation was started or canceled, and the project TOML was not changed.
+
 ## Optional fixed-receptor repulsion during 3D optimization (2026-11-06)
 
 **Confirmed user request:** account for the receptor during energy optimization
