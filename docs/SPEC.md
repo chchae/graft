@@ -1,5 +1,78 @@
 # Graft specification
 
+## Explicit restart of unstarted MDs under a pinned installation (2026-11-06)
+
+**Observed continuation and authorized intent:** after requesting an explicit
+2026-3 MD path, the user still encountered iter3's missing-parent failure because
+iter2's 24 terminal startup failures retained the old frozen environment and had
+consumed their automatic retries. Recover only that failed upstream MD work;
+preserve iteration 0/1, all prior scores, compound identities and parent rules.
+
+**Implementation:** add a caller-locked, explicit `restart_unstarted_md_selection`
+DB operation. Require the exact saved selection, latest iteration with no later
+frozen CReM generation, all selected compounds failed/unscored with no result,
+and one verified FAILED/JOB_SUPERVISOR_NOT_STARTED native parent per replica,
+without a timeStarted or children. Block pending retries, active/uncertain jobs,
+started MDs and changed science. Only the execution suite and fresh remote/local
+run/helper paths may change; source/hash, protocol, seeds, native helper hashes,
+resource limits, local Prime installation and selected order remain fixed.
+
+Back up committed SQLite/WAL, preserve the old selection and native evidence in
+md_startup_restart_history, archive local progress, and retain old remote journals
+and jobs. Claim the same IDs as MD-running using the fresh frozen settings.
+Keep consumed automatic retry tokens unchanged: this is one explicit new attempt,
+not a replenished automatic budget. Reopen completion timing and mark FEP for
+refresh after the real MD stage completes. Normal polling never retargets a saved
+run or invokes this operation. Do not bypass the finite-MD parent gate.
+
+**Verification:** 324 configuration, MD, retry, admission, local Prime and pool
+regressions passed. Tests cover backup/selection/ranking preservation, retained
+retry tokens and refusal of live/started/unproven work, changed protocols, scored
+compounds and pending retries. An isolated production-DB copy passed the recovery
+checks before the actual operation. Compileall, imports and diff checks passed.
+These checks do not validate native MD completion or binding accuracy.
+
+**Operational outcome:** verified all 24 old native parents against their remote
+journals, checked the 2026-3 environment, held driver/all-stage locks, archived
+SQLite and local MD state under output/.previous/iter02-md-startup-restart-1793943423275847029/,
+and retargeted exactly those 24 IDs to a fresh 2026-3 run. Other compound rows
+were unchanged. A single iteration-2 driver was started, then stopped gracefully
+when fresh native queries showed the same startup failure. Fourteen new parents
+were FAILED/JOB_SUPERVISOR_NOT_STARTED with actual jobSchrodinger=2026-3; ten
+were not submitted. No native jobs were canceled or scientific failures hidden.
+The initial md-running reports were submission-time snapshots, not proof of MD
+startup or completion. Official `jsc admin test-queue slurm-gpu` without --submit
+also failed to resolve runtime installation for the server's default launch
+path. Source/TOML pinning is in place, but supervisor/queue environment diagnosis
+remains unresolved; no further production retry was performed. Preserve all
+journals and resume only after addressing the native startup problem.
+
+## Pin new MD execution to Schrödinger 2026-3 (2026-11-06)
+
+**Confirmed user request:** use an explicit 2026-3 execution installation in the
+source/TOML instead of the mutable `/share/opt/schrodinger/default` path.
+
+**Implementation:** change the optional `md-gbsa-schrodinger` default in config.py
+to `/share/opt/schrodinger/2026-3`, and set the same explicit key in the EGFR CReM
+pipeline TOML. This supersedes the earlier default-symlink choice for new runs.
+Preserve explicit alternative TOML values as remote paths; do not resolve them on
+the client. Leave local Prime installation settings and scientific parameters
+unchanged. Existing SQLite-frozen MD selections, helpers, JobIds and retry budgets
+retain their saved environment. Configuration changes alone do not retarget or
+restart an already failed/uncertain MD run; that requires explicit reconciliation.
+
+**Evidence limits:** the observed iter2 failures were all
+JOB_SUPERVISOR_NOT_STARTED. JobServer was 2026-3 and the default path selected
+2026-1; this difference alone does not prove the cause. A newer JobServer can
+support an older Suite. Pinning removes ambiguity from future execution paths,
+without establishing that native MD startup or calculations will succeed.
+
+**Verification:** 225 configuration/MD regressions passed, including explicit
+remote overrides and retention of frozen old settings. Compileall, package/CLI
+imports and diff checks passed. Read-only checks found executable 2026-3 run,
+multisim and supervisor tools on slurm/gpu56, with API v1.21.2; no job was submitted
+or retried. Production SQLite and existing remote scientific helpers were untouched.
+
 ## Explicit recovery after deletion of all generated iterations (2026-11-06)
 
 **Observed report and user confirmation:** after the prior iter04-only repair,

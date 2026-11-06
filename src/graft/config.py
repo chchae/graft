@@ -369,7 +369,7 @@ def md_gbsa_settings(config: dict[str, Any]) -> dict[str, Any]:
                 or any(c.isspace() for c in value) or ':' in value):
             raise ValueError(f'Invalid md-gbsa-{suffix}')
         result['md_gbsa_' + suffix.replace('-', '_')] = value
-    for suffix, default in [('schrodinger', '/share/opt/schrodinger/default'),
+    for suffix, default in [('schrodinger', '/share/opt/schrodinger/2026-3'),
                             ('remote-work-dir', f'/homes1/{getpass.getuser()}/graft-md-gbsa-runs'),
                             ('local-work-dir', '/home1/prime_share'),
                             ('local-schrodinger', '/home/schrodinger/2025-3-IL')]:

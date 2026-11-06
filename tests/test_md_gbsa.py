@@ -1,5 +1,6 @@
 """Workflow regressions; mocked energies do not validate scientific calculations."""
 import json
+import copy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,6 +43,69 @@ def test_final_prime_selection_is_frozen_before_claim_and_no_refill(db):
     database.store_md_gbsa_result(db,1,2,result(2,-70))
     assert database.md_gbsa_completion_reason(db,1) is None
     assert 'need 2' in database.md_gbsa_completion_reason(db,1,2)
+
+
+def test_pinned_md_default_does_not_rewrite_existing_native_selection(db):
+    old = dict(protocol=dict(snapshots=20), replicates=1, root='/immutable',
+               suite='/share/opt/schrodinger/default')
+    saved = database.freeze_md_gbsa_selection(db, 1, old, target_count=4, prime_count=4)
+    changed = old | {'suite': md_gbsa_settings({})['md_gbsa_schrodinger']}
+    assert changed['suite'] == '/share/opt/schrodinger/2026-3'
+    assert database.freeze_md_gbsa_selection(db, 1, changed, target_count=4, prime_count=4) == saved
+    assert database.md_gbsa_selection(db, 1)['settings']['suite'] == old['suite']
+
+
+def startup_restart_case(db):
+    settings = dict(protocol=dict(snapshots=20), replicates=1, root='/old', helper='/old/native.py',
+                    suite='/share/opt/schrodinger/default', source_sha256='same', helper_sha256='same')
+    old = database.freeze_md_gbsa_selection(db,1,settings,target_count=4,prime_count=4)
+    with database.connect(db) as conn:
+        conn.execute('UPDATE compound SET state=?,failed_stage=? WHERE id IN (1,2)', (State.FAILED,'md_gbsa'))
+    database.enable_md_cycle_retries(db,1)
+    for cid, token in database.score_retry_requests(db,1,'md_gbsa'):
+        database.finish_score_retry(db,1,'md_gbsa',cid,token,rearm=False)
+    new = settings | dict(root='/new',helper='/new/native.py',suite='/share/opt/schrodinger/2026-3')
+    evidence = [dict(id=cid,replica=0,record=dict(job_id=str(cid)),jobs=[dict(jobId=str(cid),status='FAILED',
+                    statusChangeReason='JOB_SUPERVISOR_NOT_STARTED',timeStarted=None)]) for cid in old['ids']]
+    return old,new,evidence
+
+
+def test_explicit_unstarted_md_restart_preserves_ranking_backup_and_retry_budget(db,tmp_path):
+    old,new,evidence = startup_restart_case(db)
+    with database.connect(db) as conn:
+        unrelated = conn.execute('SELECT * FROM compound WHERE id>2 ORDER BY id').fetchall()
+        retries = conn.execute('SELECT * FROM score_restart_retry ORDER BY compound_id').fetchall()
+    backup = tmp_path/'before.sqlite'
+    result = database.restart_unstarted_md_selection(db,1,old,new,evidence,backup)
+    assert result == dict(ids=old['ids'],settings=new)
+    assert database.md_gbsa_selection(backup,1)==old
+    assert database.md_gbsa_completion_reason(db,1) is not None
+    with database.connect(db) as conn:
+        assert conn.execute('SELECT * FROM compound WHERE id>2 ORDER BY id').fetchall()==unrelated
+        assert conn.execute('SELECT * FROM score_restart_retry ORDER BY compound_id').fetchall()==retries
+        assert conn.execute('SELECT DISTINCT state FROM compound WHERE id<=2').fetchall()==[(State.MD_GBSA_RUNNING,)]
+        assert conn.execute('SELECT previous_selection FROM md_startup_restart_history').fetchone()[0]==json.dumps(old)
+    with pytest.raises(RuntimeError,match='selection changed'):
+        database.restart_unstarted_md_selection(db,1,old,new,evidence,tmp_path/'again.sqlite')
+
+
+@pytest.mark.parametrize('problem',['active','started','different_failure','missing','science','same_root','scored','pending_retry'])
+def test_unstarted_md_restart_refuses_unsafe_or_changed_work(db,tmp_path,problem):
+    old,new,evidence = startup_restart_case(db)
+    if problem=='active':evidence[0]['jobs'][0]['status']='RUNNING'
+    elif problem=='started':evidence[0]['jobs'][0]['timeStarted']='2026-11-06T01:00:00Z'
+    elif problem=='different_failure':evidence[0]['jobs'][0]['statusChangeReason']='OTHER'
+    elif problem=='missing':evidence.pop()
+    elif problem=='science':new=copy.deepcopy(new);new['protocol']['snapshots']=10
+    elif problem=='same_root':new['root']=old['settings']['root']
+    else:
+        with database.connect(db) as conn:
+            if problem=='scored':conn.execute('UPDATE compound SET md_gbsa_score=-42 WHERE id=1')
+            else:conn.execute("UPDATE score_restart_retry SET pending=1 WHERE compound_id=1")
+    backup=tmp_path/'blocked.sqlite'
+    with pytest.raises(RuntimeError):database.restart_unstarted_md_selection(db,1,old,new,evidence,backup)
+    assert database.md_gbsa_selection(db,1)==old
+    assert not backup.exists()
 
 
 @pytest.mark.parametrize('state', [State.GLIDE_RUNNING,State.PRIME_GBSA_RUNNING,State.AMBER_RUNNING])

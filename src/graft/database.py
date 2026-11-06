@@ -159,6 +159,81 @@ def request_authorized_md_retries(path, iteration, compound_ids):
         return tokens
 
 
+def restart_unstarted_md_selection(path, iteration, expected, settings, evidence, backup):
+    """Explicit operator recovery of an all-failed supervisor-startup selection.
+
+    Caller holds driver/all-stage locks, verifies remote journals and archives
+    local progress before starting the fresh run. Never an automatic retry.
+    """
+    import json
+    import copy
+    ids = expected['ids']
+    old = expected['settings']
+    if not ids or settings['root'] == old['root'] or settings['suite'] == old['suite']:
+        raise RuntimeError('Startup recovery requires a fresh run and explicit changed execution installation')
+    def science(value):
+        value = copy.deepcopy(value)
+        for key in ('root', 'helper', 'suite'):
+            value.pop(key, None)
+        if value.get('local_compute'):
+            for key in ('root', 'helper'):
+                value['local_compute'].pop(key, None)
+        return value
+    if science(old) != science(settings):
+        raise RuntimeError('Startup recovery must preserve scientific settings, inputs and helpers')
+    required = {(cid, replica) for cid in ids for replica in range(old['replicates'])}
+    if len(evidence) != len(required) or {(r['id'], r['replica']) for r in evidence} != required:
+        raise RuntimeError('Missing startup-failure evidence; no recovery')
+    for entry in evidence:
+        jobs = entry['jobs']
+        if (len(jobs) != 1 or jobs[0].get('jobId') != entry['record'].get('job_id')
+                or jobs[0].get('status') != 'FAILED' or jobs[0].get('timeStarted')
+                or jobs[0].get('statusChangeReason') != 'JOB_SUPERVISOR_NOT_STARTED'):
+            raise RuntimeError('Native MD started, active or uncertain; no startup recovery')
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT candidates,settings FROM iteration_md_gbsa_selection WHERE iteration=?', (iteration,)).fetchone()
+        saved = dict(ids=json.loads(row[0]), settings=json.loads(row[1])) if row else None
+        if saved != expected:
+            raise RuntimeError('Frozen MD selection changed; recovery stopped')
+        if conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0] != iteration:
+            raise RuntimeError('Later compounds depend on this MD selection; recovery stopped')
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_crem'").fetchone() and conn.execute(
+                'SELECT 1 FROM iteration_crem WHERE iteration>?', (iteration,)).fetchone():
+            raise RuntimeError('Later frozen generation depends on this MD selection; recovery stopped')
+        for cid in ids:
+            state = conn.execute('SELECT state,failed_stage,md_gbsa_score FROM compound WHERE id=? AND iteration=?', (cid,iteration)).fetchone()
+            if state != (State.FAILED, 'md_gbsa', None) or conn.execute(
+                    'SELECT 1 FROM compound_md_gbsa_result WHERE compound_id=?', (cid,)).fetchone():
+                raise RuntimeError('Only unscored failed MD compounds permit startup recovery')
+        if score_retry_requests(path, iteration, 'md_gbsa'):
+            raise RuntimeError('An existing MD retry still requires recovery; no startup restart')
+        backup = Path(backup)
+        if backup.exists():
+            raise FileExistsError(f'Refusing to overwrite startup recovery backup: {backup}')
+        with sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro', uri=True) as source:
+            with sqlite3.connect(backup) as target:
+                source.backup(target)
+        conn.execute('CREATE TABLE IF NOT EXISTS md_startup_restart_history ('
+                     'id INTEGER PRIMARY KEY,iteration INTEGER NOT NULL,previous_selection TEXT NOT NULL,'
+                     'replacement_settings TEXT NOT NULL,evidence TEXT NOT NULL,created REAL NOT NULL)')
+        conn.execute('INSERT INTO md_startup_restart_history(iteration,previous_selection,replacement_settings,evidence,created) '
+                     'VALUES (?,?,?,?,?)', (iteration,json.dumps(expected),json.dumps(settings),json.dumps(evidence),time.time()))
+        conn.execute('UPDATE iteration_md_gbsa_selection SET settings=? WHERE iteration=?', (json.dumps(settings,sort_keys=True),iteration))
+        conn.executemany('UPDATE compound SET state=?,failed_stage=NULL,failure_message=NULL,modified_at=CURRENT_TIMESTAMP WHERE id=?',
+                         ((State.MD_GBSA_RUNNING,cid) for cid in ids))
+        # Retain consumed automatic retry tokens: this grants one explicit new
+        # attempt, without silently replenishing the automatic retry budget.
+        for table, condition, params in (
+                ('stage_timing', 'iteration=? AND stage=?', (iteration,'md-gbsa')),
+                ('iteration_timing', 'iteration=?', (iteration,))):
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                conn.execute(f'UPDATE {table} SET finished_at=NULL WHERE {condition}', params)
+        if _md_retry_policy(conn, iteration):
+            conn.execute('UPDATE iteration_md_retry_policy SET refresh_fep=1 WHERE iteration=?', (iteration,))
+        return dict(ids=ids, settings=settings)
+
+
 def _completed_md_ids(conn, iteration):
     if 'md_gbsa_score' not in {r[1] for r in conn.execute('PRAGMA table_info(compound)')}:
         return set()
