@@ -4876,7 +4876,7 @@ def configure_project(project_toml, schrodinger=None, *, elite_mcs=None):
     set_log_level(cfg['log_level'])
     sch = Path(
         schrodinger
-        or os.environ.get("SCHRODINGER", "/home1/schrodinger/2026-3")
+        or os.environ.get("SCHRODINGER", "/home1/schrodinger/default")
     ).expanduser().resolve()
 
     args = SimpleNamespace(**cfg)

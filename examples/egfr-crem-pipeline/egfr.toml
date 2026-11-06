@@ -96,7 +96,7 @@ prime-gbsa-license-retries = 3
 
 
 md-gbsa = true
-md-gbsa-schrodinger = "/share/opt/schrodinger/2026-3"
+md-gbsa-schrodinger = "/share/opt/schrodinger/default"
 md-gbsa-input-count = 24  # Prime 점수 상위 24개; 비율 설정보다 우선
 md-gbsa-snapshots = 20  # 추출 목표; NJOBS는 실제 입력 MAEGZ 프레임 수로 결정
 md-gbsa-production-ns = 5.0

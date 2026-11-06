@@ -61,7 +61,7 @@ def combichem_3d_settings(filename):
         'processes': min(16, os.cpu_count() or 1), 'seed': 20261025,
         'batch-size': 16, 'result-buffer-size': 16, 'result-buffer-seconds': 2., 'grace-seconds': 5., 'embed-timeout': 5,
         'prune-intermediates': False, 'filters': {}, 'site-candidates': {}, 'reference-mcs': None,
-        'schrodinger': os.environ.get('SCHRODINGER','/home1/schrodinger/2026-3'),
+        'schrodinger': os.environ.get('SCHRODINGER','/home1/schrodinger/default'),
         'infer-history': project_mode, 'inferred-parent-iteration': 1,
         'log-level': 'INFO', 'log-interval': 10.,
         'log-structures': 3,
@@ -369,7 +369,7 @@ def md_gbsa_settings(config: dict[str, Any]) -> dict[str, Any]:
                 or any(c.isspace() for c in value) or ':' in value):
             raise ValueError(f'Invalid md-gbsa-{suffix}')
         result['md_gbsa_' + suffix.replace('-', '_')] = value
-    for suffix, default in [('schrodinger', '/share/opt/schrodinger/2026-3'),
+    for suffix, default in [('schrodinger', '/share/opt/schrodinger/default'),
                             ('remote-work-dir', f'/homes1/{getpass.getuser()}/graft-md-gbsa-runs'),
                             ('local-work-dir', '/home1/prime_share'),
                             ('local-schrodinger', '/home/schrodinger/2025-3-IL')]:

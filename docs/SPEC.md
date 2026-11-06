@@ -1,5 +1,72 @@
 # Graft specification
 
+## Use default aliases for 2026-1/2026-3 execution paths (2026-11-06)
+
+**Confirmed user request:** replace Schrödinger 2026-1 and 2026-3 execution paths
+in source and TOML files with `default`. This supersedes the earlier 2026-3 pin
+for configuration of new work; it does not reinterpret historical run evidence.
+
+**Implementation:** use `/home1/schrodinger/default` for the shared local stage
+and 3D input-extraction defaults, and `/share/opt/schrodinger/default` for remote
+MD. Update the EGFR CReM pipeline and both version-pinned EGFR combichem TOMLs,
+plus the 3D settings example's local override comment. Retain CLI/environment
+precedence, explicit alternative overrides, local path normalization and remote
+path preservation. Tests use named synthetic saved installations to continue
+checking frozen-selection preservation and explicit changed-installation recovery.
+Preserve unrelated installation versions, scientific options and the 2026-3
+LigPrep option warning; no external options are changed.
+
+**Verification:** 430 configuration, MD, 3D and integrated CReM regressions passed,
+with the previously documented real-fragment collision assertion explicitly
+excluded. All 15 tracked TOMLs parse; no requested version-pinned executable
+paths remain in production source or tracked TOMLs. Compileall, package/CLI
+imports and diff checks passed. No production DB, saved JobId, frozen remote
+settings/helper or machine-level default symlink was changed, and no native job
+was launched. These alias edits do not establish that the supervisor startup
+failure is fixed; saved runs still require their explicit recovery procedure.
+
+## Block iteration advancement when required MD has no finite scores (2026-11-06)
+
+**Observed user report:** iteration 1 began while SQLite had no reference
+MD-GBSA values. Read-only inspection found 24 reference MD failures, all
+JOB_SUPERVISOR_NOT_STARTED, with exhausted automatic retries and zero finite
+scores. No calculated ensemble awaited DB import. All failed native attempts
+were correctly considered resolved, but that status incorrectly admitted growth.
+The user clarified that the score gate must follow the TOML MD enable option;
+a saved historical selection alone does not make finite scores mandatory.
+
+**Implementation repair / minimum eligibility choice:** preserve the existing
+MD completion API's distinction between pending work and resolved terminal
+failures. Separately require at least one finite MD score before reference or
+later-iteration advancement only when TOML `md-gbsa=true`.
+This minimum prevents empty-score advancement; it does not require every selected
+MD to succeed or change elite-count/ranking/training gates. Pending replicas and
+cleanup still block even when one score exists. With `md-gbsa=false`, missing
+scores add no advancement gate, even for resolved historical selections. Saved
+pending jobs, retries and cleanup still require recovery regardless of the toggle.
+
+The driver selects the blocked preceding iteration rather than a new one. After
+an enabled MD worker resolves all failures without a usable score, pause supervision once
+with an explicit advancement blocker, without exporting FEP, publishing stage
+completion or granting new retries. The independent CReM worker applies the same
+option-controlled score gate before native input preparation. CReM's separate
+MD-ranked parent/provenance rule remains unchanged, with no score fallback.
+Keep completed/frozen generated populations and all scores/JobIds unchanged;
+never fabricate scores, substitute Prime/Glide parents or reset failed jobs.
+
+**Verification:** 230 MD/CReM/retry/driver/logging/progress regressions passed.
+New tests cover zero-score failures at iterations 0/1, partial success, one-call
+supervisor pause, enabled/disabled MD with resolved saved selections, disabled
+MD with pending saved work and early standalone CReM admission checks.
+Compileall, package/CLI imports and diff checks passed. The user's retry loop and
+local supervisor were stopped gracefully. Read-only inspection of the actual DB
+now selects iteration 0 and blocks bootstrap generation, retaining the already
+created iteration-1 population. Native infrastructure failure remains unresolved;
+no scientific calculation, score import, DB reset or new submission was performed.
+A subsequent read-only disabled-option probe encountered an independent frozen
+iter1 population mismatch (expected 1146, actual 0). That corruption guard remains
+intact; no deletion reconciliation was performed as part of the option correction.
+
 ## Explicit restart of unstarted MDs under a pinned installation (2026-11-06)
 
 **Observed continuation and authorized intent:** after requesting an explicit

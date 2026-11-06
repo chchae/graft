@@ -151,7 +151,8 @@ def reference_work_pending(args):
     saved_md = database.md_gbsa_selection(args.db_path, 0)
     if (saved_md is not None or (getattr(args, 'md_gbsa_enabled', False)
                                 and database.md_gbsa_rows(args.db_path, 0))):
-        if database.md_gbsa_completion_reason(args.db_path, 0) is not None:
+        if database.md_gbsa_completion_reason(args.db_path, 0,
+                minimum=1 if getattr(args, 'md_gbsa_enabled', False) else 0) is not None:
             return True
     from graft.amber_gbsa import load_job
     if load_job(stage_directory(args.output, 0, 'amber_gbsa')) is not None:
@@ -213,7 +214,8 @@ def choose_iteration(args, requested=None):
     iterations = sorted(set(iterations) | set(database.crem_iterations(args.db_path)))
     for iteration in iterations:
         if (database.md_gbsa_selection(args.db_path,iteration) is not None and
-                database.md_gbsa_completion_reason(args.db_path,iteration)):
+                database.md_gbsa_completion_reason(args.db_path,iteration,
+                    minimum=1 if getattr(args, 'md_gbsa_enabled', False) else 0)):
             return iteration
         from graft.amber_gbsa import load_job
         if load_job(stage_directory(args.output, iteration, 'amber_gbsa')) is not None:
@@ -391,6 +393,15 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
             )
             if reason is None:
                 reason = external_completion_reason(args, iteration, stage)
+            if (reason is None and stage == 'md-gbsa'
+                    and getattr(args, 'md_gbsa_enabled', False)
+                    and database.md_gbsa_selection(args.db_path, iteration) is not None):
+                advancement = database.md_gbsa_completion_reason(args.db_path, iteration, minimum=1)
+                if advancement:
+                    print(f'[driver  ] iteration {iteration}: progression blocked: {advancement}. '
+                          'Terminal MD failures are resolved work, not usable scores; '
+                          'preserve saved jobs and explicitly recover the failed MD stage.', flush=True)
+                    return False
             if reason is None:
                 if (stage == 'prime_gbsa' and md_stage_required(args, project_toml, iteration)
                         and md_stage not in pending_stages

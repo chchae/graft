@@ -96,7 +96,7 @@ md-gbsa = false
 md-gbsa-input-count = 50  # Prime 점수 상위 개수; 비율 설정보다 우선
 md-gbsa-snapshots = 5
 md-gbsa-production-ns = 5.0
-md-gbsa-schrodinger = "/share/opt/schrodinger/2026-1"
+md-gbsa-schrodinger = "/share/opt/schrodinger/default"
 
 
 # 7. FEP 후보 export / 결과 import; 실제 FEP 계산은 외부 protocol로 별도 수행

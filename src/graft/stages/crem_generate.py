@@ -63,7 +63,8 @@ def _ready(args, iteration):
                 return f'iteration {previous}: {reason}'
         if database.stage_is_running(args.db_path,'amber_gbsa'):
             return 'Amber worker is still running'
-        reason = database.md_gbsa_completion_reason(args.db_path, previous)
+        reason = database.md_gbsa_completion_reason(args.db_path, previous,
+                    minimum=1 if getattr(args, 'md_gbsa_enabled', False) else 0)
         if reason:
             return f'iteration {previous}: {reason}'
     return None

@@ -45,26 +45,26 @@ def test_final_prime_selection_is_frozen_before_claim_and_no_refill(db):
     assert 'need 2' in database.md_gbsa_completion_reason(db,1,2)
 
 
-def test_pinned_md_default_does_not_rewrite_existing_native_selection(db):
+def test_default_alias_does_not_rewrite_existing_native_selection(db):
     old = dict(protocol=dict(snapshots=20), replicates=1, root='/immutable',
-               suite='/share/opt/schrodinger/default')
+               suite='/share/opt/schrodinger/saved-installation')
     saved = database.freeze_md_gbsa_selection(db, 1, old, target_count=4, prime_count=4)
     changed = old | {'suite': md_gbsa_settings({})['md_gbsa_schrodinger']}
-    assert changed['suite'] == '/share/opt/schrodinger/2026-3'
+    assert changed['suite'] == '/share/opt/schrodinger/default'
     assert database.freeze_md_gbsa_selection(db, 1, changed, target_count=4, prime_count=4) == saved
     assert database.md_gbsa_selection(db, 1)['settings']['suite'] == old['suite']
 
 
 def startup_restart_case(db):
     settings = dict(protocol=dict(snapshots=20), replicates=1, root='/old', helper='/old/native.py',
-                    suite='/share/opt/schrodinger/default', source_sha256='same', helper_sha256='same')
+                    suite='/share/opt/schrodinger/saved-installation', source_sha256='same', helper_sha256='same')
     old = database.freeze_md_gbsa_selection(db,1,settings,target_count=4,prime_count=4)
     with database.connect(db) as conn:
         conn.execute('UPDATE compound SET state=?,failed_stage=? WHERE id IN (1,2)', (State.FAILED,'md_gbsa'))
     database.enable_md_cycle_retries(db,1)
     for cid, token in database.score_retry_requests(db,1,'md_gbsa'):
         database.finish_score_retry(db,1,'md_gbsa',cid,token,rearm=False)
-    new = settings | dict(root='/new',helper='/new/native.py',suite='/share/opt/schrodinger/2026-3')
+    new = settings | dict(root='/new',helper='/new/native.py',suite='/share/opt/schrodinger/default')
     evidence = [dict(id=cid,replica=0,record=dict(job_id=str(cid)),jobs=[dict(jobId=str(cid),status='FAILED',
                     statusChangeReason='JOB_SUPERVISOR_NOT_STARTED',timeStarted=None)]) for cid in old['ids']]
     return old,new,evidence
@@ -512,3 +512,70 @@ def test_completed_references_skip_md_when_disabled(db):
     args=SimpleNamespace(db_path=db,output=db.parent,max_iteration=3,md_gbsa_enabled=False)
     assert driver.choose_iteration(args)==1
     assert [s for s,_ in driver.reference_stages(args)]==['prime_gbsa']
+
+
+def resolved_md_failures(db, iteration, one_score=False):
+    with database.connect(db) as conn:
+        conn.execute('UPDATE compound SET iteration=?', (iteration,))
+    saved=database.freeze_md_gbsa_selection(db,iteration,
+        dict(protocol=dict(snapshots=20),replicates=1),count=4,target_count=4,prime_count=4)
+    with database.connect(db) as conn:
+        conn.execute('UPDATE compound SET state=?,failed_stage=?', (State.FAILED,'md_gbsa'))
+    if one_score:
+        database.store_md_gbsa_result(db,iteration,saved['ids'][0],result(saved['ids'][0],-80))
+    database.enable_md_cycle_retries(db,iteration)
+    for cid,token in database.score_retry_requests(db,iteration,'md_gbsa'):
+        database.finish_score_retry(db,iteration,'md_gbsa',cid,token,rearm=False)
+    return SimpleNamespace(db_path=db,output=db.parent,target_count=4,prime_gbsa_input_count=4,
+                           max_iteration=3,md_gbsa_enabled=True,synthetic_feasibility_enabled=False)
+
+
+@pytest.mark.parametrize('iteration',[0,1])
+@pytest.mark.parametrize('one_score',[False,True])
+@pytest.mark.parametrize('enabled',[False,True])
+def test_iteration_advancement_requires_finite_md_score_only_when_enabled(db,iteration,one_score,enabled):
+    args=resolved_md_failures(db,iteration,one_score)
+    args.md_gbsa_enabled=enabled
+    assert database.md_gbsa_completion_reason(db,iteration) is None  # terminal work remains resolved
+    assert driver.choose_iteration(args)==(iteration+1 if one_score or not enabled else iteration)
+    assert database.completed_md_ids(db,iteration)==({1} if one_score else set())
+
+
+def test_supervisor_pauses_once_without_export_when_all_md_attempts_failed(db,monkeypatch,capsys):
+    args=resolved_md_failures(db,0)
+    calls=[]
+    monkeypatch.setattr(driver,'stream_process',lambda stage,*a: calls.append(stage) or 0)
+    assert not driver.supervise_iteration(args,db.parent/'missing.toml',0,
+        [('md-gbsa','graft.stages.md_gbsa'),('fep','graft.stages.fep')],1,driver.StopFlag())
+    assert calls==['md-gbsa']
+    assert 'progression blocked: MD-GBSA has 0 finite results; need 1' in capsys.readouterr().out
+    assert database.completed_md_ids(db,0)==set()
+    assert database.score_retry_requests(db,0,'md_gbsa')==[]
+
+
+def test_standalone_crem_bootstrap_waits_for_reference_md_scores_before_native_work(db,monkeypatch):
+    from graft.stages import crem_generate
+    args=resolved_md_failures(db,0)
+    monkeypatch.setattr(crem_generate,'materialize_native_inputs',lambda *a:pytest.fail('native inputs must wait'))
+    crem_generate.run_stage(args,1)
+    assert database.crem_generation(db,1) is None
+    assert not database.iteration_has_compounds(db,1)
+
+
+def test_disabling_md_removes_score_gate_for_resolved_reference_selection(db,monkeypatch):
+    from graft.stages import crem_generate
+    args=resolved_md_failures(db,0)
+    args.md_gbsa_enabled=False
+    assert crem_generate._ready(args,1) is None
+    monkeypatch.setattr(driver,'stream_process',lambda *a:0)
+    assert driver.supervise_iteration(args,db.parent/'missing.toml',0,
+        [('md-gbsa','graft.stages.md_gbsa')],1,driver.StopFlag())
+
+
+@pytest.mark.parametrize('iteration',[0,1])
+def test_disabling_md_still_waits_for_saved_pending_work(db,iteration):
+    args=resolved_md_failures(db,iteration)
+    args.md_gbsa_enabled=False
+    with database.connect(db) as conn:
+        conn.execute('UPDATE compound SET state=?,failed_stage=NULL WHERE id=1', (State.MD_GBSA_RUNNING,))
+    assert driver.choose_iteration(args)==iteration

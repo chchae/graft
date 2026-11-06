@@ -64,10 +64,10 @@ def test_md_gbsa_protocol_defaults_are_configurable():
     assert settings['md_gbsa_snapshots']==20
     assert settings['md_gbsa_gpu_host']=='slurm-gpu'
     assert settings['md_gbsa_cpu_host']=='slurm-cpu'
-    assert settings['md_gbsa_schrodinger']=='/share/opt/schrodinger/2026-3'
+    assert settings['md_gbsa_schrodinger']=='/share/opt/schrodinger/default'
 
 
-@pytest.mark.parametrize('suite', ['/share/opt/schrodinger/2026-1', '/share/opt/schrodinger/default'])
+@pytest.mark.parametrize('suite', ['/share/opt/schrodinger/custom-installation', '/share/opt/schrodinger/default'])
 def test_explicit_remote_md_installation_is_preserved(tmp_path, suite):
     project = tmp_path/'project.toml'
     project.write_text(PROJECT_TOML + f'md-gbsa-schrodinger = "{suite}"\n')

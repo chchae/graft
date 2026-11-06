@@ -5,7 +5,7 @@
 [combichem-3d]
 # Coordinate references and receptor come from shared reference-pose and dock-grid.
 # Optional local installation override (otherwise SCHRODINGER/default installation):
-# schrodinger = "/home1/schrodinger/2026-3"
+# schrodinger = "/home1/schrodinger/default"
 # Optional prepared coordinate-preserving overrides:
 # receptor = "./input/prepared-receptor.pdb"
 # parents = "./input/reference-poses.sdf"
