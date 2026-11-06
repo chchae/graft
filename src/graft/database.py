@@ -1188,6 +1188,82 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
         _mark_iteration_workspace_prepared(conn, iteration)
 
 
+def reset_deleted_crem_iterations(path, iterations, backup):
+    """Explicit recovery when the user deleted *all* generated compound rows.
+
+    The caller must hold the driver/stage locks, verify terminal native/remote
+    jobs, and archive remaining files. Never called by automatic recovery.
+    Completed MD results are preserved in the required full database backup;
+    missing/uncertain MD results block this operation. Reference rows stay intact.
+    """
+    import json
+    requested = set(iterations)
+    if not requested or any(isinstance(i, bool) or not isinstance(i, int) or i < 1 for i in requested):
+        raise ValueError('Explicit positive deleted CReM iterations required')
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if conn.execute('SELECT 1 FROM compound WHERE iteration>0 LIMIT 1').fetchone():
+            raise RuntimeError('Generated compounds still exist; all-deleted recovery blocked')
+        if not conn.execute('SELECT 1 FROM compound WHERE iteration=0 LIMIT 1').fetchone():
+            raise RuntimeError('Reference population missing; recovery blocked')
+        saved_iterations = {r[0] for r in conn.execute('SELECT iteration FROM iteration_crem')}
+        if requested != saved_iterations:
+            raise RuntimeError('Explicit deleted iterations do not match all frozen CReM plans')
+        ids = set()
+        for iteration in sorted(requested):
+            saved = _crem_record(conn, iteration)
+            owned = {r[0] for r in conn.execute(
+                'SELECT compound_id FROM crem_compound_pose WHERE iteration=?', (iteration,))}
+            if saved['state'] != Growth.DONE or not saved['population_count'] or len(owned) != saved['population_count']:
+                raise RuntimeError('Deleted CReM provenance is incomplete; recovery blocked')
+            selection = conn.execute('SELECT population_count FROM iteration_druglike_selection WHERE iteration=?',
+                                     (iteration,)).fetchone()
+            members = {r[0] for r in conn.execute(
+                'SELECT compound_id FROM compound_druglike_selection WHERE iteration=?', (iteration,))}
+            if (selection and (selection[0] != len(owned) or members != owned)) or (not selection and members):
+                raise RuntimeError('Deleted druglike ownership disagrees with CReM provenance')
+            md = conn.execute('SELECT candidates FROM iteration_md_gbsa_selection WHERE iteration=?',
+                              (iteration,)).fetchone()
+            for cid in json.loads(md[0]) if md else ():
+                result = conn.execute('SELECT result FROM compound_md_gbsa_result WHERE compound_id=?', (cid,)).fetchone()
+                payload = json.loads(result[0]) if result else {}
+                mean = payload.get('mean')
+                if (cid not in owned or payload.get('id') != cid or isinstance(mean, bool)
+                        or not isinstance(mean, (int, float)) or not math.isfinite(mean)):
+                    raise RuntimeError('Deleted iteration has unresolved MD results; recovery blocked')
+            ids.update(owned)
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        iteration_tables = ('iteration_crem', 'iteration_workspace', 'iteration_scaffold',
+                            'iteration_druglike_selection', 'iteration_sa_selection', 'iteration_fep_selection',
+                            'iteration_md_gbsa_selection', 'iteration_md_retry_policy', 'iteration_timing',
+                            'stage_timing', 'score_completion_history')
+        for table in iteration_tables:
+            if table in tables and any(r[0] not in requested for r in conn.execute(
+                    f'SELECT DISTINCT iteration FROM {table} WHERE iteration>0')):
+                raise RuntimeError('Unidentified later iteration records remain; recovery blocked')
+        conn.execute('CREATE TEMP TABLE deleted_crem_ids(id INTEGER PRIMARY KEY)')
+        conn.executemany('INSERT INTO deleted_crem_ids VALUES (?)', ((cid,) for cid in ids))
+        if conn.execute('SELECT 1 FROM compound WHERE id IN (SELECT id FROM deleted_crem_ids) '
+                        'OR similar_to IN (SELECT id FROM deleted_crem_ids) LIMIT 1').fetchone():
+            raise RuntimeError('Deleted identities are referenced by retained compounds; recovery blocked')
+        backup = Path(backup)
+        if backup.exists():
+            raise FileExistsError(f'Refusing to overwrite recovery backup: {backup}')
+        with sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro', uri=True) as source:
+            with sqlite3.connect(backup) as target:
+                source.backup(target)
+        for table in ('compound_md_gbsa_result', 'compound_druglike_selection', 'amber_failure',
+                      'crem_compound_pose', 'md_gbsa_local_cleanup', 'score_restart_retry'):
+            if table in tables:
+                conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM deleted_crem_ids)')
+        for table in iteration_tables:
+            if table in tables:
+                conn.execute(f'DELETE FROM {table} WHERE iteration>0')
+        if conn.execute('PRAGMA foreign_key_check').fetchone():
+            raise RuntimeError('Unidentified orphan records remain; recovery rolled back, backup retained')
+        return sorted(requested)
+
+
 def mark_iteration_workspace_prepared(path, iteration):
     """Checkpoint cleanup before generation so zero-row retries keep their files."""
     with connect(path) as conn:

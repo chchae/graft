@@ -186,6 +186,57 @@ def test_explicit_deleted_crem_reconciliation_refuses_uncertain_state(project, t
     assert not backup.exists()
 
 
+def test_explicit_all_deleted_crem_recovery_preserves_reference_and_archives_md(project, tmp_path):
+    generate._run_stage(project, 1)
+    druglike._run_stage(project, 1)
+    with sqlite3.connect(project.db_path) as conn:
+        earlier = conn.execute('SELECT * FROM compound WHERE iteration=0').fetchall()
+        cid = conn.execute('SELECT MIN(id) FROM compound WHERE iteration=1').fetchone()[0]
+        conn.execute('INSERT INTO compound_md_gbsa_result VALUES (?,?)', (cid, json.dumps({'id':cid, 'mean':-42.})))
+        conn.execute('INSERT INTO iteration_md_gbsa_selection VALUES (1,?,?)', (json.dumps([cid]), '{}'))
+        conn.execute("INSERT INTO iteration_crem VALUES (2,'{}','done',1,'exhausted')")
+        conn.execute('INSERT INTO crem_compound_pose SELECT 100000,2,molblock,history,properties '
+                     'FROM crem_compound_pose LIMIT 1')
+        conn.execute('DELETE FROM compound WHERE iteration>0')
+    backup = tmp_path/'all-deleted-backup.sqlite'
+    assert database.reset_deleted_crem_iterations(project.db_path, [1,2], backup) == [1,2]
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT * FROM compound WHERE iteration=0').fetchall() == earlier
+        assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert conn.execute('SELECT * FROM iteration_crem').fetchall() == []
+        assert conn.execute('SELECT * FROM iteration_md_gbsa_selection WHERE iteration>0').fetchall() == []
+        assert conn.execute('SELECT * FROM compound_md_gbsa_result WHERE compound_id=?', (cid,)).fetchall() == []
+    with sqlite3.connect(backup) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM iteration_crem').fetchone()[0] == 2
+        assert conn.execute('SELECT result FROM compound_md_gbsa_result WHERE compound_id=?', (cid,)).fetchone()
+
+
+@pytest.mark.parametrize('problem', ['nonempty','missing_pose','unresolved_md','wrong_members','wrong_requested','later_metadata','unknown_orphan'])
+def test_explicit_all_deleted_crem_recovery_refuses_inconsistent_or_uncertain_records(project, tmp_path, problem):
+    generate._run_stage(project, 1)
+    druglike._run_stage(project, 1)
+    before = database.crem_generation(project.db_path, 1)
+    with sqlite3.connect(project.db_path) as conn:
+        cid = conn.execute('SELECT MIN(id) FROM compound WHERE iteration=1').fetchone()[0]
+        if problem != 'nonempty':
+            conn.execute('DELETE FROM compound WHERE iteration>0')
+        if problem == 'missing_pose':
+            conn.execute('DELETE FROM crem_compound_pose WHERE compound_id=?', (cid,))
+        if problem == 'unresolved_md':
+            conn.execute('INSERT INTO iteration_md_gbsa_selection VALUES (1,?,?)', (json.dumps([cid]), '{}'))
+        if problem == 'wrong_members':
+            conn.execute('DELETE FROM compound_druglike_selection WHERE compound_id=?', (cid,))
+        if problem == 'later_metadata':
+            conn.execute("INSERT INTO iteration_scaffold VALUES (2,'{}')")
+        if problem == 'unknown_orphan':
+            conn.execute("INSERT INTO compound_md_gbsa_result VALUES (100000,'{}')")
+    backup = tmp_path/'blocked-backup.sqlite'
+    with pytest.raises(RuntimeError):
+        database.reset_deleted_crem_iterations(project.db_path, [1,2] if problem=='wrong_requested' else [1], backup)
+    assert database.crem_generation(project.db_path, 1) == before
+    assert backup.exists() == (problem == 'unknown_orphan')
+
+
 def test_active_reference_blocks_generation(project,monkeypatch):
     monkeypatch.setattr(driver,'reference_work_pending',lambda args:True)
     generate._run_stage(project,1)

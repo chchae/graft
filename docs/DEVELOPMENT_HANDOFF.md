@@ -1,5 +1,43 @@
 # Graft Development Handoff
 
+## Explicit recovery after deletion of all generated iterations (2026-11-06)
+
+**Observed report and user confirmation:** after the prior iter04-only repair,
+the user deleted all generated compound rows and iter01–iter04 directories.
+Reference iteration 0 retained 24 fully scored compounds, but frozen populations,
+selection records and 72 completed generated-compound MD results remained orphaned.
+A local 100-run loop repeatedly retried generation. Its loop/supervisor were
+stopped gracefully without canceling native jobs. Remaining iter04 Glide parents
+and children became terminal during inspection; local and registered remote
+native-job queries then reported no active work.
+
+**Explicit recovery implementation:** `reset_deleted_crem_iterations` handles only
+user-directed recovery of an entirely deleted generated population, under caller-
+held driver/all-stage locks and verified terminal native/remote work. Require
+retained references, no generated compounds, an exact explicitly named set of
+completed positive CReM plans, full pose membership and consistent druglike
+ownership. Any selected MD identity must have a finite saved matching result;
+missing/uncertain ensembles block recovery. Unnamed later metadata, references to
+deleted IDs and unidentified orphan records block or roll back the transaction.
+Back up SQLite including committed WAL, then remove only generated-iteration
+metadata and owned orphan records. Preserve every reference record and the ID
+sequence. The automatic deletion guards and single-iteration reset remain intact.
+
+**Operational verification:** first verified on an isolated copy, then backed up
+and reconciled the project under all locks. The backup retains populations of
+1090/1783/83/3150 and all 72 generated MD results. Reference compound rows,
+iteration-0 metadata, its 24 MD results and scientific files were unchanged.
+Archived native status, configuration, log and stale distribution reports under
+output/.previous/iterations01-04-user-deleted-1793933228058394462/.
+Foreign-key/integrity checks passed and read-only driver selection returned 1.
+No new calculation was started and no TOML setting was changed by the repair.
+
+**Verification:** 182 CReM, MD and workspace regressions passed, including backup
+preservation of completed MD, multiple deleted iterations, unresolved MD refusal,
+ownership mismatch and rollback for unknown orphans. Compileall, package/CLI
+imports and diff checks passed; the full suite was not rerun. These tests establish
+recovery/state behavior, not scientific accuracy.
+
 ## Explicit reconciliation of a user-deleted CReM iteration (2026-11-06)
 
 **Observed report and user confirmation:** the user deleted the iter04 folder and
