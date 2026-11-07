@@ -117,7 +117,8 @@ def run_or_recover(command, directory, compound_ids, output):
                   'submitted_at': time.time()}
         _save(directory, record)  # Write before launching, including uncertain launches.
         output.unlink(missing_ok=True)
-        print('$', ' '.join(command), flush=True)
+        from graft.stages._logging import command_display
+        print('$', command_display(command), flush=True)
         with subprocess.Popen(command, cwd=directory, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, text=True, bufsize=1) as proc:
             for line in proc.stdout:

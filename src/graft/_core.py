@@ -173,7 +173,7 @@ def load_project_toml(filename):
 
     output = resolve_path(config["out-dir"])
     from graft.config import prime_gbsa_license_retry_settings, schrodinger_cpu_settings, schrodinger_stage_hosts, glide_job_timeout, amber_settings, log_level, prime_gbsa_flexdist, fep_settings, debug_settings, distribution_settings, md_gbsa_settings
-    from graft.config import prime_gbsa_local_settings
+    from graft.config import prime_gbsa_local_settings, submission_installation
     return debug_settings(config, {
         **prime_gbsa_local_settings(config),
         **distribution_settings(config),
@@ -184,6 +184,7 @@ def load_project_toml(filename):
         **schrodinger_cpu_settings(config),
         **schrodinger_stage_hosts(config),
         "toml_file": filename,
+        "submission_schrodinger": submission_installation(config, base),
         "log_level": log_level(config),
         "project": project,
         "db_path": output / f"{project}.sqlite",
@@ -652,9 +653,9 @@ def run_command(
     *, log_message: str | None = None, log_dir: str | Path | None = None,
 ) -> None:
     cmd = [str(x) for x in cmd]
-    from graft.stages._logging import detail, enabled
+    from graft.stages._logging import command_display, detail, enabled
     if log_message is None:
-        detail("$", " ".join(cmd))
+        detail("$", command_display(cmd))
     else:
         detail(log_message)
     # Keep output on disk even when console verbosity is low. Native logs
@@ -3167,7 +3168,8 @@ def submit_glide(schrodinger, glide_input, group_dir, host, cpus=None):
     ]
 
     print()
-    print("$", " ".join(str(x) for x in cmd))
+    from graft.stages._logging import command_display
+    print("$", command_display(cmd))
     print()
 
     from graft.glide_recovery import submit
@@ -4876,6 +4878,7 @@ def configure_project(project_toml, schrodinger=None, *, elite_mcs=None):
     set_log_level(cfg['log_level'])
     sch = Path(
         schrodinger
+        or cfg.get("submission_schrodinger")
         or os.environ.get("SCHRODINGER", "/home1/schrodinger/default")
     ).expanduser().resolve()
 

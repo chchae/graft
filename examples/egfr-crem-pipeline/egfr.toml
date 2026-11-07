@@ -46,6 +46,7 @@ aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 
 # 4. LigPrep → constrained Glide: Drug likeness 통과 화합물만 처리
+schrodinger = "/share/opt/schrodinger/2026-1" # submission client compatible with Slurm JobServer
 host = "t41-cpu:128"  # 일반 Prime 등의 기본 host; use-slurm=true이면 LigPrep/Glide는 slurm-cpu
 ligprep-cpus = 124
 ligprep-ph = 7.4

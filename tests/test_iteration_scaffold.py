@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -379,6 +380,24 @@ def test_project_initialization_defers_core_calculations(project, monkeypatch, s
     assert args.initial_mcs_smarts == supplied
     assert args.mcs_smarts == supplied
     assert args.mcs_timeout == timeout
+
+
+@pytest.mark.parametrize('cli_override,project_override,expected', [
+    ('/cli-suite', '/toml-suite', '/cli-suite'),
+    (None, '/toml-suite', '/toml-suite'),
+    (None, None, '/environment-suite'),
+])
+def test_submission_client_precedence(project, monkeypatch, cli_override, project_override, expected):
+    cfg = dict(project='project', toml_file=project.output / 'project.toml',
+               db_path=project.db_path, output=project.output, log_level=1,
+               grid=project.output / 'grid.zip', reference_poses=project.output / 'refs.maegz',
+               libinvent_prior=project.libinvent_prior, mcs_smarts=None,
+               submission_schrodinger=project_override)
+    monkeypatch.setenv('SCHRODINGER', '/environment-suite')
+    monkeypatch.setattr(_core, 'load_project_toml', lambda path: cfg)
+    monkeypatch.setattr(_core, 'initialize_project_database', lambda **kwargs: None)
+    args = _core.configure_project(cfg['toml_file'], cli_override)
+    assert args.schrodinger == Path(expected)
 
 
 @pytest.mark.parametrize('supplied', [None, '[*:0]c1ccc([*:1])cc1'])

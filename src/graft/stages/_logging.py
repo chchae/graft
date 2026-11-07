@@ -3,11 +3,21 @@ import contextvars
 import datetime
 import functools
 import os
+from pathlib import Path
+import shlex
 import time
 
 WORK_STARTED = "__GRAFT_WORK_STARTED__"
 _timer = contextvars.ContextVar("graft_stage_timer", default=None)
 _log_level = contextvars.ContextVar("graft_log_level", default=1)
+
+
+def command_display(command):
+    """Short console command; execution and durable launch records retain paths."""
+    values = [str(item) for item in command]
+    return shlex.join(Path(value).name
+                      if Path(value).is_absolute() or value.startswith(('./', '../')) else value
+                      for value in values)
 
 
 def set_log_level(level):

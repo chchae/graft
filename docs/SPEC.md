@@ -1,5 +1,28 @@
 # Graft specification
 
+## Project-specific submission client override (2026-11-06)
+
+**Confirmed user request:** explicitly use a compatible 2026-1 submission client
+for the EGFR CReM pipeline after LigPrep was blocked by Slurm JobServer API
+1.19.4 versus the local default client's 1.21.2.
+
+**Implementation:** optional top-level `schrodinger` selects the project's local
+submission installation; relative values resolve against the TOML directory.
+Explicit caller/CLI override takes precedence, followed by TOML, then the existing
+SCHRODINGER environment/default fallback. Reject empty/non-string values. Set
+examples/egfr-crem-pipeline/egfr.toml to `/share/opt/schrodinger/2026-1`, which is
+also accessible locally. This project-specific request supersedes the default
+alias preference only for its submission client. Keep remote MD and local Prime
+installations, frozen settings, scientific parameters and saved jobs unchanged.
+
+**Verification:** 265 configuration, scaffold, driver and submission-guard tests
+passed; compileall, package/CLI imports and diff checks passed. Read-only native
+preflights passed for LigPrep and Glide with matching API 1.19.4. The existing
+supervisor independently read the updated TOML and submitted iteration 1's 573
+LigPrep compounds with JobId faa5b904-d9d4-11f1-8da5-ece7a713a41c. Submission is
+not evidence of scientific completion; no server upgrade or database reset was
+performed.
+
 ## Use default aliases for 2026-1/2026-3 execution paths (2026-11-06)
 
 **Confirmed user request:** replace Schrödinger 2026-1 and 2026-3 execution paths

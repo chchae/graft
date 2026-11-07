@@ -25,6 +25,23 @@ aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 '''
 
 
+@pytest.mark.parametrize('value', ['""', '"  "', 'true', '42', '[]'])
+def test_submission_installation_rejects_invalid_paths(tmp_path, value):
+    project = tmp_path / 'project.toml'
+    project.write_text(PROJECT_TOML + f'schrodinger = {value}\n')
+    with pytest.raises(ValueError, match='schrodinger must be a nonempty local installation path'):
+        _core.load_project_toml(project)
+
+
+def test_project_submission_client_is_relative_to_toml_and_remote_md_stays_remote(tmp_path):
+    project = tmp_path / 'project.toml'
+    project.write_text(PROJECT_TOML + 'schrodinger = "suite"\n'
+                       'md-gbsa-schrodinger = "/remote/suite"\n')
+    cfg = _core.load_project_toml(project)
+    assert cfg['submission_schrodinger'] == tmp_path / 'suite'
+    assert cfg['md_gbsa_schrodinger'] == '/remote/suite'
+
+
 @pytest.mark.parametrize('extra, expected', [('', 60), ('mcs-timeout = 600\n', 600)])
 def test_mcs_timeout_reaches_project_settings(tmp_path, extra, expected):
     project = tmp_path / 'project.toml'

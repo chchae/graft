@@ -828,6 +828,17 @@ def remote_reinvent_settings(config: dict[str, Any]) -> dict[str, str] | None:
     return settings
 
 
+def submission_installation(config: dict[str, Any], base: Path) -> Path | None:
+    """Optional project-local client; remote MD/Prime installations are separate."""
+    value = config.get('schrodinger')
+    if value is None and 'schrodinger' not in config:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('schrodinger must be a nonempty local installation path')
+    path = Path(value).expanduser()
+    return (base / path).resolve()
+
+
 def load_project_toml(path: str | Path) -> dict[str, Any]:
     return _core.load_project_toml(path)
 
