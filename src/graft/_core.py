@@ -3167,10 +3167,8 @@ def submit_glide(schrodinger, glide_input, group_dir, host, cpus=None):
         "-OVERWRITE",
     ]
 
-    print()
     from graft.stages._logging import command_display
     print("$", command_display(cmd))
-    print()
 
     from graft.glide_recovery import submit
     job_id = submit(schrodinger, cmd, group_dir)

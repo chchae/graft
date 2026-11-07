@@ -105,8 +105,11 @@ def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatc
         args, tmp_path/'p.toml', 60, [(stage, f'graft.stages.{stage.replace("-", "_")}')],
         30, driver.StopFlag(), once=True,
     )
-    assert (f'iteration 60: {stage} pending: {reason}; '
-            'elapsed=00:10:00.0 (including waiting, polling and restart recovery).') in capsys.readouterr().out
+    expected = ('iteration 60: amber-gbsa pending: 493 compounds still running; '
+                'elapsed=00:10:00.0 .' if stage == 'amber-gbsa' else
+                f'iteration 60: {stage} pending: {reason}; '
+                'elapsed=00:10:00.0 (including waiting, polling and restart recovery).')
+    assert expected in capsys.readouterr().out
 
 
 def test_restart_resumes_oldest_unfinished_iteration_and_never_requires_elites(tmp_path):

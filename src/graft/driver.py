@@ -441,10 +441,13 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
                 elapsed = database.stage_elapsed(args.db_path, iteration, stage)
                 if elapsed is not None:
                     timing = (f'; elapsed={format_elapsed(elapsed)} '
-                              '(including waiting, polling and restart recovery)')
+                              + ('' if stage == 'amber-gbsa' else
+                                 '(including waiting, polling and restart recovery)'))
             pending_key = (rc, reason)  # Elapsed time alone is not a progress change.
             if stage != 'amber-gbsa' or rc != 0 or pending_key != previous_pending:
-                report(f"[driver  ] iteration {iteration}: {stage} pending: {reason}{timing}.", flush=True)
+                display_reason = (reason.removesuffix(' Amber GBSA screening')
+                                  if stage == 'amber-gbsa' else reason)
+                report(f"[driver  ] iteration {iteration}: {stage} pending: {display_reason}{timing}.", flush=True)
             previous_pending = pending_key
             if once:
                 return False
