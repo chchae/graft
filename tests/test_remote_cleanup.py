@@ -313,6 +313,43 @@ def test_completed_md_run_removes_helpers_after_archiving_and_recovers_lost_repl
     assert native.md_run(request)['status'] == 'done'
 
 
+@pytest.mark.parametrize('name', ['native.cpython-311.pyc', 'native.cpython-315.opt-1.pyc'])
+def test_md_run_archives_native_python_cache_then_removes_run(md_run, tmp_path, name):
+    root, request, _ = collected_md_run(md_run)
+    cache = root / '__pycache__' / name
+    cache.parent.mkdir()
+    cache.write_bytes(b'generated native helper bytecode')
+    response = native.md_run(request)
+    archive = tmp_path / 'collected-run.tar'
+    shutil.copy2(root / 'cleanup-run-evidence.tar', archive)
+    with tarfile.open(archive) as stream:
+        assert stream.extractfile('__pycache__/' + name).read() == cache.read_bytes()
+    request.update(action='delete', archive_sha256=response['sha256'])
+    assert native.md_run(request)['status'] == 'done'
+    assert not root.exists() and archive.exists()
+
+
+@pytest.mark.parametrize('problem', ['unknown', 'nested', 'symlink', 'not_directory'])
+def test_md_run_rejects_unowned_or_symlinked_python_cache(md_run, tmp_path, problem):
+    root, request, _ = collected_md_run(md_run)
+    cache = root / '__pycache__'
+    if problem == 'not_directory':
+        cache.write_text('unexpected file')
+    else:
+        cache.mkdir()
+        if problem == 'unknown':
+            (cache / 'foreign.cpython-311.pyc').touch()
+        elif problem == 'nested':
+            (cache / 'native.cpython-311.pyc').mkdir()
+        else:
+            foreign = tmp_path / 'foreign.pyc'
+            foreign.write_bytes(b'preserve foreign content')
+            (cache / 'native.cpython-311.pyc').symlink_to(foreign)
+    with pytest.raises(RuntimeError, match='cache'):
+        native.md_run(request)
+    assert root.exists()
+
+
 @pytest.mark.parametrize('problem', ['remaining_compound', 'unknown_file', 'symlink', 'receipt', 'live_child'])
 def test_md_run_retains_uncollected_foreign_or_active_work(md_run, tmp_path, problem):
     root, request, jobs = collected_md_run(md_run)

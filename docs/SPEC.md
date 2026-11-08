@@ -1,5 +1,30 @@
 # Graft specification
 
+## Collect native Python cache during final MD cleanup (2026-11-08)
+
+**Observed bug:** after iter09 committed all 24 ensembles, final run cleanup
+rejected a normal `__pycache__/native.cpython-311.pyc` created when the MD
+admission adapter imported the frozen helper. The whole-run allowlist omitted
+this interpreter-generated directory, so the cleanup completion gate remained
+pending despite all scores being durable.
+
+**Repair:** accept a run-owned `__pycache__` directory containing only regular
+`native.cpython-<version>[.opt-1|.opt-2].pyc` files. Include these in the existing
+checksum-verified run archive before removal. Continue rejecting unknown cache
+names, nested directories, cache-as-file and symlinks; retain all selection,
+receipt, native-terminal, archive-change and NFS lock-order checks. No jobs,
+scientific settings or score records are reset or recomputed.
+
+**Verification/outcome:** 207 cleanup/MD/retry/reference tests passed, including
+normal/optimized bytecode collection and rejection of foreign or symlinked
+cache entries. Compileall, package/CLI imports and diff checks passed. The
+existing supervisor recovered automatically: iter09 run cleanup was acknowledged
+in SQLite, remote run and tombstone are absent, and native bytecode is retained
+in `09-md_gbsa/remote-cleanup/run-evidence.tar`. All 24 scores/stds/snapshot
+counts match the pre-fix snapshot exactly; MD completion now returns clear.
+No new scientific calculation or accuracy validation was performed.
+
+
 ## Release NFS controller files before recursive cleanup (2026-11-08)
 
 **Observed bug:** iter09 MD result collection stopped at remote cleanup with

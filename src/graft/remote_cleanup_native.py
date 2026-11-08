@@ -217,12 +217,19 @@ def md_run(request):
         raise RuntimeError('MD run cleanup ownership differs')
     with ExitStack() as stack:
         lock(stack, root / 'cleanup-run.lock')
-        allowed = {'ready.json', 'native.py', 'prime_final.maegz', 'control',
+        allowed = {'ready.json', 'native.py', 'prime_final.maegz', 'control', '__pycache__',
                    'cleanup-run.lock', 'cleanup-run-evidence.tar', 'cleanup-run-evidence.pending'}
         allowed.update(f'.cleanup-CMPID_{cid}.json' for cid in selection['ids'])
         for path in root.iterdir():
-            if path.name not in allowed or path.is_symlink() or (path.is_dir() and path.name != 'control'):
+            if path.name not in allowed or path.is_symlink() or (path.is_dir() and path.name not in {'control', '__pycache__'}):
                 raise RuntimeError('MD run has uncollected, foreign or uncertain work')
+        cache = root / '__pycache__'
+        if cache.exists():
+            if not cache.is_dir() or any(
+                    path.is_symlink() or not path.is_file() or
+                    not re.fullmatch(r'native\.cpython-\d+(?:\.opt-[12])?\.pyc', path.name)
+                    for path in cache.iterdir()):
+                raise RuntimeError('MD run has foreign or uncertain Python cache files')
         for cid in selection['ids']:
             path = root / f'.cleanup-CMPID_{cid}.json'
             proof = json.loads(path.read_text())
