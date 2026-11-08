@@ -82,7 +82,8 @@ def run_stage(args, requested_iteration):
     if not 1 <= iteration <= args.max_iteration:
         raise ValueError('CReM generation requires a configured iteration >= 1')
     saved = database.crem_generation(args.db_path, iteration)
-    if saved and saved['state'] == Growth.DONE:
+    deleted = database.iteration_was_deleted(args.db_path, iteration)
+    if saved and saved['state'] == Growth.DONE and not deleted:
         database.validate_generation_population(args.db_path, iteration, args.target_count)
         print(f'Iteration {iteration}: retaining completed CReM population ({saved["population_count"]} compounds).')
         return
@@ -94,6 +95,7 @@ def run_stage(args, requested_iteration):
         return
     if not prepare_workspace(args, iteration):
         return
+    saved = database.crem_generation(args.db_path, iteration)
     folder = stage_directory(args.output, iteration, 'reinvent')/'crem'
     folder.mkdir(parents=True, exist_ok=True)
     cfg = settings(args, iteration, folder)

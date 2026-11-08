@@ -604,6 +604,8 @@ def _generation_readiness_reason(conn, iteration, target_count):
         if saved['state'] != Growth.DONE:
             return 'CReM generation/import incomplete'
         if count != saved['population_count']:
+            if count == 0 and saved['population_count']:
+                return 'Deleted CReM population requires verified workspace recovery'
             raise RuntimeError(f'Frozen CReM population changed for iteration {iteration} '
                                f"(expected={saved['population_count']}, actual={count}); "
                                'existing results retained. Restore the original population or explicitly '
@@ -689,7 +691,9 @@ def import_crem_results(path, iteration, records, stop_reason):
         if saved is None:
             raise RuntimeError('CReM generation has no frozen plan')
         if saved['state'] == Growth.DONE:
-            _generation_readiness_reason(conn, iteration, saved['plan']['target_count'])
+            reason = _generation_readiness_reason(conn, iteration, saved['plan']['target_count'])
+            if reason:
+                raise RuntimeError(reason)
             return saved['population_count']
         existing = {_core.canonicalize_smiles(r[0]) for r in conn.execute('SELECT smiles FROM compound')}
         count = 0
@@ -1149,8 +1153,11 @@ def iteration_has_saved_work(path, iteration):
 
 
 def _deleted_iteration(conn, iteration):
-    if _crem_record(conn, iteration) is not None:
-        return False  # Frozen CReM counts are validated, never automatically reset.
+    crem = _crem_record(conn, iteration)
+    if crem is not None:
+        return (crem['state'] == Growth.DONE and bool(crem['population_count'])
+                and not conn.execute('SELECT 1 FROM compound WHERE iteration=? LIMIT 1',
+                                     (iteration,)).fetchone())
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if 'compound' not in tables:
         return False
@@ -1171,6 +1178,23 @@ def iteration_was_deleted(path, iteration):
         return _deleted_iteration(conn, iteration)
 
 
+def deleted_crem_recovery_context(path, iteration):
+    """Read surviving ownership and timers after manual population deletion."""
+    with connect(path) as conn:
+        crem = _crem_record(conn, iteration)
+        if crem is None or not _deleted_iteration(conn, iteration):
+            raise RuntimeError('Not an entirely deleted completed CReM population')
+        ids = [r[0] for r in conn.execute(
+            'SELECT compound_id FROM crem_compound_pose WHERE iteration=? ORDER BY compound_id', (iteration,))]
+        if len(ids) != crem['population_count']:
+            raise RuntimeError('Deleted CReM provenance is incomplete; recovery retained')
+        timers = conn.execute('SELECT stage,started_at FROM stage_timing WHERE iteration=?', (iteration,)).fetchall()
+        stages = [r[0] for r in timers]
+        if conn.execute('SELECT 1 FROM iteration_md_gbsa_selection WHERE iteration=?', (iteration,)).fetchone():
+            raise RuntimeError('Deleted population has durable MD work; remote reconciliation required')
+        return dict(ids=ids, stages=stages, since=min((r[1] for r in timers), default=None))
+
+
 def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_deleted_crem=False,
                             delete_existing_crem=False):
     """Under all stage locks, back up SQLite/WAL and reset an owned iteration.
@@ -1179,9 +1203,9 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
     must come from saved selection ownership, combichem origins or the original
     druglike report, never guessed ID ranges. Existing compounds are removed only
     with delete_existing_crem, for an explicitly requested latest-iteration reset.
-    allow_deleted_crem is only for explicit user-directed reconciliation after
-    native/remote jobs are terminal and archived. Automatic workspace recovery
-    never sets it; incomplete, nonempty or provenance-inconsistent runs stop.
+    allow_deleted_crem requires verified terminal native/remote jobs and archived
+    evidence, either for explicit reconciliation or for the user-directed deletion
+    of all rows and the iteration folder. Incomplete or inconsistent runs stop.
     """
     if iteration < 1:
         raise ValueError('Cannot reset iteration zero')
@@ -1191,6 +1215,8 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
         conn.execute('BEGIN IMMEDIATE')
         crem = _crem_record(conn, iteration)
         crem_ids = set()
+        if crem is not None and not allow_deleted_crem:
+            raise RuntimeError('CReM reset requires verified workspace reconciliation')
         existing_ids = {row[0] for row in conn.execute('SELECT id FROM compound WHERE iteration=?', (iteration,))}
         if delete_existing_crem and (crem is None or not existing_ids):
             raise RuntimeError('Explicit existing reset requires a nonempty frozen CReM iteration')
@@ -1421,7 +1447,9 @@ def validate_generation_population(path, iteration, target_count=None):
         if crem is not None and crem['state'] == Growth.DONE:
             if target_count is not None and target_count != crem['plan']['target_count']:
                 raise RuntimeError('Cannot change target-count of a frozen CReM population')
-            _generation_readiness_reason(conn, iteration, target_count)
+            reason = _generation_readiness_reason(conn, iteration, target_count)
+            if reason:
+                raise RuntimeError(reason)
             count = None  # Explicitly exhausted CReM populations may be below target.
     if count is not None and target_count is not None and target_count > count:
         raise RuntimeError(f'Iteration {iteration}: cannot increase target-count to {target_count} '

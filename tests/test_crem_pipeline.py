@@ -136,14 +136,18 @@ def test_iteration_zero_stages_unchanged_and_legacy_defaults_remain(project):
     assert names==['generate','druglike','ligprep','glide','amber-gbsa','prime_gbsa','md-gbsa']
 
 
-def test_deleted_frozen_crem_population_is_not_silently_regenerated(project):
+def test_deleted_frozen_crem_population_without_provenance_waits(project, capsys):
     args=project
     generate._run_stage(args,1)
     with database.connect(args.db_path) as conn:
         conn.execute('DELETE FROM crem_compound_pose')
         conn.execute('DELETE FROM compound WHERE iteration=1')
-    with pytest.raises(RuntimeError,match='population changed'):
-        generate._run_stage(args,1)
+    import shutil
+    from graft.paths import iteration_directory
+    shutil.rmtree(iteration_directory(args.output, 1))
+    generate._run_stage(args,1)
+    assert 'provenance is incomplete' in capsys.readouterr().out
+    assert database.crem_generation(args.db_path,1)['population_count'] > 0
 
 
 def test_explicit_deleted_crem_reconciliation_backs_up_and_retains_previous_results(project, tmp_path):
@@ -153,7 +157,7 @@ def test_explicit_deleted_crem_reconciliation_backs_up_and_retains_previous_resu
     with sqlite3.connect(project.db_path) as conn:
         earlier = conn.execute('SELECT * FROM compound WHERE iteration=0').fetchall()
         conn.execute('DELETE FROM compound WHERE iteration=1')  # simulate manual deletion with FK checks off
-    assert not database.iteration_was_deleted(project.db_path, 1)  # never an automatic reset
+    assert database.iteration_was_deleted(project.db_path, 1)  # Workspace/native checks still gate reset.
     backup = tmp_path/'before-explicit-reset.sqlite'
     database.reset_deleted_iteration(project.db_path, 1, backup, allow_deleted_crem=True)
     assert database.crem_generation(project.db_path, 1) is None

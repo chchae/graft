@@ -1,5 +1,38 @@
 # Graft Development Handoff
 
+## Restart after deleting CReM rows and the iteration folder (2026-11-08)
+
+**Confirmed user request:** after interrupted work, deleting all compound rows
+for an iteration and its output directory must allow regeneration on restart
+without the frozen-population startup traceback. This supersedes the earlier
+manual-only rule for an entirely deleted completed CReM population; partial
+population changes remain errors. It does not authorize resetting live jobs.
+
+**Implementation:** a completed positive frozen population with zero remaining
+rows is incomplete/deleted for scheduling, never scientific completion. Return
+to Generate, require the iteration directory to be absent, retain full original
+pose ownership and acquire every stage lock. Discover native JobServer history
+by launch directory (including terminal parents' children), check active jobs,
+and reconcile surviving owned Slurm Amber manifests, array states and task
+locks. Preserve remote scratch/results. Under those checks, archive retirement
+evidence, back up SQLite/WAL and atomically reset only the deleted iteration's
+owned metadata using the existing explicit reset helper. Re-read the cleared
+plan before fresh generation so the preceding iteration supplies the parents.
+Earlier populations and the monotonic compound ID sequence remain intact.
+
+**Limits:** retain and report pending recovery when jobs are active/unknown,
+history or ownership is missing, later work exists, files remain, or deleted
+MD/FEP journals require explicit reconciliation. MD selections and non-Slurm
+Amber work retain their existing protection. No automatic cancellation or
+scientific protocol change is introduced. Tests use synthetic scientific data;
+production jobs and databases are not reset during development verification.
+
+**Verification:** 115 focused deletion/workspace/CReM/timeout-result tests
+passed. The full suite reported 2,139 passed, seven skipped and the previously
+known `test_real_probes_pass_but_actual_fragment_combination_collides_with_itself`
+failure. Compileall, package/CLI imports and diff checks passed. Synthetic
+recovery tests do not validate external scientific calculations.
+
 ## Explicit reset and regeneration of the latest CReM iteration (2026-11-08)
 
 **Confirmed user request:** delete the iteration-10 database records and

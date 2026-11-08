@@ -62,6 +62,18 @@ def _prepare(args, iteration, deleted):
         database.mark_iteration_workspace_prepared(args.db_path, iteration)
         return None
 
+    deleted_crem = deleted and database.crem_generation(args.db_path, iteration) is not None
+    deletion_proof = None
+    if deleted_crem:
+        if root.exists():
+            raise WorkspaceReconciliationPending(
+                'Deleted CReM population: remove its iteration directory too, or restore its original DB rows')
+        from graft.stages._deleted_crem import reconcile
+        try:
+            deletion_proof = reconcile(args, iteration, root)
+        except Exception as exc:
+            raise WorkspaceReconciliationPending(f'Deleted CReM recovery waiting: {exc}') from exc
+
     # Configuration inputs must never be relocated while clearing working output.
     for key in ('db_path', 'toml_file', 'grid', 'reference_poses', 'libinvent_prior',
                 'sidechain_library', 'prime_gbsa_receptor', 'amber_receptor', 'aizynth_config'):
@@ -142,17 +154,23 @@ def _prepare(args, iteration, deleted):
         if remote_evidence:
             (archive / 'workspace_remote_reconciliation.json').write_text(
                 json.dumps(remote_evidence, indent=2) + '\n')
+        if deletion_proof is not None:
+            (archive / 'deleted_crem_reconciliation.json').write_text(
+                json.dumps(deletion_proof, indent=2) + '\n')
         if deleted:
             database.reset_deleted_iteration(args.db_path, iteration,
-                                             archive / f'database-before-reset-{time.time_ns()}.sqlite', report_ids)
+                                             archive / f'database-before-reset-{time.time_ns()}.sqlite', report_ids,
+                                             allow_deleted_crem=deleted_crem)
         else:
             database.mark_iteration_workspace_prepared(args.db_path, iteration)
-    except BaseException:
+    except BaseException as exc:
         # No worker can modify this iteration while the stage locks are held.
         # Restore its original files if the DB transaction/backup did not finish.
         root.rmdir()
         if had_root:
             archive.rename(root)
+        if deleted_crem and isinstance(exc, RuntimeError):
+            raise WorkspaceReconciliationPending(str(exc)) from exc
         raise
     print(f'Iteration {iteration}: cleared previous calculation files before generation; '
           f'preserved in {archive}.', flush=True)
