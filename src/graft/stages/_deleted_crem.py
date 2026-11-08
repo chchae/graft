@@ -39,6 +39,20 @@ for root in sorted(Path(request['base']).glob('run-*')):
     if snapshot['active'] or len(snapshot['tasks']) != len(entries):
         raise RuntimeError('Amber task locks/evidence remain uncertain: ' + str(root))
     proof.append(dict(root=str(root), native=native, snapshot=snapshot))
+for receipt in sorted(Path(request['base']).glob('.cleanup-run-*.json')):
+    saved = json.loads(receipt.read_text())
+    ids = set(saved['ids'])
+    if not (ids & owned) or (Path(request['base'])/saved['run_id']).exists():
+        continue
+    if (receipt.is_symlink() or not ids <= owned or set(map(int, saved['successful'])) != ids
+            or saved['base'] != request['base'] or not str(saved.get('job_id', '')).isdigit()):
+        raise RuntimeError('Amber cleanup receipt is incomplete or foreign')
+    checked = subprocess.run(['python3', '-', 'status', str(saved['job_id']), str(len(ids))],
+                             input=request['status_source'], capture_output=True, text=True, check=True, timeout=60)
+    native = json.loads(checked.stdout)
+    if native['active']:
+        raise RuntimeError('Retired Amber job is active or uncertain')
+    proof.append(dict(receipt=str(receipt), request=saved, native=native))
 print(json.dumps(proof))
 '''
 
@@ -46,8 +60,14 @@ print(json.dumps(proof))
 def reconcile(args, iteration, root):
     context = database.deleted_crem_recovery_context(args.db_path, iteration)
     stages = set(context['stages'])
-    if stages & {'md-gbsa', 'md_gbsa', 'fep'}:
-        raise RuntimeError('MD/FEP journals were deleted; explicit remote reconciliation required')
+    if 'fep' in stages:
+        raise RuntimeError('FEP journals were deleted; explicit reconciliation required')
+    md = {}
+    if context['md'] is not None:
+        from graft.stages._deleted_md import reconcile as reconcile_md
+        md = reconcile_md(context['md'])
+    elif stages & {'md-gbsa', 'md_gbsa'}:
+        raise RuntimeError('MD selection was deleted; explicit remote reconciliation required')
     command = [str(Path(args.schrodinger)/'jsc'), 'list', '--any-status', '--id-only', '--without-subjobs']
     if context['since'] is not None:
         command += ['--created-after', time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(context['since']-86400))]
@@ -80,10 +100,12 @@ def reconcile(args, iteration, root):
             raise RuntimeError('Deleted non-Slurm Amber journals require explicit remote reconciliation')
         from graft import amber_gbsa
         settings = args.amber_remote
-        request = dict(base=settings['remote_work_dir'], ids=context['ids'])
+        from graft import amber_slurm_control
+        request = dict(base=settings['remote_work_dir'], ids=context['ids'],
+                       status_source=Path(amber_slurm_control.__file__).read_text())
         response = amber_gbsa.ssh(settings, shlex.join(['python3', '-c', AMBER_PROBE]),
                                   input=json.dumps(request), capture_output=True, text=True, timeout=120)
         amber = json.loads(response.stdout)
         if not amber:
             raise RuntimeError('No surviving Amber ownership/task evidence; recovery withheld')
-    return dict(native=native, amber=amber)
+    return dict(native=native, amber=amber, md=md)

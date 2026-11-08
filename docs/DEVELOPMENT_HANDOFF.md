@@ -1,5 +1,49 @@
 # Graft Development Handoff
 
+## Recover deleted populations with durable MD selections (2026-11-09)
+
+**Observed issue and user intent:** the user again deleted iteration-4 compound
+rows and its local output after MD work began. The automatic recovery introduced
+on November 8 retained the MD selection and waited indefinitely. Extend that
+same authorized deletion/restart workflow to verified retired MD work.
+
+**Implementation:** require the saved MD selection to belong entirely to the
+old CReM provenance. Verify the Slurm ready marker, frozen helper hashes, local
+Prime owner marker, compound/replica ownership, native parents and children,
+and controller locks on both hosts. Archive surviving JSON metadata/results and
+native retirement evidence, retaining scientific scratch trees. Failed launch
+clients with missing acknowledged JobIds require authoritative JobServer history
+for the exact launch directory; every discovered tree must be terminal. Never
+resubmit or rewrite scientific journals during recovery. Unknown identities,
+live children, missing roots and changed ownership remain pending.
+
+Pass the exact reconciled selection to the reset transaction, recheck it before
+backup/mutation, then remove only its iteration-owned orphan scores, selection,
+cleanup and retry metadata. Keep earlier populations and IDs intact. Completed
+Amber cleanup receipts can supply ownership/result evidence after scratch
+removal, together with a fresh native Slurm status check. FEP and uncertain
+remote work still require explicit reconciliation.
+
+**Operational finding:** the server GPU QueueArgs had
+`--cpus-per-task%NPROC%`, producing the rejected option `--cpus-per-task1`.
+Backed up `/opt/schrodinger/jobserver/config/hosts.yml` on slurm and corrected
+only the missing `=`. Native configuration validation and reload-hosts succeeded;
+no server restart or scientific protocol change was made. Preserve the old MD
+run `66370c9de98549ea882824c84a7079b6` and its Prime counterpart for evidence.
+
+**Verification:** 126 focused deletion/MD/workspace/CReM/timeout-result tests
+passed. The full suite reported 2,150 passed, seven skipped and the known
+real-fragment collision test failure. Compileall, package/CLI imports and diff
+checks passed. These synthetic tests validate recovery/state handling, not
+scientific calculations. Production-native inspection also verified both saved
+MD roots and 44 terminal native status rows without running calculations.
+
+**Operational recovery:** archived native evidence and SQLite/WAL under
+`output/.previous/iter04-1794176509867487944/`, verified earlier compound rows
+against the backup, and passed integrity/foreign-key checks. Resumed the existing
+sequential execution loop. Iteration 4 restarted Generate from iteration-3's
+24 parents with 116 workers; later scientific completion is not claimed here.
+
 ## Restart after deleting CReM rows and the iteration folder (2026-11-08)
 
 **Confirmed user request:** after interrupted work, deleting all compound rows

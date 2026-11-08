@@ -106,7 +106,7 @@ def test_later_iteration_metadata_blocks_reset_and_restores_absence(deleted):
 def test_durable_md_selection_is_retained(deleted):
     with database.connect(deleted.db_path) as conn:
         conn.execute("INSERT INTO iteration_md_gbsa_selection VALUES (1,'[]','{}')")
-    with pytest.raises(WorkspaceReconciliationPending, match='durable MD'):
+    with pytest.raises(WorkspaceReconciliationPending, match='MD selection'):
         prepare_iteration_directory(deleted, 1)
     assert database.md_gbsa_selection(deleted.db_path, 1) is not None
 
@@ -155,3 +155,25 @@ def test_amber_missing_or_active_evidence_defers_recovery(deleted, monkeypatch):
     with pytest.raises(WorkspaceReconciliationPending, match='No surviving Amber'):
         prepare_iteration_directory(deleted, 1)
     assert database.crem_generation(deleted.db_path, 1) is not None
+
+
+@pytest.mark.parametrize('complete', [True, False])
+def test_retired_amber_receipt_requires_complete_results_and_native_retirement(tmp_path,monkeypatch,capsys,complete):
+    base=tmp_path/'amber'
+    base.mkdir()
+    saved=dict(base=str(base),run_id='run-'+'a'*32,ids=[7,8],job_id='123',
+               successful={'7':-20,'8':-30} if complete else {'7':-20})
+    receipt=base/('.cleanup-'+saved['run_id']+'.json')
+    receipt.write_text(json.dumps(saved))
+    request=dict(base=str(base),ids=[7,8],status_source='read-only status source')
+    monkeypatch.setattr(sys,'stdin',io.StringIO(json.dumps(request)))
+    monkeypatch.setattr(subprocess,'run',lambda cmd,**kw:
+                        subprocess.CompletedProcess(cmd,0,json.dumps(dict(active=False,state='COMPLETED')),''))
+    if complete:
+        exec(_deleted_crem.AMBER_PROBE,{})
+        proof=json.loads(capsys.readouterr().out)
+        assert proof[0]['request']==saved
+    else:
+        with pytest.raises(RuntimeError,match='incomplete or foreign'):
+            exec(_deleted_crem.AMBER_PROBE,{})
+    assert json.loads(receipt.read_text())==saved

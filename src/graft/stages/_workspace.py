@@ -160,7 +160,8 @@ def _prepare(args, iteration, deleted):
         if deleted:
             database.reset_deleted_iteration(args.db_path, iteration,
                                              archive / f'database-before-reset-{time.time_ns()}.sqlite', report_ids,
-                                             allow_deleted_crem=deleted_crem)
+                                             allow_deleted_crem=deleted_crem,
+                                             reconciled_md=(deletion_proof or {}).get('md', {}).get('selection'))
         else:
             database.mark_iteration_workspace_prepared(args.db_path, iteration)
     except BaseException as exc:

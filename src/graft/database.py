@@ -1190,13 +1190,17 @@ def deleted_crem_recovery_context(path, iteration):
             raise RuntimeError('Deleted CReM provenance is incomplete; recovery retained')
         timers = conn.execute('SELECT stage,started_at FROM stage_timing WHERE iteration=?', (iteration,)).fetchall()
         stages = [r[0] for r in timers]
-        if conn.execute('SELECT 1 FROM iteration_md_gbsa_selection WHERE iteration=?', (iteration,)).fetchone():
-            raise RuntimeError('Deleted population has durable MD work; remote reconciliation required')
-        return dict(ids=ids, stages=stages, since=min((r[1] for r in timers), default=None))
+        row = conn.execute('SELECT candidates,settings FROM iteration_md_gbsa_selection WHERE iteration=?',
+                           (iteration,)).fetchone()
+        import json
+        md = dict(ids=json.loads(row[0]), settings=json.loads(row[1])) if row else None
+        if md and (not md['ids'] or not set(md['ids']) <= set(ids)):
+            raise RuntimeError('Deleted MD selection has foreign or missing ownership')
+        return dict(ids=ids, stages=stages, since=min((r[1] for r in timers), default=None), md=md)
 
 
 def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_deleted_crem=False,
-                            delete_existing_crem=False):
+                            delete_existing_crem=False, reconciled_md=None):
     """Under all stage locks, back up SQLite/WAL and reset an owned iteration.
 
     The caller verifies native jobs and archives working files. Membership IDs
@@ -1240,8 +1244,16 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
                           'iteration_workspace', 'iteration_druglike_selection', 'glide_timeout_collection'):
                 if table in tables and conn.execute(f'SELECT 1 FROM {table} WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
                     raise RuntimeError('Later saved iteration work depends on this iteration; reset blocked')
-        if 'iteration_md_gbsa_selection' in tables and conn.execute('SELECT 1 FROM iteration_md_gbsa_selection WHERE iteration=?',(iteration,)).fetchone():
-            raise RuntimeError('Deleted iteration has durable MD work; reconcile remote jobs before reset')
+        if 'iteration_md_gbsa_selection' in tables:
+            row = conn.execute('SELECT candidates,settings FROM iteration_md_gbsa_selection WHERE iteration=?',
+                               (iteration,)).fetchone()
+            import json
+            md = dict(ids=json.loads(row[0]), settings=json.loads(row[1])) if row else None
+            if md is not None and (not allow_deleted_crem or not crem_ids or reconciled_md != md
+                                   or not set(md['ids']) <= crem_ids):
+                raise RuntimeError('Deleted iteration has durable MD work; reconcile remote jobs before reset')
+            if reconciled_md is not None and md != reconciled_md:
+                raise RuntimeError('MD selection changed since remote reconciliation; reset blocked')
         ids = {row[0] for row in conn.execute(
             'SELECT compound_id FROM combichem_compound_origin WHERE iteration=?', (iteration,))
                } if 'combichem_compound_origin' in tables else set()
@@ -1287,14 +1299,20 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
         for table in ('compound_druglike_selection', 'amber_failure'):
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM reset_compound_ids)')
-        if delete_existing_crem:
+        if delete_existing_crem or reconciled_md is not None:
             # Native retirement was verified by the caller. All scientific rows
             # remain recoverable in the mandatory SQLite backup made above.
             for table in ('compound_md_gbsa_result', 'md_gbsa_local_cleanup',
                           'md_gbsa_remote_cleanup', 'score_restart_retry'):
                 if table in tables:
                     conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM reset_compound_ids)')
-            conn.execute('DELETE FROM compound WHERE id IN (SELECT id FROM reset_compound_ids)')
+            if delete_existing_crem:
+                conn.execute('DELETE FROM compound WHERE id IN (SELECT id FROM reset_compound_ids)')
+        if reconciled_md is not None:
+            for table in ('iteration_md_gbsa_selection', 'md_gbsa_run_cleanup', 'iteration_md_retry_policy',
+                          'md_gbsa_selection_history', 'score_completion_history'):
+                if table in tables:
+                    conn.execute(f'DELETE FROM {table} WHERE iteration=?', (iteration,))
         for table in ('combichem_compound_origin', 'combichem_batch', 'iteration_combichem_history',
                       'iteration_combichem', 'iteration_druglike_selection', 'iteration_druglike_priority', 'glide_timeout_collection', 'iteration_sa_selection',
                       'iteration_fep_selection', 'iteration_scaffold', 'iteration_workspace'):
