@@ -301,6 +301,8 @@ def external_completion_reason(args, iteration, stage):
                 record = load_record(record_path.parent)
                 if not record.get("job_id"):
                     return "Glide launch identity remains uncertain"
+                if record.get('timeout_requested_at') and not record.get('timeout_results_imported'):
+                    return f"Glide timeout results require recovery: {record['job_id']}"
                 # Already downloaded records were verified terminal by the worker.
                 if not record.get("downloaded"):
                     details = guard.job_details(args.schrodinger, record["job_id"])

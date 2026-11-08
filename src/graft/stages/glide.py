@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import hashlib
 import json
 import re
+import shutil
 from pathlib import Path
 from graft.paths import stage_directory
 from graft.stages._logging import detail, progress
@@ -14,6 +16,7 @@ from graft.config import glide_group_resources, schrodinger_job_options
 from graft.stages._logging import work_started, timed_stage, format_elapsed
 from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
+from graft.glide_recovery import timeout_pose_files, save_record
 from graft.schrodinger_guard import active_jobs, belongs_to_directory, SubmissionBlocked, job_details, TERMINAL
 
 
@@ -135,6 +138,84 @@ def process_completed_job(iteration, args, job, extractor, merger, glide_root):
 
 
 
+def process_timeout_job(iteration, args, job, merger, glide_root):
+    directory = job['group_dir']
+    record = load_record(directory)
+    if not record or not record.get('timeout_requested_at'):
+        raise RuntimeError('Glide timeout recovery has no durable native identity')
+    summary = database.begin_glide_timeout_collection(
+        args.db_path, iteration, job['reference_id'], record['job_id'])
+    if summary is None:
+        sources = timeout_pose_files(args.schrodinger, directory)
+        folder = directory / 'timeout-results' / 'extracted'
+        folder.mkdir(parents=True, exist_ok=True)
+        ids = [row[0] for row in job['compounds']]
+        scores = {}
+        report = dict(scored=0, read_errors=[], inputs=[])
+        if sources:
+            request = dict(inputs=[str(p.resolve()) for p in sources], ids=ids, output=str(folder.resolve()))
+            request_file = folder / 'request.json'
+            request_file.write_text(json.dumps(request))
+            helper = Path(__file__).resolve().parents[1] / 'glide_timeout_results.py'
+            c.run_command([args.schrodinger/'run', helper, request_file], cwd=directory)
+            with (folder / 'docking_scores.tsv').open(newline='') as stream:
+                scores = {int(row['id']): float(row['docking_score'])
+                          for row in csv.DictReader(stream, delimiter='\t')}
+            report = json.loads((folder / 'report.json').read_text())
+        database.validate_glide_timeout_scores(args.db_path, iteration, job['reference_id'], scores)
+        if scores:
+            # Publish the matching poses before making recovered scores eligible.
+            for name in ('best_poses.maegz', 'docking_scores.tsv'):
+                pending = directory / ('timeout-' + name)
+                shutil.copy2(folder / name, pending)
+                pending.replace(directory / name)
+            merge_current_best(args, glide_root, merger)
+        record = load_record(directory)
+        summary = dict(job_id=record['job_id'], timeout_seconds=record['timeout_seconds'],
+                       scored_ids=sorted(scores), sources=record.get('timeout_sources', []), report=report)
+        database.store_glide_timeout_scores(args.db_path, iteration, job['reference_id'],
+            record['job_id'], scores, record['timeout_seconds'], summary)
+    record = load_record(directory)
+    record['timeout_results_imported'] = True
+    record['timeout_result_count'] = len(summary['scored_ids'])
+    save_record(directory, record)
+    print(f"Reference {job['reference_id']}: timeout results collected; "
+          f"finite scores={len(summary['scored_ids'])}; no docking resubmission.", flush=True)
+
+
+def recover_timeout_groups(args, iteration, glide_root):
+    records = [(path.parent, load_record(path.parent))
+               for path in sorted(glide_root.glob('ref_*/glide_job.json'))]
+    pending = [(directory, record) for directory, record in records
+               if record.get('timeout_requested_at') and not record.get('timeout_results_imported')]
+    if not pending:
+        return
+    # Legacy workers may already have marked timeout members failed. Enroll
+    # every pending native tree before slow I/O, so independent GBSA workers
+    # cannot rank an iteration whose timeout results still need collection.
+    for directory, record in pending:
+        database.begin_glide_timeout_collection(args.db_path, iteration,
+            int(directory.name.removeprefix('ref_')), record['job_id'])
+    prepared = stage_directory(args.output, iteration, 'ligprep') / 'ligprep.maegz'
+    signature = glide_root / 'ligprep_input.sha256'
+    digest = hashlib.sha256()
+    with prepared.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024*1024), b''):
+            digest.update(chunk)
+    if not signature.exists() or signature.read_text().strip() != digest.hexdigest():
+        raise RuntimeError('Cannot recover Glide timeout results for a changed LigPrep input')
+    merger = c.create_best_pose_merger(glide_root)
+    for directory, record in pending:
+        refid = int(directory.name.removeprefix('ref_'))
+        status = group_status(args.schrodinger, directory, directory/'glide.log', directory/'glide_lib.maegz',
+                              timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
+        if status not in TERMINAL:
+            continue
+        rows = database.glide_timeout_rows(args.db_path, iteration, refid)
+        job = dict(group_dir=directory, reference_id=refid, compounds=rows)
+        process_timeout_job(iteration, args, job, merger, glide_root)
+
+
 @timed_stage("Glide stage worker")
 def _run_stage(args, ns):
     args.poll_interval = ns.poll_interval
@@ -159,6 +240,7 @@ def _run_stage(args, ns):
 
     # Assign nearest reference for any still-undocked compounds.
     c.assign_reference_compounds(iteration, args)
+    recover_timeout_groups(args, iteration, stage_directory(args.output, iteration, 'glide'))
     groups = query_groups(iteration, args.db_path)
     fresh_references = database.fresh_glide_references(args.db_path, iteration)
 
@@ -243,8 +325,11 @@ def _run_stage(args, ns):
                            message='Completed Glide job produced no poses')
             continue
         if status is not None:
-            mark_group(args.db_path, compounds, State.FAILED, failed_stage='glide',
-                       message=failure_reason(gdir, status))
+            if (load_record(gdir) or {}).get('timeout_requested_at'):
+                process_timeout_job(iteration, args, job, merger, glide_root)
+            else:
+                mark_group(args.db_path, compounds, State.FAILED, failed_stage='glide',
+                           message=failure_reason(gdir, status))
             continue
 
         unsubmitted.append((job, ligand_file))
@@ -326,7 +411,10 @@ def _run_stage(args, ns):
                 terminal += 1
                 continue
             if status is not None and status not in ('RUNNING', 'UNKNOWN'):
-                mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide', message=failure_reason(job['group_dir'], status))
+                if (load_record(job['group_dir']) or {}).get('timeout_requested_at'):
+                    process_timeout_job(iteration, args, job, merger, glide_root)
+                else:
+                    mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide', message=failure_reason(job['group_dir'], status))
                 terminal += 1
                 continue
             rest.append(job)

@@ -168,6 +168,77 @@ def test_explicit_deleted_crem_reconciliation_backs_up_and_retains_previous_resu
         assert conn.execute('SELECT COUNT(*) FROM iteration_druglike_priority WHERE iteration=1').fetchone()[0] == 1
 
 
+def test_explicit_existing_crem_reset_backs_up_rows_scores_and_keeps_earlier_work(project, tmp_path):
+    generate._run_stage(project, 1)
+    druglike._run_stage(project, 1)
+    with database.connect(project.db_path) as conn:
+        conn.execute("UPDATE compound SET docking_score=-10,state='amber_running' WHERE iteration=1")
+        old = conn.execute('SELECT * FROM compound WHERE iteration=1 ORDER BY id').fetchall()
+        earlier = conn.execute('SELECT * FROM compound WHERE iteration=0 ORDER BY id').fetchall()
+        sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='compound'").fetchone()
+    backup = tmp_path/'before-existing-reset.sqlite'
+    # Caller has archived files, holds all stage locks and verified retirement.
+    database.reset_deleted_iteration(project.db_path, 1, backup,
+                                     allow_deleted_crem=True, delete_existing_crem=True)
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT * FROM compound WHERE iteration=0 ORDER BY id').fetchall() == earlier
+        assert conn.execute('SELECT COUNT(*) FROM compound WHERE iteration=1').fetchone()[0] == 0
+        assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name='compound'").fetchone() == sequence
+        assert conn.execute('SELECT COUNT(*) FROM crem_compound_pose WHERE iteration=1').fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM iteration_druglike_priority WHERE iteration=1').fetchone()[0] == 0
+        assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
+    assert database.crem_generation(project.db_path, 1) is None
+    assert driver.choose_iteration(project) == 1
+    with sqlite3.connect(backup) as conn:
+        assert conn.execute('SELECT * FROM compound WHERE iteration=1 ORDER BY id').fetchall() == old
+
+
+@pytest.mark.parametrize('problem', ['no_authorization', 'later_compound', 'later_workspace',
+                                    'md_selection', 'bad_provenance', 'earlier_reference'])
+def test_existing_crem_reset_refuses_unsafe_or_implicit_deletion(project, tmp_path, problem):
+    generate._run_stage(project, 1)
+    druglike._run_stage(project, 1)
+    with database.connect(project.db_path) as conn:
+        cid = conn.execute('SELECT MIN(id) FROM compound WHERE iteration=1').fetchone()[0]
+        if problem == 'later_compound':
+            conn.execute("INSERT INTO compound(name,smiles,iteration,state) VALUES ('later','CC',2,'generated')")
+        elif problem == 'later_workspace':
+            database._mark_iteration_workspace_prepared(conn, 2)
+        elif problem == 'md_selection':
+            conn.execute("INSERT INTO iteration_md_gbsa_selection VALUES (1,'[]','{}')")
+        elif problem == 'bad_provenance':
+            conn.execute('DELETE FROM crem_compound_pose WHERE compound_id=?', (cid,))
+        elif problem == 'earlier_reference':
+            conn.execute('UPDATE compound SET similar_to=? WHERE iteration=0', (cid,))
+        old = conn.execute('SELECT * FROM compound ORDER BY id').fetchall()
+    backup = tmp_path/'must-not-reset-existing.sqlite'
+    with pytest.raises((RuntimeError, ValueError)):
+        database.reset_deleted_iteration(project.db_path, 1, backup,
+            allow_deleted_crem=problem != 'no_authorization', delete_existing_crem=True)
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT * FROM compound ORDER BY id').fetchall() == old
+    assert not backup.exists()
+
+
+def test_existing_crem_reset_rolls_back_all_metadata_on_delete_failure(project, tmp_path):
+    generate._run_stage(project, 1)
+    druglike._run_stage(project, 1)
+    with database.connect(project.db_path) as conn:
+        old = conn.execute('SELECT * FROM compound ORDER BY id').fetchall()
+        count = conn.execute('SELECT COUNT(*) FROM crem_compound_pose').fetchone()[0]
+        conn.execute("CREATE TRIGGER fail_reset BEFORE DELETE ON compound WHEN OLD.iteration=1 "
+                     "BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END")
+    backup = tmp_path/'before-rolled-back-reset.sqlite'
+    with pytest.raises(sqlite3.IntegrityError, match='injected deletion failure'):
+        database.reset_deleted_iteration(project.db_path, 1, backup,
+                                         allow_deleted_crem=True, delete_existing_crem=True)
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT * FROM compound ORDER BY id').fetchall() == old
+        assert conn.execute('SELECT COUNT(*) FROM crem_compound_pose').fetchone()[0] == count
+    assert database.crem_generation(project.db_path, 1) is not None
+    assert backup.exists()
+
+
 @pytest.mark.parametrize('problem', ['nonempty', 'partial_provenance', 'md_work', 'later_plan'])
 def test_explicit_deleted_crem_reconciliation_refuses_uncertain_state(project, tmp_path, problem):
     generate._run_stage(project, 1)

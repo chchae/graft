@@ -1,5 +1,85 @@
 # Graft Development Handoff
 
+## Explicit reset and regeneration of the latest CReM iteration (2026-11-08)
+
+**Confirmed user request:** delete the iteration-10 database records and
+`output/iter10`, then start that iteration again. This authorizes this explicit
+reset; it does not change automatic recovery or permit resetting active jobs.
+
+**Implementation:** the existing `reset_deleted_iteration` helper accepts the
+additional explicit `delete_existing_crem=True` option only together with
+`allow_deleted_crem=True`. Require a complete, nonempty frozen CReM population
+whose saved pose ownership exactly matches current compound IDs. Reject later
+compound/workspace/selection/collection records, durable MD selection,
+inconsistent ownership and retained compounds referring to removed IDs. Under
+caller-held driver/all-stage locks, verified terminal native work and archived
+working directories, back up SQLite including committed WAL before atomically
+removing only the owned population and its iteration metadata. Preserve earlier
+iterations and the compound ID sequence. Normal workers never request this option.
+
+**Operational result:** canceled only Amber array `202430`, verified its 32 tasks
+and remote locks retired, and checked 192 recorded LigPrep/Glide native identities
+were terminal. Verified the reset first on a database copy. Archived the old
+3,958-compound iteration, canceled Amber scratch tree, native retirement evidence
+and the pre-reset SQLite database under
+`output/.previous/iter10-reset-1794112277164857869/`. Earlier compound rows matched
+their pre-reset SHA-256; database integrity and foreign keys passed. Restarted a
+single iteration-10 supervisor from Generate; its log is `restart.log` in that
+archive. Completion of new scientific calculations is not established here.
+
+**Verification:** 100 focused CReM/workspace/timeout-result tests passed, including
+backup preservation, earlier-iteration and ID-sequence preservation, rejected
+unsafe resets and rollback after an injected deletion failure. Mock tests do not
+validate scientific calculations.
+
+## Retain real Glide scores from timed-out native jobs (2026-11-08)
+
+**Confirmed user request:** save the Glide energies available when a job fails
+at the 30-minute timeout. This supersedes the prior discard-all-timeout-output
+policy. It does not authorize invented energies, unconstrained redocking or
+resetting submitted jobs.
+
+**Implementation:** persist timeout intent, request native `jsc stop` with
+output preservation (without immediate --force), and wait for the parent and
+every child to become terminal. Download the known tree into JobId-scoped
+`timeout-results` directories, retaining identities and source checksums. Never
+use stale group caches as recovery inputs. Extract only fully decoded poses
+with finite native `r_i_docking_score` and allowed original compound IDs. Select
+the lowest score and its corresponding pose across LigPrep states/child files.
+Unreadable compressed tails may retain previously decoded complete structures;
+record read errors explicitly. The standalone extractor performs no docking.
+
+The independent Glide worker enrolls pending timeout trees in SQLite before
+slow recovery I/O, including legacy rows already marked failed. Publish valid
+poses before atomically committing scores and completing the collection gate.
+Unscored members remain failed with failed_stage=glide and a timeout message.
+Persist native timeout provenance in job records and the new non-destructive
+`glide_timeout_collection` ledger. Restore lost job-file acknowledgments from
+committed ledger summaries without resubmission. Driver completion and final
+GBSA candidate claims wait for pending collection; refuse conflicting existing
+scores or imports after downstream scoring/export has started. Existing stage
+ordering, constraints, reference selection and scientific results stay intact.
+
+**Verification:** 156 focused extraction/recovery/claim/restart regressions
+passed after final changes. A broader run reported 2,112 passed, seven skipped
+and the documented unrelated real-fragment collision test failure. Compileall,
+editable installation, package/CLI imports and diff checks passed. A separate
+temporary native-MAE parsing probe matched all 18 existing scores from one
+completed group exactly; no scientific calculation was performed by that probe.
+Mock native outputs do not validate docking accuracy.
+
+**Operational result:** paused only the old local loop/supervisor while retaining
+submitted jobs, and backed up SQLite plus native records under
+`output/.previous/iter10-timeout-recovery-1794111219524642092/`. Recovered the
+five already force-stopped iter10 groups without resubmission: JobServer had
+no downloadable pose outputs, so no timeout energies could be recovered and
+none were fabricated. Their collection attempts were acknowledged. Retained
+all 14 previously stored scores; a remaining normally completed group supplied
+18 more, leaving 32 scored compounds. Resumed a single iter10 supervisor with
+its log in that archive directory; it advanced to Amber for those 32 compounds.
+Existing native JobIds and all prior scientific scores were preserved.
+
+
 ## Collect native Python cache during final MD cleanup (2026-11-08)
 
 **Observed bug:** after iter09 committed all 24 ensembles, final run cleanup

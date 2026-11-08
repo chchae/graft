@@ -98,7 +98,7 @@ def test_changed_input_never_deletes_live_or_uncertain_job_artifacts(tmp_path):
 
 
 @pytest.mark.parametrize('timeout', [0, 1800])
-def test_stage_does_not_import_partial_output_or_mark_failed_from_child_log(tmp_path,monkeypatch,timeout):
+def test_stage_does_not_import_stale_output_or_mark_failed_from_child_log(tmp_path,monkeypatch,timeout):
     import sqlite3
     from graft import _core as c
     db=tmp_path/'results.sqlite'
@@ -118,7 +118,9 @@ def test_stage_does_not_import_partial_output_or_mark_failed_from_child_log(tmp_
         {'jobId': 'new', 'status': 'STOPPED' if stopped else 'RUNNING',
          'timeStarted': '1970-01-01T00:00:10Z'}])
     def native_stop(command, **kw):
-        assert command == ['/suite/jsc', 'stop', '--force', 'new']
+        if command[1] == 'download':
+            return  # No native output: the old cached group file stays ineligible.
+        assert command == ['/suite/jsc', 'stop', 'new']
         stopped.append(True)
     monkeypatch.setattr(recovery.subprocess, 'run', native_stop)
     monkeypatch.setattr(c,'assign_reference_compounds',lambda *a:None)
@@ -158,14 +160,14 @@ def test_timeout_stops_only_live_tree_and_waits_for_children(tmp_path, monkeypat
         calls.append(command)
     monkeypatch.setattr(recovery.subprocess, 'run', stop)
     assert recovery.group_status('/suite', tmp_path, log, out, [], timeout_seconds=1800) == 'RUNNING'
-    assert calls == [['/suite/jsc', 'stop', '--force', *(['parent'] if parent_status == 'RUNNING' else []), 'child']]
+    assert calls == [['/suite/jsc', 'stop', *(['parent'] if parent_status == 'RUNNING' else []), 'child']]
     # Worker restart with the timeout disabled still reconciles the saved stop.
     assert recovery.group_status('/suite', tmp_path, log, out, [], timeout_seconds=0) == 'RUNNING'
     assert len(calls) == 1
     jobs[0]['status'] = 'STOPPED'
     jobs[1]['status'] = 'STOPPED'
     assert recovery.group_status('/suite', tmp_path, log, out, [], timeout_seconds=0) == 'STOPPED'
-    assert len(calls) == 1  # Stale/partial output was never downloaded or imported.
+    assert len(calls) == 1  # group_status itself never imports cached output.
     assert '1800s' in glide.failure_reason(tmp_path, 'STOPPED')
 
 

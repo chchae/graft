@@ -719,6 +719,10 @@ def _docking_completion_reason(rows, target_count, conn=None, iteration=None):
         reason = _generation_readiness_reason(conn, iteration, target_count)
         if reason:
             return reason
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_timeout_collection'").fetchone():
+            if conn.execute('SELECT 1 FROM glide_timeout_collection WHERE iteration=? AND completed=0',
+                            (iteration,)).fetchone():
+                return 'Glide timeout result collection pending'
     elif len(rows) < target_count:
         return f"generation incomplete ({len(rows)}/{target_count} compounds)"
     unfinished = sum(state in _PRE_DOCKING_STATES for _, state, _, _ in rows)
@@ -1135,7 +1139,7 @@ def iteration_has_saved_work(path, iteration):
     with connect(path) as conn:
         for table in ('compound', 'iteration_scaffold', 'iteration_combichem',
                       'iteration_combichem_history', 'iteration_sa_selection', 'combichem_batch',
-                      'iteration_crem', 'iteration_workspace', 'iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_fep_selection', 'iteration_md_gbsa_selection'):
+                      'iteration_crem', 'iteration_workspace', 'iteration_druglike_selection', 'iteration_druglike_priority', 'glide_timeout_collection', 'iteration_fep_selection', 'iteration_md_gbsa_selection'):
             if (conn.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?',
                              ('table', table)).fetchone()
                     and conn.execute(f'SELECT 1 FROM {table} WHERE iteration=? LIMIT 1',
@@ -1167,37 +1171,47 @@ def iteration_was_deleted(path, iteration):
         return _deleted_iteration(conn, iteration)
 
 
-def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_deleted_crem=False):
-    """Under all stage locks, back up SQLite/WAL and reset only a deleted iteration.
+def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_deleted_crem=False,
+                            delete_existing_crem=False):
+    """Under all stage locks, back up SQLite/WAL and reset an owned iteration.
 
     The caller verifies native jobs and archives working files. Membership IDs
     must come from saved selection ownership, combichem origins or the original
-    druglike report, never guessed ID ranges. Existing compounds are never removed.
+    druglike report, never guessed ID ranges. Existing compounds are removed only
+    with delete_existing_crem, for an explicitly requested latest-iteration reset.
     allow_deleted_crem is only for explicit user-directed reconciliation after
     native/remote jobs are terminal and archived. Automatic workspace recovery
     never sets it; incomplete, nonempty or provenance-inconsistent runs stop.
     """
     if iteration < 1:
         raise ValueError('Cannot reset iteration zero')
+    if delete_existing_crem and not allow_deleted_crem:
+        raise ValueError('Existing CReM deletion requires explicit CReM reset authorization')
     with connect(path) as conn:
         conn.execute('BEGIN IMMEDIATE')
         crem = _crem_record(conn, iteration)
         crem_ids = set()
+        existing_ids = {row[0] for row in conn.execute('SELECT id FROM compound WHERE iteration=?', (iteration,))}
+        if delete_existing_crem and (crem is None or not existing_ids):
+            raise RuntimeError('Explicit existing reset requires a nonempty frozen CReM iteration')
         if allow_deleted_crem and crem is not None:
             if (crem['state'] != Growth.DONE or not crem['population_count']
-                    or conn.execute('SELECT 1 FROM compound WHERE iteration=? LIMIT 1', (iteration,)).fetchone()):
+                    or (existing_ids and not delete_existing_crem)):
                 raise RuntimeError('Only a fully deleted, completed CReM population can be explicitly reset')
             crem_ids = {row[0] for row in conn.execute(
                 'SELECT compound_id FROM crem_compound_pose WHERE iteration=?', (iteration,))}
             if len(crem_ids) != crem['population_count']:
                 raise RuntimeError('Deleted CReM provenance does not match its frozen population; reset blocked')
+            if delete_existing_crem and existing_ids != crem_ids:
+                raise RuntimeError('Existing CReM population differs from its provenance; reset blocked')
         elif not _deleted_iteration(conn, iteration):
             raise RuntimeError('Iteration is no longer empty/deleted; files and database retained')
         if conn.execute('SELECT 1 FROM compound WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
             raise RuntimeError('Later iteration compounds depend on this iteration; reset blocked')
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if crem_ids:
-            for table in ('iteration_crem', 'iteration_scaffold', 'iteration_md_gbsa_selection', 'iteration_fep_selection'):
+            for table in ('iteration_crem', 'iteration_scaffold', 'iteration_md_gbsa_selection', 'iteration_fep_selection',
+                          'iteration_workspace', 'iteration_druglike_selection', 'glide_timeout_collection'):
                 if table in tables and conn.execute(f'SELECT 1 FROM {table} WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
                     raise RuntimeError('Later saved iteration work depends on this iteration; reset blocked')
         if 'iteration_md_gbsa_selection' in tables and conn.execute('SELECT 1 FROM iteration_md_gbsa_selection WHERE iteration=?',(iteration,)).fetchone():
@@ -1228,8 +1242,10 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
                                'saved selection ownership or compound origins required before reset')
         conn.execute('CREATE TEMP TABLE reset_compound_ids(id INTEGER PRIMARY KEY)')
         conn.executemany('INSERT INTO reset_compound_ids VALUES (?)', ((cid,) for cid in ids))
-        if conn.execute('SELECT 1 FROM compound WHERE id IN (SELECT id FROM reset_compound_ids) '
-                        'OR similar_to IN (SELECT id FROM reset_compound_ids) LIMIT 1').fetchone():
+        if conn.execute('SELECT 1 FROM compound WHERE '
+                        '(id IN (SELECT id FROM reset_compound_ids) AND ?=0) '
+                        'OR (similar_to IN (SELECT id FROM reset_compound_ids) AND iteration!=?) LIMIT 1',
+                        (int(delete_existing_crem), iteration)).fetchone():
             raise RuntimeError('Deleted iteration IDs are referenced by current compounds; reset blocked')
         backup = Path(backup)
         if backup.exists():
@@ -1245,8 +1261,16 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
         for table in ('compound_druglike_selection', 'amber_failure'):
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM reset_compound_ids)')
+        if delete_existing_crem:
+            # Native retirement was verified by the caller. All scientific rows
+            # remain recoverable in the mandatory SQLite backup made above.
+            for table in ('compound_md_gbsa_result', 'md_gbsa_local_cleanup',
+                          'md_gbsa_remote_cleanup', 'score_restart_retry'):
+                if table in tables:
+                    conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM reset_compound_ids)')
+            conn.execute('DELETE FROM compound WHERE id IN (SELECT id FROM reset_compound_ids)')
         for table in ('combichem_compound_origin', 'combichem_batch', 'iteration_combichem_history',
-                      'iteration_combichem', 'iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_sa_selection',
+                      'iteration_combichem', 'iteration_druglike_selection', 'iteration_druglike_priority', 'glide_timeout_collection', 'iteration_sa_selection',
                       'iteration_fep_selection', 'iteration_scaffold', 'iteration_workspace'):
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE iteration=?', (iteration,))
@@ -1310,7 +1334,7 @@ def reset_deleted_crem_iterations(path, iterations, backup):
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         iteration_tables = ('iteration_crem', 'iteration_workspace', 'iteration_scaffold',
                             'iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_sa_selection', 'iteration_fep_selection',
-                            'iteration_md_gbsa_selection', 'md_gbsa_run_cleanup', 'iteration_md_retry_policy', 'iteration_timing',
+                            'iteration_md_gbsa_selection', 'md_gbsa_run_cleanup', 'glide_timeout_collection', 'iteration_md_retry_policy', 'iteration_timing',
                             'stage_timing', 'score_completion_history')
         for table in iteration_tables:
             if table in tables and any(r[0] not in requested for r in conn.execute(
@@ -1936,6 +1960,89 @@ def glide_pending_rows(path, iteration):
             'WHERE iteration=? AND state IN (?,?) AND docking_score IS NULL '
             f'AND similar_to IS NOT NULL ORDER BY {order}',
             (iteration, State.LIGPREPPED, State.GLIDE_RUNNING)).fetchall()
+
+
+def glide_timeout_rows(path, iteration, reference_id):
+    with connect(path) as conn:
+        return conn.execute('SELECT id,name,smiles,similarity FROM compound '
+                            'WHERE iteration=? AND similar_to=?', (iteration, reference_id)).fetchall()
+
+
+def _check_glide_timeout_admission(conn, iteration):
+    if conn.execute('SELECT 1 FROM compound WHERE iteration=? AND '
+                    '(amber_gbsa_score IS NOT NULL OR prime_gbsa_score IS NOT NULL OR '
+                    'md_gbsa_score IS NOT NULL OR fep_score IS NOT NULL OR state IN (?,?,?,?) OR '
+                    "failed_stage IN ('amber_gbsa','prime_gbsa','md_gbsa','fep')) LIMIT 1",
+                    (iteration, State.AMBER_RUNNING, State.PRIME_GBSA_RUNNING,
+                     State.MD_GBSA_RUNNING, State.FEP_RUNNING)).fetchone():
+        raise RuntimeError('Cannot import Glide timeout results after downstream scoring has started')
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_fep_selection'").fetchone():
+        if conn.execute('SELECT 1 FROM iteration_fep_selection WHERE iteration=?', (iteration,)).fetchone():
+            raise RuntimeError('Cannot import Glide timeout results after downstream export has started')
+
+
+def begin_glide_timeout_collection(path, iteration, reference_id, job_id):
+    import json
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.execute('CREATE TABLE IF NOT EXISTS glide_timeout_collection ('
+                     'iteration INTEGER NOT NULL,reference_id INTEGER NOT NULL,job_id TEXT NOT NULL,'
+                     'completed INTEGER NOT NULL DEFAULT 0,summary TEXT,'
+                     'PRIMARY KEY(iteration,reference_id,job_id))')
+        old = conn.execute('SELECT completed,summary FROM glide_timeout_collection '
+                           'WHERE iteration=? AND reference_id=? AND job_id=?',
+                           (iteration, reference_id, job_id)).fetchone()
+        if old and old[0]:
+            return json.loads(old[1])
+        _check_glide_timeout_admission(conn, iteration)
+        conn.execute('INSERT OR IGNORE INTO glide_timeout_collection(iteration,reference_id,job_id) '
+                     'VALUES (?,?,?)', (iteration, reference_id, job_id))
+        return None
+
+
+def validate_glide_timeout_scores(path, iteration, reference_id, scores):
+    with connect(path) as conn:
+        _validate_glide_timeout_scores(conn, iteration, reference_id, scores)
+
+
+def _validate_glide_timeout_scores(conn, iteration, reference_id, scores):
+    _check_glide_timeout_admission(conn, iteration)
+    rows = {row[0]: row[1:] for row in conn.execute(
+        'SELECT id,docking_score,state,failed_stage,failure_message FROM compound '
+        'WHERE iteration=? AND similar_to=?', (iteration, reference_id))}
+    for cid, score in scores.items():
+        if cid not in rows or not math.isfinite(score):
+            raise ValueError('Glide timeout score has a foreign identity or nonfinite value')
+        old, state, stage, message = rows[cid]
+        if old is not None and old != score:
+            raise RuntimeError('Glide timeout result conflicts with an existing scientific score')
+        if old is None and state not in {State.LIGPREPPED, State.GLIDE_RUNNING} and not (
+                state == State.FAILED and stage == 'glide' and (message or '').startswith('Glide job exceeded ')):
+            raise RuntimeError('Glide timeout result belongs to unrelated failed or active work')
+
+
+def store_glide_timeout_scores(path, iteration, reference_id, job_id, scores, timeout_seconds, summary):
+    """Publish real scores and resolve unscored timeout members atomically."""
+    import json
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        _validate_glide_timeout_scores(conn, iteration, reference_id, scores)
+        if not conn.execute('SELECT 1 FROM glide_timeout_collection WHERE iteration=? AND reference_id=? '
+                            'AND job_id=? AND completed=0', (iteration, reference_id, job_id)).fetchone():
+            raise RuntimeError('Glide timeout collection has no pending ownership')
+        for cid, score in scores.items():
+            conn.execute('UPDATE compound SET docking_score=?,state=?,failed_stage=NULL,failure_message=NULL,'
+                         'modified_at=CURRENT_TIMESTAMP WHERE id=? AND docking_score IS NULL',
+                         (score, State.DOCKED, cid))
+        conn.execute('UPDATE compound SET state=?,failed_stage=?,failure_message=?,modified_at=CURRENT_TIMESTAMP '
+                     'WHERE iteration=? AND similar_to=? AND docking_score IS NULL AND '
+                     '(state IN (?,?) OR (state=? AND failed_stage=? AND failure_message LIKE ?))',
+                     (State.FAILED, 'glide', f'Glide job exceeded {timeout_seconds}s; no valid score/pose recovered',
+                      iteration, reference_id, State.LIGPREPPED, State.GLIDE_RUNNING, State.FAILED,
+                      'glide', 'Glide job exceeded %'))
+        conn.execute('UPDATE glide_timeout_collection SET completed=1,summary=? WHERE iteration=? '
+                     'AND reference_id=? AND job_id=?',
+                     (json.dumps(summary, sort_keys=True), iteration, reference_id, job_id))
 
 
 def fresh_glide_references(path, iteration):

@@ -1,5 +1,6 @@
 """Track native Glide identity; cached output never proves a live job finished."""
 import json
+import hashlib
 import re
 import subprocess
 import time
@@ -59,13 +60,14 @@ def enforce_timeout(suite, directory, record, timeout_seconds):
     if not record.get('timeout_requested_at'):
         if started is None or now - started < timeout_seconds:
             return None
-        # Persist intent before stopping; restart must not import partial output.
+        # Persist intent before stopping; collect partial results only after
+        # the native parent and every child have terminated.
         record['timeout_requested_at'] = now
         record['timeout_seconds'] = timeout_seconds
         save_record(directory, record)
     if now - record.get('timeout_stop_sent_at', 0) >= 30:
         # Include live children even if their parent has already terminated.
-        subprocess.run([str(Path(suite) / 'jsc'), 'stop', '--force', *running],
+        subprocess.run([str(Path(suite) / 'jsc'), 'stop', *running],
                        cwd=directory, check=True, capture_output=True, text=True, timeout=30)
         record['timeout_stop_sent_at'] = now
         save_record(directory, record)
@@ -90,9 +92,10 @@ def group_status(suite, directory, log_file, output_file, live=None, timeout_sec
                 record = {'job_id': parent['jobId'], 'recovered': True, 'downloaded': False}
                 save_record(directory, record)
         timeout_status = enforce_timeout(suite, directory, record, timeout_seconds)
-        if timeout_status is not None:
+        if timeout_status is not None and timeout_status != 'STOPPED':
             return timeout_status
-        return 'RUNNING'
+        if timeout_status != 'STOPPED':
+            return 'RUNNING'
     if record is None and log_file.exists():
         match = re.search(r'^JobId\s*:\s*(\S+)', log_file.read_text(errors='replace'), re.MULTILINE)
         if match:
@@ -118,6 +121,53 @@ def group_status(suite, directory, log_file, output_file, live=None, timeout_sec
     if log_file.exists():
         return 'UNKNOWN'
     return None
+
+
+def timeout_pose_files(suite, directory):
+    """Download a stopped tree into fresh JobId-scoped directories.
+
+    Never accept the group's potentially stale cached output as evidence.
+    Download failures retain the durable recovery intent for the next pass.
+    """
+    directory = Path(directory)
+    record = load_record(directory)
+    if not record or not record.get('job_id') or not record.get('timeout_requested_at'):
+        raise RuntimeError('Partial Glide recovery requires a saved timeout JobId')
+    jobs = job_details(suite, record['job_id'], directory)
+    if any(job.get('status') not in TERMINAL for job in jobs):
+        raise RuntimeError('Partial Glide recovery waits for all parent/child jobs to terminate')
+    if not any(job.get('jobId') == record['job_id'] for job in jobs):
+        raise RuntimeError('Partial Glide recovery cannot verify its native parent')
+    downloaded = set(record.get('timeout_downloaded_ids', []))
+    files = []
+    for job in jobs:
+        identity = job['jobId']
+        if not identity or Path(identity).name != identity or identity in {'.', '..'}:
+            raise RuntimeError('Invalid native Glide output identity')
+        folder = directory / 'timeout-results' / identity
+        if (directory / 'timeout-results').is_symlink() or not folder.resolve().is_relative_to(directory.resolve()):
+            raise RuntimeError('Glide timeout output directory points outside its group')
+        folder.mkdir(parents=True, exist_ok=True)
+        if folder.is_symlink():
+            raise RuntimeError('Glide timeout output directory is a symlink')
+        if identity not in downloaded:
+            subprocess.run([str(Path(suite) / 'jsc'), 'download', '--cwd', identity],
+                           cwd=folder, check=True, capture_output=True, text=True, timeout=60)
+            downloaded.add(identity)
+            record['timeout_downloaded_ids'] = sorted(downloaded)
+            save_record(directory, record)
+        for path in sorted(folder.rglob('*.maegz')):
+            if path.name.endswith(('_lib.maegz', '_pv.maegz')):
+                if path.is_symlink() or not path.resolve().is_relative_to(folder.resolve()):
+                    raise RuntimeError('Glide timeout output points outside its native directory')
+                if path.is_file() and path.stat().st_size:
+                    files.append(path)
+    record['timeout_sources'] = [dict(path=str(path.relative_to(directory)),
+        sha256=hashlib.sha256(path.read_bytes()).hexdigest()) for path in files]
+    record['timeout_native_status'] = next(job['status'] for job in jobs if job['jobId'] == record['job_id'])
+    record['downloaded'] = True
+    save_record(directory, record)
+    return files
 
 
 def submit(suite, command, directory):
