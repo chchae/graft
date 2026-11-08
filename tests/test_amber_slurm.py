@@ -108,8 +108,7 @@ def test_slurm_configuration_and_shared_environment(tmp_path):
     assert settings['amber_slurm_time_limit'] == '01:00:00'
     remote = settings['amber_remote']
     assert remote['host'] == 'slurm' and remote['partition'] == 'cpu'
-    assert remote['remote_work_dir'].startswith('/homes1/')
-    assert remote['remote_work_dir'].endswith('/graft-amber-slurm-runs')
+    assert remote['remote_work_dir'] == str(tmp_path/'output/graft-amber-slurm-runs')
     assert 'conda_init' not in remote
     command = amber.environment_command(remote, 'python worker.py')
     assert '/share/opt/amber26/envs/AmberTools26/amber.sh' in command
@@ -400,6 +399,35 @@ def test_parent_collects_other_shard_even_when_one_is_uncertain(project, monkeyp
     monkeypatch.setattr(amber, 'poll', lambda *a: True)
     assert slurm.poll(project, 1, project.output, record)
     assert not (project.output / 'amber_job.json').exists()
+
+
+@pytest.mark.parametrize('mode', [slurm.SINGLE, slurm.ARRAY])
+def test_new_default_work_directory_does_not_retarget_saved_slurm_run(project, monkeypatch, mode):
+    record = child_record(project, mode)
+    old = record['remote_dir']
+    project.amber_remote = dict(project.amber_remote, remote_work_dir=str(project.output/'new-work'))
+    monkeypatch.setattr(slurm, 'job_state', lambda *a: dict(active=True, state='RUNNING'))
+    calls = []
+    def ssh(settings, command, **kwargs):
+        calls.append((settings, command))
+        return SimpleNamespace(stdout=json.dumps(dict(status='running', active=True, results=[])))
+    monkeypatch.setattr(amber, 'ssh', ssh)
+    assert not amber.poll(project, 1, project.output, record)
+    assert record['remote_dir'] == old
+    assert calls and all(settings == record['settings'] and old in command for settings, command in calls)
+    assert not (project.output/'new-work').exists()
+
+
+def test_saved_shards_keep_original_paths_after_default_change(project, monkeypatch):
+    record = legacy_record(project)
+    old = json.loads(json.dumps(record))
+    project.amber_remote = dict(project.amber_remote, remote_work_dir=str(project.output/'new-work'))
+    calls = []
+    monkeypatch.setattr(amber, 'poll', lambda args, iteration, folder, child: calls.append(child) or False)
+    assert not slurm.poll(project, 1, project.output, record)
+    assert calls == old['parts']
+    assert record == old
+    assert (project.output / 'amber_job.json').exists()
 
 
 @pytest.mark.parametrize('count,cpus,throttle', [(50, 384, 50), (500, 384, 384), (4, 2, 2), (1, 1, 1)])

@@ -108,7 +108,7 @@ def resolve_timeouts(record, saved_input, native, snapshot):
 
 def poll(args, iteration, directory, record):
     from graft import amber_gbsa as amber
-    if (record['settings'] != args.amber_remote
+    if (not amber.remote_settings_compatible(record['settings'], args.amber_remote)
             or record['charge_method'] != args.amber_charge_method
             or record['cpus'] != args.amber_cpus):
         raise RuntimeError('Slurm Amber settings changed; recover saved work with its original settings')

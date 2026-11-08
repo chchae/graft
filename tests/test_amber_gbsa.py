@@ -263,6 +263,31 @@ def test_saved_run_rejects_changed_identity(project,monkeypatch):
         amber_gbsa.poll(project,1,directory,record)
 
 
+def test_new_work_directory_preserves_saved_ssh_run(project, monkeypatch):
+    directory, record = make_record(project)
+    original = record['remote_dir']
+    project.amber_remote = dict(project.amber_remote, remote_work_dir=str(project.output/'new-work'))
+    calls = []
+    def ssh(settings, command, **kwargs):
+        calls.append((settings, command))
+        return SimpleNamespace(stdout=json.dumps(dict(status='running', active=True, results=[])))
+    monkeypatch.setattr(amber_gbsa, 'ssh', ssh)
+    assert not amber_gbsa.poll(project, 1, directory, record)
+    assert record['remote_dir'] == original
+    assert calls and all(settings == record['settings'] and original in command for settings, command in calls)
+    assert not (project.output/'new-work').exists()
+
+
+@pytest.mark.parametrize('key', ['host', 'remote_env', 'conda_init'])
+def test_work_directory_compatibility_does_not_allow_other_settings_changes(project, monkeypatch, key):
+    directory, record = make_record(project)
+    project.amber_remote = dict(project.amber_remote, remote_work_dir='/new-work')
+    project.amber_remote[key] = 'changed'
+    monkeypatch.setattr(amber_gbsa, 'ssh', lambda *a, **kw: pytest.fail('Changed scientific/host settings'))
+    with pytest.raises(RuntimeError, match='settings changed'):
+        amber_gbsa.poll(project, 1, directory, record)
+
+
 def test_direct_prime_and_generation_cannot_bypass_saved_amber_run(project,monkeypatch,capsys):
     directory,record=make_record(project)
     database.store_amber_results(project.db_path,1,[{'id':cid,'score':-cid} for cid in range(1,5)],range(1,5))

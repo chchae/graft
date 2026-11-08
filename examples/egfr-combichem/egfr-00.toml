@@ -67,7 +67,7 @@ amber-slurm-partition = "cpu"
 amber-slurm-time-limit = 600       # 초 단위; 화합물당 10분, 큐 대기 제외
 amber-slurm-cpus = 384           # 전체 Amber 작업 합계 상한; 각 단일 노드 작업은 최대 192
 amber-slurm-env = "/share/opt/amber26/envs/AmberTools26"
-# amber-slurm-work-dir = "/homes1/사용자명/graft-amber-slurm-runs"  # 기본값: 현재 사용자별 디렉터리
+# amber-slurm-work-dir 기본값: <out-dir>/graft-amber-slurm-runs (성공한 실행별 폴더는 결과 저장 후 삭제)
 amber-cpus = 124
 amber-receptor = "./output/iter00/08-prime_gbsa/receptor.maegz"
 amber-charge-method = "bcc"

@@ -177,7 +177,7 @@ def load_project_toml(filename):
     return debug_settings(config, {
         **prime_gbsa_local_settings(config),
         **distribution_settings(config),
-        **md_gbsa_settings(config),
+        **md_gbsa_settings(config, base),
         **generation,
         **amber_settings(config, base),
         **prime_gbsa_license_retry_settings(config),

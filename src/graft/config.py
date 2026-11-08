@@ -325,9 +325,10 @@ def distribution_settings(config):
     return {'distribution_report_enabled': enabled}
 
 
-def md_gbsa_settings(config: dict[str, Any]) -> dict[str, Any]:
+def md_gbsa_settings(config: dict[str, Any], base: Path | None = None) -> dict[str, Any]:
     """Validate the optional, separate Desmond/Prime protocol and remote paths."""
-    import getpass
+    base = Path.cwd() if base is None else base
+    output = (base / Path(config.get('out-dir', 'output')).expanduser()).resolve()
     enabled = config.get('md-gbsa', False)
     if not isinstance(enabled, bool):
         raise ValueError('md-gbsa must be a boolean')
@@ -370,7 +371,7 @@ def md_gbsa_settings(config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f'Invalid md-gbsa-{suffix}')
         result['md_gbsa_' + suffix.replace('-', '_')] = value
     for suffix, default in [('schrodinger', '/share/opt/schrodinger/default'),
-                            ('remote-work-dir', f'/homes1/{getpass.getuser()}/graft-md-gbsa-runs'),
+                            ('remote-work-dir', str(output / 'graft-md-gbsa-runs')),
                             ('local-work-dir', '/home1/prime_share'),
                             ('local-schrodinger', '/home/schrodinger/2025-3-IL')]:
         value = config.get('md-gbsa-' + suffix, default)
@@ -545,7 +546,7 @@ def amber_settings(config: dict[str, Any], base: Path) -> dict[str, Any]:
     if ssh_config:
         settings['amber_remote']['ssh_config'] = str((base / Path(ssh_config).expanduser()).resolve())
     if use_slurm:
-        import getpass
+        output = (base / Path(config['out-dir']).expanduser()).resolve()
         cpus = config.get('amber-slurm-cpus', 384)
         if isinstance(cpus, bool) or not isinstance(cpus, int) or not 1 <= cpus <= 384:
             raise ValueError('amber-slurm-cpus must be an integer between 1 and 384')
@@ -553,7 +554,7 @@ def amber_settings(config: dict[str, Any], base: Path) -> dict[str, Any]:
         defaults = {
             'host': 'slurm', 'partition': 'cpu',
             'env': '/share/opt/amber26/envs/AmberTools26',
-            'work-dir': f'/homes1/{getpass.getuser()}/graft-amber-slurm-runs',
+            'work-dir': str(output / 'graft-amber-slurm-runs'),
         }
         # The shared Amber installation has amber.sh but no conda installation.
         settings['amber_remote'].pop('conda_init', None)

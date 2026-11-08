@@ -51,8 +51,8 @@ def cleanup_base(value):
     return path.resolve()
 
 
-def remove_tree(path):
-    """Rename first; restart can finish deletion without reopening scientific work."""
+def retire_tree(path):
+    """Fence the owned tree while its controller locks are still held."""
     tombstone = path.with_name('.collected-' + path.name)
     if path.is_symlink() or tombstone.is_symlink():
         raise RuntimeError('Cleanup tombstone is a symlink')
@@ -60,6 +60,12 @@ def remove_tree(path):
         if tombstone.exists():
             raise RuntimeError('Cleanup target and tombstone both exist')
         path.rename(tombstone)
+    return tombstone
+
+
+def remove_tree(path):
+    """Delete after closing controller files so NFS creates no busy .nfs files."""
+    tombstone = retire_tree(path)
     if tombstone.exists():
         shutil.rmtree(tombstone)
 
@@ -183,7 +189,10 @@ def md(request):
         if request['action'] != 'delete' or digest(archive) != request['archive_sha256']:
             raise RuntimeError('MD evidence was not collected')
         save(receipt, request)
-        remove_tree(root)
+        retire_tree(root)
+    # NFS keeps unlinked open controller files as .nfs* entries. Retire the
+    # original path under lock, then close every lock before removing its tree.
+    remove_tree(root)
     return {'status': 'done', 'request': request}
 
 
@@ -255,7 +264,8 @@ def md_run(request):
                         hashlib.sha256(stream.extractfile(member).read()).hexdigest() != digest(path)):
                     raise RuntimeError('MD run files changed after archival')
         save(receipt, request)
-        remove_tree(root)
+        retire_tree(root)
+    remove_tree(root)
     return {'status': 'done', 'request': request}
 
 

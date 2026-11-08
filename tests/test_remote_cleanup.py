@@ -23,7 +23,7 @@ def write(path, data):
 
 @pytest.fixture
 def amber_run(tmp_path):
-    base = tmp_path / 'amber'
+    base = tmp_path / 'output/graft-amber-slurm-runs'
     root = base / ('run-' + 'a' * 32)
     config = dict(entries=[dict(id=2), dict(id=1)])
     write(root / 'input.json', config)
@@ -41,8 +41,11 @@ def test_amber_deletes_only_owned_completed_run_and_recovers_lost_reply(amber_ru
     root, request = amber_run
     neighbor = root.parent / ('run-' + 'b' * 32)
     write(neighbor / 'active.json', {})
+    permanent = root.parent.parent / 'amber_scores.tsv'
+    permanent.write_text('committed results\n')
     assert native.amber(request)['status'] == 'done'
     assert not root.exists() and neighbor.exists()
+    assert permanent.read_text() == 'committed results\n'
     assert native.amber(request)['status'] == 'done'
 
 
@@ -134,7 +137,7 @@ def test_amber_array_native_activity_or_uncertain_history_blocks_cleanup(amber_r
 
 @pytest.fixture
 def md_run(tmp_path, monkeypatch):
-    base = tmp_path / 'md' / ('a' * 32)
+    base = tmp_path / 'output/graft-md-gbsa-runs' / ('a' * 32)
     root = base / 'CMPID_1'
     journal = dict(job_id='md-parent', downloaded=True, command=['/suite/utilities/multisim'])
     settings = dict(root=str(base), suite='/suite', protocol=dict(snapshots=1), replicates=1,
@@ -296,6 +299,8 @@ def test_completed_md_run_removes_helpers_after_archiving_and_recovers_lost_repl
     root, request, _ = collected_md_run(md_run)
     neighbor = root.with_name('b' * 32)
     write(neighbor / 'ready.json', {})
+    permanent = root.parent.parent / 'md_scores.tsv'
+    permanent.write_text('committed results\n')
     response = native.md_run(request)
     archive = tmp_path / 'run-evidence.tar'
     shutil.copy2(root / 'cleanup-run-evidence.tar', archive)
@@ -304,6 +309,7 @@ def test_completed_md_run_removes_helpers_after_archiving_and_recovers_lost_repl
     request.update(action='delete', archive_sha256=response['sha256'])
     assert native.md_run(request)['status'] == 'done'
     assert not root.exists() and neighbor.exists() and archive.exists()
+    assert permanent.read_text() == 'committed results\n'
     assert native.md_run(request)['status'] == 'done'
 
 
@@ -407,3 +413,44 @@ def test_md_run_database_gate_rejects_partial_or_uncollected_results(md_run, tmp
     with pytest.raises(RuntimeError, match='committed and collected'):
         database.begin_md_run_cleanup(args.db_path, 1, final)
     assert database.md_run_cleanup_record(args.db_path, 1) is None
+
+
+@pytest.mark.parametrize('scope', ['compound', 'run'])
+def test_md_retires_under_lock_but_closes_lock_before_recursive_delete(md_run, monkeypatch, scope):
+    # POSIX /tmp permits deleting open files; explicitly check the lock lifetime
+    # so this also protects NFS, where an open deleted lock becomes a .nfs file.
+    if scope == 'compound':
+        root, request, _ = md_run
+        response = native.md(request)
+        cleanup = native.md
+        relative_lock = Path('replica01/controller.lock')
+    else:
+        root, request, _ = collected_md_run(md_run)
+        response = native.md_run(request)
+        cleanup = native.md_run
+        relative_lock = Path('cleanup-run.lock')
+    request.update(action='delete', archive_sha256=response['sha256'])
+    retire = native.retire_tree
+    remove = native.shutil.rmtree
+    events = []
+
+    def retire_while_locked(path):
+        if path.exists():
+            with (path / relative_lock).open('a') as stream:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            events.append('retire')
+        return retire(path)
+
+    def remove_after_unlock(path):
+        assert not root.exists()
+        with (path / relative_lock).open('a') as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        events.append('remove')
+        return remove(path)
+
+    monkeypatch.setattr(native, 'retire_tree', retire_while_locked)
+    monkeypatch.setattr(native.shutil, 'rmtree', remove_after_unlock)
+    assert cleanup(request)['status'] == 'done'
+    assert events == ['retire', 'remove']
+    assert not root.with_name('.collected-' + root.name).exists()

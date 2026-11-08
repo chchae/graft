@@ -227,6 +227,12 @@ def launch(record):
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
+def remote_settings_compatible(saved, current):
+    """Keep a saved run's work directory when the default for new work changes."""
+    return ({key: value for key, value in saved.items() if key != 'remote_work_dir'} ==
+            {key: value for key, value in current.items() if key != 'remote_work_dir'})
+
+
 def poll(args, iteration, directory, record):
     from graft import amber_slurm
     if record.get('mode') == amber_slurm.MODE:
@@ -243,7 +249,7 @@ def poll(args, iteration, directory, record):
         save(directory / f"{record['run_id']}.completed.json", record)
         (directory / 'amber_job.json').unlink(missing_ok=True)
         return True
-    if record['settings'] != args.amber_remote or record['charge_method'] != args.amber_charge_method:
+    if not remote_settings_compatible(record['settings'], args.amber_remote) or record['charge_method'] != args.amber_charge_method:
         raise RuntimeError('Amber settings changed during a saved run; recover with its original settings')
     if record.get('mode') == amber_slurm.ARRAY and record['cpus'] != args.amber_cpus:
         raise RuntimeError('Slurm Amber CPU limit changed; recover with its original settings')

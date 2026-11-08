@@ -55,6 +55,17 @@ def test_default_alias_does_not_rewrite_existing_native_selection(db):
     assert database.md_gbsa_selection(db, 1)['settings']['suite'] == old['suite']
 
 
+def test_output_work_default_preserves_existing_remote_selection(db, tmp_path):
+    old = dict(protocol=dict(snapshots=20), replicates=1,
+               root='/homes1/user/graft-md-gbsa-runs/old-run',
+               helper='/homes1/user/graft-md-gbsa-runs/old-run/native.py')
+    saved = database.freeze_md_gbsa_selection(db, 1, old, target_count=4, prime_count=4)
+    changed = md_gbsa_settings({'out-dir': 'output'}, tmp_path)['md_gbsa_remote_work_dir']
+    proposed = old | dict(root=changed+'/new-run', helper=changed+'/new-run/native.py')
+    assert database.freeze_md_gbsa_selection(db, 1, proposed, target_count=4, prime_count=4) == saved
+    assert database.md_gbsa_selection(db, 1)['settings'] == old
+
+
 def startup_restart_case(db):
     settings = dict(protocol=dict(snapshots=20), replicates=1, root='/old', helper='/old/native.py',
                     suite='/share/opt/schrodinger/saved-installation', source_sha256='same', helper_sha256='same')

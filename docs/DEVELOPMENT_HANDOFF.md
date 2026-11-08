@@ -1,5 +1,76 @@
 # Graft Development Handoff
 
+## Release NFS controller files before recursive cleanup (2026-11-08)
+
+**Observed bug:** iter09 MD result collection stopped at remote cleanup with
+`OSError: [Errno 39] Directory not empty: replica01`. The adapter removed a
+compound tree while its own controller.lock descriptor was still open. On NFS
+the unlink created a temporary .nfs file, preventing directory removal until
+the adapter exited. The complete-run cleanup held cleanup-run.lock similarly.
+
+**Repair:** split retirement from recursive deletion. Persist the exact cleanup
+receipt and atomically rename the owned tree to its tombstone while holding
+controller locks; close every lock through ExitStack, then recursively remove
+the retired tree. Apply this ordering to both compound and complete MD runs.
+Replay still drains an existing tombstone from its durable receipt. Preserve
+all score/archive/native identity checks, symlink isolation and cleanup gates;
+do not suppress ENOTEMPTY or discard a pending cleanup acknowledgment. No
+scientific helper, protocol, JobId, score or active MD job is reset.
+
+**Verification/outcome:** 201 cleanup/MD/retry/reference regressions passed.
+New tests prove locks are held during retirement and released during removal.
+A tiny disposable folder on the actual Slurm NFS share reproduced errno 39
+and an open-file .nfs entry; the corrected rename/close/delete sequence and
+its replay succeeded there. These probes contained only dummy lock files and
+were removed. Compileall, package/CLI imports and diff checks passed.
+The existing supervisor recovered automatically: iter09 remote cleanup pending
+count and remaining compound tombstones both reached zero. Its 12 already
+committed scores/stds/snapshot counts remained exact. Other MD work continued;
+no new scientific calculation or binding-accuracy validation was performed.
+
+
+## Put new Slurm GBSA work under project output (2026-11-08)
+
+**Confirmed user request:** stop creating Amber Slurm and MD-GBSA work roots
+directly under the Slurm user's home; create them below the project's `output`
+and delete collected GBSA working trees after calculations finish.
+
+**Implementation:** new default Amber Slurm work is
+`<out-dir>/graft-amber-slurm-runs/run-<uuid>` and new MD work is
+`<out-dir>/graft-md-gbsa-runs/<uuid>`. Resolve the project's local `out-dir`
+relative to its TOML, independent of invocation directory, then use its absolute
+shared-filesystem path on Slurm. Pass the TOML base into MD settings validation.
+Explicit absolute remote-work-dir overrides remain remote, with no client-side
+normalization. Prime shared-compute paths and scientific settings remain exact.
+
+Saved MD selections retain their frozen roots. Saved Amber SSH, single/array
+and legacy shard work continues using its saved directory when only the new
+work-directory setting changes; all other saved host/environment/protocol/CPU
+checks remain enforced. Never move a live run, edit its JobId or resubmit work
+to apply a new default. The existing post-commit cleanup removes successful
+owned run trees in the new output location, retaining the project DB, final
+results, logs/archives and small restart receipts. Active/failed/uncertain work
+is retained. Shared parent containers remain under output. No historical home
+folder sweep or live job relocation is authorized by a default-path change.
+
+
+**Verification:** 515 affected configuration, Amber recovery, MD selection
+and post-commit cleanup regressions passed. Full suite: 2,097 passed, seven
+skipped and the previously documented unrelated real-fragment collision test
+failure in `tests/test_combichem_3d.py`. Tests cover TOML-relative/absolute output,
+invocation-directory independence, target isolation, explicit remote overrides,
+saved SSH/Slurm single/array/shard paths and frozen MD roots. Temporary output
+trees verify successful run deletion while preserving final scores and neighbors.
+Editable installation, compileall, package/CLI imports and diff checks passed.
+
+The current EGFR TOML resolves both defaults under
+`examples/egfr-crem-pipeline/output`; read-only SSH confirmed that Slurm sees the
+same writable output path. No production database, saved JobId, active run path
+or historical home directory was moved/deleted, and no scientific job was
+submitted. Native calculation accuracy/destructive remote cleanup was not
+validated by these checks.
+
+
 ## Remove fully collected calculation run directories (2026-11-08)
 
 **Confirmed user request:** automatically remove intermediate calculation
