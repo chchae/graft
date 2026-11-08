@@ -30,6 +30,12 @@ def poll(args, iteration, source):
         print('Amber retry already collected; no resubmission.', flush=True)
         return True
     if record is None:
+        ids = database.failed_amber_retry_ids(args.db_path, iteration, original['compound_ids'])
+        cleanup = parent / original['run_id'] / 'remote-cleanup.json'
+        if not ids and cleanup.exists() and json.loads(cleanup.read_text()).get('completed'):
+            # Successful original runs may already have been cleaned remotely.
+            print('No unscored terminal Amber failures to retry.', flush=True)
+            return True
         native = amber_slurm.job_state(parent, original)
         remote = original['remote_dir']
         import shlex
@@ -39,7 +45,6 @@ def poll(args, iteration, source):
             capture_output=True, text=True)
         if native['active'] or json.loads(response.stdout)['active']:
             raise RuntimeError('Original Amber jobs or inherited locks are still active; retry withheld')
-        ids = database.failed_amber_retry_ids(args.db_path, iteration, original['compound_ids'])
         if not ids:
             print('No unscored terminal Amber failures to retry.', flush=True)
             return True

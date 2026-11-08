@@ -1,4 +1,4 @@
-"""Evaluate and freeze drug likeness across the complete generated iteration."""
+"""Assess and prioritize the complete generated iteration without exclusions."""
 import argparse
 import csv
 import os
@@ -7,7 +7,7 @@ import tempfile
 
 from graft.paths import stage_directory
 from graft import _core as c, database
-from graft.chemistry.druglike import filter_druglike
+from graft.chemistry.druglike import rank_druglike
 from graft.stages.generate import store_iteration_descriptors
 from graft.stages._logging import work_started, timed_stage
 
@@ -26,26 +26,28 @@ def _run_stage(args, iteration):
     work_started(f'Iteration {iteration}: assessing drug likeness of all generated database compounds.')
     store_iteration_descriptors(args, iteration)
     if database.druglike_completion_reason(args.db_path, iteration) is not None:
-        selections = filter_druglike(database.druglike_population(args.db_path, iteration))
+        selections = rank_druglike(database.druglike_population(args.db_path, iteration))
         database.apply_druglike_selection(args.db_path, iteration, args.target_count,
-                                          selections, getattr(args, 'sa_accepted_ratio', 1.0))
+                                          selections, priority_only=True)
     rows = database.druglike_report(args.db_path, iteration)
+    priorities = {row['id']: row['druglike_priority'] for row in
+                  rank_druglike(database.druglike_population(args.db_path, iteration))}
     folder = stage_directory(args.output, iteration, 'druglike')
     folder.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=folder, prefix='selection-')
     try:
         with os.fdopen(fd, 'w', newline='') as stream:
             writer = csv.writer(stream, lineterminator='\n')
-            writer.writerow(['id', 'smiles', 'rdk_qed', 'rdk_sa_score', 'rdk_ro5_violations', 'passed', 'reason'])
-            writer.writerows(rows)
+            writer.writerow(['id', 'smiles', 'rdk_qed', 'rdk_sa_score', 'rdk_ro5_violations', 'passed', 'reason', 'priority'])
+            writer.writerows((*row, priorities[row[0]]) for row in rows)
         os.replace(temporary, folder / 'druglike_selection.csv')
     finally:
         Path(temporary).unlink(missing_ok=True)
-    print(f'Iteration {iteration}: drug likeness passed={sum(row[-2] for row in rows)}/{len(rows)}.')
+    print(f'Iteration {iteration}: drug likeness eligible={sum(row[-2] for row in rows)}/{len(rows)}; priority: RO5 ascending, QED descending, SA ascending.')
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Iteration-wide drug likeness selection')
+    parser = argparse.ArgumentParser(description='Iteration-wide drug likeness priority')
     parser.add_argument('project_toml', type=Path)
     parser.add_argument('--iteration', type=int, required=True)
     parser.add_argument('--schrodinger', type=Path)

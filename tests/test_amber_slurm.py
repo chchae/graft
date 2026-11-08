@@ -118,7 +118,9 @@ def test_slurm_configuration_and_shared_environment(tmp_path):
 
 
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
+    from graft import remote_cleanup
+    monkeypatch.setattr(remote_cleanup, 'amber', lambda *a: None)
     db = tmp_path / 'test.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)

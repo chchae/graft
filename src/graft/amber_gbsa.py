@@ -233,6 +233,16 @@ def poll(args, iteration, directory, record):
         return amber_slurm.poll(args, iteration, directory, record)
     if record['iteration'] != iteration or record['db_path'] != str(args.db_path.resolve()):
         raise RuntimeError('Saved Amber run belongs to a different project/iteration')
+    intent = directory / record['run_id'] / 'remote-cleanup.json'
+    if intent.exists():
+        # A crash/SSH loss after commit must resume deletion, never repoll or
+        # recreate a scientific run whose remote tree may already be gone.
+        from graft import remote_cleanup
+        remote_cleanup.amber(args, iteration, directory, record)
+        record['finished'] = True
+        save(directory / f"{record['run_id']}.completed.json", record)
+        (directory / 'amber_job.json').unlink(missing_ok=True)
+        return True
     if record['settings'] != args.amber_remote or record['charge_method'] != args.amber_charge_method:
         raise RuntimeError('Amber settings changed during a saved run; recover with its original settings')
     if record.get('mode') == amber_slurm.ARRAY and record['cpus'] != args.amber_cpus:
@@ -288,6 +298,8 @@ def poll(args, iteration, directory, record):
     # A terminal marker plus a released inherited lock establishes completion.
     record['finished'] = True
     download_logs(directory, record)
+    from graft import remote_cleanup
+    remote_cleanup.amber(args, iteration, directory, record)
     save(directory / f"{record['run_id']}.completed.json", record)
     (directory / 'amber_job.json').unlink()
     return True

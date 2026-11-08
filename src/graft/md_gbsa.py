@@ -42,6 +42,15 @@ def response(text):
 
 def remote_call(settings, action, root, *extra):
     helper = settings['helper']
+    if action == 'jobs' and Path(helper).name == 'native.py':
+        # Queue inspection must survive removal of an old run directory.
+        # Stream only the read-only jobs action through the registered suite;
+        # retain its global native queries and any surviving uncertain journals.
+        # Scientific actions still use the exact frozen helper on disk.
+        source = Path(__file__).with_name('md_gbsa_native.py')
+        return ssh(settings['ssh_host'], shlex.join([
+            settings['suite']+'/run', 'python3', '-', 'jobs', root, *extra]),
+            input=source.read_text())
     if action in ('md-status', 'md-start'):
         source = Path(__file__).with_name('md_gbsa_dispatch.py')
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -194,6 +203,9 @@ def run(args, iteration):
     if settings.get('local_compute'):
         from graft import md_gbsa_local
         md_gbsa_local.cleanup_committed(args, iteration, settings, directory)
+    from graft import remote_cleanup
+    remote_cleanup.md(args, iteration, settings, directory)
+    remote_cleanup.md_run(args, iteration, settings, directory)
     database.enable_md_cycle_retries(args.db_path,iteration)
     from graft.score_recovery import recover_md
     recover_md(args,iteration,saved)
@@ -288,6 +300,8 @@ def run(args, iteration):
     database.request_md_cycle_retries(args.db_path,iteration)
     if settings.get('local_compute'):
         md_gbsa_local.cleanup_committed(args, iteration, settings, directory)
+    remote_cleanup.md(args, iteration, settings, directory)
+    remote_cleanup.md_run(args, iteration, settings, directory)
     reason=database.md_gbsa_completion_reason(args.db_path,iteration)
     if reason is None:
         guard.unregister_md_remote(settings)

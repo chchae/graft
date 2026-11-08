@@ -160,10 +160,12 @@ def test_explicit_deleted_crem_reconciliation_backs_up_and_retains_previous_resu
     with database.connect(project.db_path) as conn:
         assert conn.execute('SELECT * FROM compound WHERE iteration=0').fetchall() == earlier
         assert conn.execute('SELECT COUNT(*) FROM crem_compound_pose WHERE iteration=1').fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM iteration_druglike_priority WHERE iteration=1').fetchone()[0] == 0
         assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
     assert database.crem_generation(backup, 1) == before
     with sqlite3.connect(backup) as conn:
         assert conn.execute('SELECT COUNT(*) FROM crem_compound_pose').fetchone()[0] == before['population_count']
+        assert conn.execute('SELECT COUNT(*) FROM iteration_druglike_priority WHERE iteration=1').fetchone()[0] == 1
 
 
 @pytest.mark.parametrize('problem', ['nonempty', 'partial_provenance', 'md_work', 'later_plan'])

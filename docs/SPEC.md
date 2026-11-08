@@ -1,5 +1,188 @@
 # Graft specification
 
+## Remove fully collected calculation run directories (2026-11-08)
+
+**Confirmed user request:** automatically remove intermediate calculation
+folders such as `graft-amber-slurm-runs` and `graft-md-gbsa-runs` after extracting
+the results. Apply deletion to owned per-run trees after durable result
+collection; preserve shared parent containers, project results and recovery
+receipts. Failed, active or uncertain calculations retain their working files.
+
+**Implementation:** retain the existing Amber Slurm/SSH post-commit full-run
+cleanup and successful-compound pruning for partial runs, plus native Prime
+shared-tree collection/cleanup. Extend MD cleanup from compound trajectories to
+the entire UUID run, including helpers, inputs and control files, once every
+selected score is finite and every individual remote/local collection is
+acknowledged. This supersedes the earlier policy of retaining a successful MD
+run's helper/input directory. Historical scores without individual cleanup
+acknowledgments do not enroll old runs for automatic deletion.
+
+Before deleting an MD run, archive its remaining files under the iteration's
+`09-md_gbsa/remote-cleanup/run-evidence.tar`; verify transport checksum and that
+the working files still match the archive. Require exact frozen selection,
+compound cleanup receipts, terminal DONE native parents/children, no leftover
+compound/foreign work and no symlinks. Save the run cleanup intent in SQLite
+using an atomic recheck of all score/collection commits. Stage completion and
+advancement wait for acknowledgment of an enrolled intent. A durable remote
+receipt and tombstone rename recover interrupted removal or lost SSH replies
+without resubmission. Existing scientific helpers/protocols remain immutable;
+cleanup is an independent operational adapter. Unregister resolved remote
+owners and finish the existing local Prime run cleanup afterward.
+
+
+**Verification:** 455 affected Amber/MD/Prime/native-query regressions passed;
+190 focused cleanup/MD/reference-extension tests passed after the final cleanup
+acknowledgment ordering change. A broader suite run reported 2,084 passed, seven
+skipped and the previously documented unrelated real-fragment collision test
+failure in `tests/test_combichem_3d.py`. Tests use real temporary files/SQLite
+and mocked native status/transport, covering uncommitted/partial results, live
+children, neighbor/symlink isolation, changed archives, interrupted tombstones
+and lost deletion replies. Editable installation, compileall, package/CLI
+imports and diff checks passed. No production sweep, submitted-job cancellation
+or remote destructive smoke test was performed. Existing on-disk scientific
+helpers and live/uncertain work were preserved.
+
+
+## Resume native recovery after removal of historical MD roots (2026-11-08)
+
+**Observed failure:** iter09 supervision stopped at an already completed LigPrep
+stage because the global native query invoked a removed historical MD
+`native.py`. Both registered Slurm MD roots were absent; registrations and
+remote suites remained valid. SQLite already had 13 Glide scores and 1,111
+glide_running compounds. No LigPrep resubmission or compound reset was needed.
+
+**Implementation repair:** for remote MD `jobs` inspection only, stream the
+current standalone native query through the registered Suite's `run python3 -`
+instead of loading a run-owned script. This reads native parents/children and
+any surviving uncertain Prime journals; it creates no run directory, launches no
+scientific job and does not edit frozen helpers or the remote registry. Native
+lookup/SSH failures still block submission. Local Prime retains its existing
+legacy JobControl adapter and journal checks. Scientific actions still invoke
+their original frozen helper. Also scope a stage's live-job completion check to
+its own stage directory: a live Glide job must not prevent a restarted supervisor
+from passing completed LigPrep and reaching the Glide recovery worker. Saved
+launch intents/queues remain checked; cross-project submission exclusion remains.
+
+**Verification/outcome:** 255 remote-query, submission-fence, MD, legacy Prime,
+sequential-supervision, output-path and Glide-recovery regressions passed. Tests
+cover missing roots, live children, surviving uncertain journals, fail-closed
+queries and completed-LigPrep/live-Glide restart. Compileall, imports and diff
+checks passed. Real read-only queries through the registered suites succeeded;
+Glide remained visible and LigPrep completion returned clear. Gracefully
+interrupted only the local supervisor; the user's existing retry loop started
+a new supervisor and iter09 Glide worker. Existing native jobs, DB states, scores,
+registrations and files were retained. Native scoring completion is not claimed.
+
+
+## Explicit deleted iter09 regeneration (2026-11-08)
+
+**Observed evidence and confirmed user request:** current EGFR `output` lost all
+1,127 iter09 compound rows and its directory while frozen CReM/priority/pose
+metadata remained. The population guard correctly blocked restart. The user
+requested regeneration and explicitly authorized stopping remaining iter09 Glide
+jobs. Native inspection found two live parents and their remaining children.
+
+**Operational recovery:** verified native `jsc stop` options, stopped only the
+two iter09 parents, confirmed both parents and all 100 children terminal, and
+downloaded available outputs into
+`output/.previous/iter09-user-deleted-1794099988880631867/`. Under driver/all-stage
+locks, backed up SQLite/WAL, tested the existing explicit deleted-CReM reset on
+an isolated copy, then removed only orphan iter09 metadata, including its priority
+marker. The full population guard remains unchanged. Iter0–8 compound checksum
+was unchanged before/after reset and regeneration; integrity/FK checks passed.
+
+Ran the independent generation worker from the same eight iter8 MD-ranked
+parents: 1,925 attempts, 1,127 unique accepted structures, stop=exhausted, saved
+CReM state=done. This exhausted the available search below target-count=10,000;
+no target was changed or population completion fabricated. Independent druglike
+assessment admitted all 1,127 with processing priorities. Driver selection now
+returns 9 and LigPrep readiness is clear. No new LigPrep/Glide job was submitted.
+
+**Verification:** 93 CReM/workspace/priority regressions passed, including backup
+preservation and removal of the priority marker during explicit deleted-iteration
+reset. Compileall, imports and diff checks passed. Real generation completed;
+this is not validation of binding affinity or subsequent docking/GBSA results.
+
+
+## Drug likeness as processing priority (2026-11-08, latest requirement)
+
+**Confirmed user request:** use drug likeness to judge priority instead of
+filtering compounds. This supersedes the RO5<=1 gate, half-population QED cutoff
+and optional SA fraction for newly assessed raw-generation iterations.
+
+**Implementation choice:** assess the full frozen population; admit every
+molecule and order preparation by RO5 violation count ascending, QED descending,
+SA ascending and compound ID ascending. Glide reference groups enter the existing
+parallel scheduler in the order of their best pending molecule, retaining group
+membership, native batching/recovery and immediate result persistence. This is
+submission/input ordering, not a guarantee of native completion order.
+Drug likeness does not replace Glide/GBSA top-N ranking or MD-ranked parents.
+`sa-accepted-ratio` remains a legacy compatibility option, ignored by priority
+assessment. Descriptor calculation failures still block admission.
+
+Persist an iteration priority marker alongside the existing complete population
+assessment; all members have passed=1 and no rejection reason. Reports append a
+priority column. Saved historical filters and legacy workspaces remain frozen.
+Explicit conversion of an entirely unstarted latest raw iteration requires caller-
+held driver/all-stage locks, a SQLite backup and no saved external jobs. In one
+transaction archive the previous selection, restore only druglike_rejected rows
+to generated, and admit the full population. Refuse failures, results, downstream
+selections and later saved work; never reset scientific work or mutate older
+iterations. Normal restart does not automatically reopen historical rejections.
+
+
+**Verification:** 183 affected priority, concurrency, restart, workspace, CReM,
+SA and Glide regressions passed after the final changes. A broader suite run
+reported 2,066 passed, seven skipped and the previously documented unrelated
+`test_combichem_3d.py::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself`
+failure. Editable installation, compileall, package/CLI imports and diff checks
+passed. These tests do not validate native scientific calculations.
+
+**Operational application:** the current EGFR pipeline TOML points to `output`,
+whose latest iter09 has 1,127 compounds; the earlier inspected `output-00` has
+140 and remains untouched. Held driver/all-stage locks, verified no downstream
+files, backed up SQLite/WAL and the old report under
+`output/.previous/iter09-druglike-priority-1794098463403319068/`, and first tested
+the conversion on an isolated DB copy. Converted only current iter09's 1,127
+rejections to generated, archived old decisions/timing in SQLite and regenerated
+the report with priority. Earlier compound rows matched their pre-conversion
+checksum; integrity/foreign-key checks passed and LigPrep readiness is clear.
+No external calculation was launched.
+
+
+## Automatic cleanup after committed Amber / MD-GBSA results (2026-11-07)
+
+**Confirmed user request:** automatically remove used Amber work and MD
+trajectories after GBSA scoring finishes. This supersedes the earlier retention
+policy for successfully scored work only; failed/active/uncertain work remains.
+
+**Implementation:** independent workers collect results before deletion. Amber
+requires committed matching finite scores, archived calculation logs, immutable
+input identity, terminal Slurm parent/tasks where applicable, and released
+inherited task locks. Fully successful runs are removed; partial runs remove only
+successful task scratch/ligand trees while retaining failure inputs and completion
+markers required by explicit retry. Keep the active local manifest until cleanup
+is acknowledged. Durable per-run intents/receipts and tombstone renames recover
+lost SSH replies or interrupted removal without relaunching scientific jobs.
+
+MD records pending remote cleanup in SQLite in the score transaction when native
+MD evidence is available. Completion/next-iteration gates wait for acknowledgment.
+After local Prime collection/cleanup, archive MD inputs, frame metadata, logs,
+native journals and final system coordinates under `09-md_gbsa/remote-cleanup/`;
+verify the archive checksum before removing the owned remote compound tree,
+including its trajectories/checkpoints. Verify the original native parent and
+children are DONE and controller locks are released. Keep run-level MD selection,
+helpers and small cleanup receipts; failed compound trajectories are retained.
+Existing historical scores are not retroactively enrolled or recomputed. No
+protocol, frame selection, score, JobId or scientific retry policy is changed.
+
+**Verification:** 721 relevant workflow/DB/cleanup regressions passed (temporary
+SQLite/files with mocked native status/transport), including active/unknown job
+refusal, partial failure preservation, neighbor/symlink isolation, archive checksum
+checks, commit-before-delete ordering, interrupted deletion and lost-reply
+recovery. Compileall, package/CLI imports and diff checks passed. No real scientific
+accuracy or remote destructive smoke test is claimed.
+
 ## Project-specific submission client override (2026-11-06)
 
 **Confirmed user request:** explicitly use a compatible 2026-1 submission client

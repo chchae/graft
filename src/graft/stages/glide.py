@@ -68,17 +68,7 @@ def prepare_glide_files(glide_root, ligprep_file, live=(), suite=None):
 
 def query_groups(iteration, db_path):
     groups = {}
-    with c.open_sqlite(db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT id,name,smiles,similar_to,similarity
-            FROM compound
-            WHERE iteration=? AND state IN ('ligprepped','glide_running')
-              AND docking_score IS NULL
-              AND similar_to IS NOT NULL
-            ORDER BY similar_to,id
-            """, (iteration,)
-        ).fetchall()
+    rows = database.glide_pending_rows(db_path, iteration)
     for cid, name, smiles, refid, sim in rows:
         groups.setdefault(refid, []).append((cid,name,smiles,sim))
     return groups
@@ -214,7 +204,7 @@ def _run_stage(args, ns):
     jobs = []
     unsubmitted = []
     reserved = []
-    for refid, compounds in sorted(groups.items()):
+    for refid, compounds in groups.items():
         ligand_file = group_ligand_files.get(refid)
         if ligand_file is None:
             mark_group(args.db_path, compounds, "failed", failed_stage="glide", message="No LigPrep structures for reference group")
@@ -264,7 +254,8 @@ def _run_stage(args, ns):
     counts = {job['reference_id']: structure_counts.get(str(job['reference_id']), job['input_count'])
               for job, _ in unsubmitted}
     resources = glide_group_resources(getattr(args, 'glide_host', getattr(args, 'host', '')),
-                                      getattr(args, 'glide_cpus', None), counts, reserved)
+                                      getattr(args, 'glide_cpus', None), counts, reserved,
+                                      priority_order=database.uses_druglike_priority(args.db_path, iteration))
     deferred = len(unsubmitted) - len(resources)
     if deferred:
         print(f'Glide: {deferred} reference groups waiting for the shared core budget.', flush=True)

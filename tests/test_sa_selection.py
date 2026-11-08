@@ -104,7 +104,7 @@ def test_ratio_configuration():
     assert sa_accepted_ratio({'sa-accepted-ratio': 1}) == 1
 
 
-def test_new_generation_scores_full_population_then_filters(tmp_path, monkeypatch):
+def test_new_generation_scores_full_population_without_filtering(tmp_path, monkeypatch):
     from graft.chemistry.sa_score import calculate_sa_score
     db = tmp_path / 'new.sqlite'
     with database.connect(db) as conn:
@@ -124,8 +124,8 @@ def test_new_generation_scores_full_population_then_filters(tmp_path, monkeypatc
     with database.connect(db) as conn:
         rows = conn.execute('SELECT smiles,sa_score,state FROM compound ORDER BY sa_score,id').fetchall()
     assert len(rows) == 8
-    assert sum(state == 'generated' for _, _, state in rows) == 3
-    assert sum(state == 'druglike_rejected' for _, _, state in rows) == 5
+    assert sum(state == 'generated' for _, _, state in rows) == 8
+    assert sum(state == 'druglike_rejected' for _, _, state in rows) == 0
     for smiles, score, _ in rows:
         assert score == pytest.approx(calculate_sa_score(smiles))
 

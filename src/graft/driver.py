@@ -309,7 +309,10 @@ def external_completion_reason(args, iteration, stage):
         jobs = guard.active_jobs(args.schrodinger)
     except Exception as exc:
         return f"cannot verify JobServer completion: {exc}"
-    directory = directory.resolve()
+    # A restarted supervisor revisits completed upstream stages. Downstream
+    # native jobs must remain available for their own worker to recover, rather
+    # than holding the supervisor at an already finished LigPrep stage.
+    directory = stage_in_iteration(directory, stage).resolve()
     for job in jobs:
         launch = job.get("spec", {}).get("launchParams", {}).get("launchDirectory")
         belongs = (launch and Path(launch).resolve().is_relative_to(directory)) or (

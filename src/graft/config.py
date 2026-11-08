@@ -680,7 +680,7 @@ def prime_gbsa_job_options(host: str, ligand_count: int) -> list[str]:
     return ["-HOST", hosts, "-NJOBS", str(ligand_count)]
 
 
-def glide_group_resources(host, cpus, counts, reserved=()):
+def glide_group_resources(host, cpus, counts, reserved=(), *, priority_order=False):
     """Share explicit host slots by prepared-ligand count, reserving live jobs.
 
     A missing/uncertain saved host request consumes the full budget until
@@ -716,9 +716,10 @@ def glide_group_resources(host, cpus, counts, reserved=()):
 
     budget = min(sum(available.values()), sum(counts.values()))
     allocation = {ref: 0 for ref in counts}
-    # Give nonempty groups one slot first. If cores are scarce, larger groups
-    # launch first; deferred groups receive slots after native jobs terminate.
-    for ref in sorted(counts, key=lambda ref: (-counts[ref], ref))[:budget]:
+    # Priority iterations admit groups in caller order when cores are scarce.
+    # Preserve the historical largest-group-first policy for saved old work.
+    ordered = list(counts) if priority_order else sorted(counts, key=lambda ref: (-counts[ref], ref))
+    for ref in ordered[:budget]:
         allocation[ref] = 1
     remaining = budget - sum(allocation.values())
     while remaining:

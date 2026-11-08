@@ -16,7 +16,11 @@ from graft.states import CompoundState as State
 
 
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
+    # These tests isolate Amber state/claim recovery; cleanup transport has its
+    # own real-filesystem regressions in test_remote_cleanup.py.
+    from graft import remote_cleanup
+    monkeypatch.setattr(remote_cleanup, 'amber', lambda *a: None)
     db = tmp_path / 'project.sqlite'
     with sqlite3.connect(db) as conn:
         _core.create_sqlite_schema(conn)

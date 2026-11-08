@@ -38,8 +38,9 @@ def test_generation_commits_all_before_iteration_wide_druglike(raw_project, monk
     druglike._run_stage(args, 1)
     with database.connect(args.db_path) as conn:
         assert conn.execute('SELECT COUNT(*),COUNT(rdk_qed) FROM compound').fetchone() == (4, 4)
-        assert conn.execute("SELECT COUNT(*) FROM compound WHERE state='druglike_rejected'").fetchone()[0] == 2
-    expected = filter_druglike(database.druglike_population(args.db_path, 1))
+        assert conn.execute("SELECT COUNT(*) FROM compound WHERE state='druglike_rejected'").fetchone()[0] == 0
+    from graft.chemistry.druglike import rank_druglike
+    expected = rank_druglike(database.druglike_population(args.db_path, 1))
     pending = database.ligprep_pending_rows(args.db_path, 1, False)
     assert {row[0] for row in pending} == {row['id'] for row in expected if row['druglike_selected']}
     assert database.upstream_completion_reason(args.db_path, 1, 4, 'ligprep') is None

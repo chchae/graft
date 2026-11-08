@@ -1135,7 +1135,7 @@ def iteration_has_saved_work(path, iteration):
     with connect(path) as conn:
         for table in ('compound', 'iteration_scaffold', 'iteration_combichem',
                       'iteration_combichem_history', 'iteration_sa_selection', 'combichem_batch',
-                      'iteration_crem', 'iteration_workspace', 'iteration_druglike_selection', 'iteration_fep_selection', 'iteration_md_gbsa_selection'):
+                      'iteration_crem', 'iteration_workspace', 'iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_fep_selection', 'iteration_md_gbsa_selection'):
             if (conn.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?',
                              ('table', table)).fetchone()
                     and conn.execute(f'SELECT 1 FROM {table} WHERE iteration=? LIMIT 1',
@@ -1152,7 +1152,7 @@ def _deleted_iteration(conn, iteration):
         return False
     if conn.execute('SELECT 1 FROM compound WHERE iteration=? LIMIT 1', (iteration,)).fetchone():
         return False
-    for table in ('iteration_druglike_selection', 'iteration_sa_selection', 'combichem_compound_origin', 'iteration_md_gbsa_selection'):
+    for table in ('iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_sa_selection', 'combichem_compound_origin', 'iteration_md_gbsa_selection'):
         if table in tables and conn.execute(f'SELECT 1 FROM {table} WHERE iteration=? LIMIT 1',
                                             (iteration,)).fetchone():
             return True
@@ -1246,7 +1246,7 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM reset_compound_ids)')
         for table in ('combichem_compound_origin', 'combichem_batch', 'iteration_combichem_history',
-                      'iteration_combichem', 'iteration_druglike_selection', 'iteration_sa_selection',
+                      'iteration_combichem', 'iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_sa_selection',
                       'iteration_fep_selection', 'iteration_scaffold', 'iteration_workspace'):
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE iteration=?', (iteration,))
@@ -1309,8 +1309,8 @@ def reset_deleted_crem_iterations(path, iterations, backup):
             ids.update(owned)
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         iteration_tables = ('iteration_crem', 'iteration_workspace', 'iteration_scaffold',
-                            'iteration_druglike_selection', 'iteration_sa_selection', 'iteration_fep_selection',
-                            'iteration_md_gbsa_selection', 'iteration_md_retry_policy', 'iteration_timing',
+                            'iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_sa_selection', 'iteration_fep_selection',
+                            'iteration_md_gbsa_selection', 'md_gbsa_run_cleanup', 'iteration_md_retry_policy', 'iteration_timing',
                             'stage_timing', 'score_completion_history')
         for table in iteration_tables:
             if table in tables and any(r[0] not in requested for r in conn.execute(
@@ -1328,7 +1328,7 @@ def reset_deleted_crem_iterations(path, iterations, backup):
             with sqlite3.connect(backup) as target:
                 source.backup(target)
         for table in ('compound_md_gbsa_result', 'compound_druglike_selection', 'amber_failure',
-                      'crem_compound_pose', 'md_gbsa_local_cleanup', 'score_restart_retry'):
+                      'crem_compound_pose', 'md_gbsa_local_cleanup', 'md_gbsa_remote_cleanup', 'score_restart_retry'):
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE compound_id IN (SELECT id FROM deleted_crem_ids)')
         for table in iteration_tables:
@@ -1416,6 +1416,42 @@ def druglike_completion_reason(path, iteration):
         return 'iteration-wide drug likeness selection incomplete'
 
 
+def _uses_druglike_priority(conn, iteration):
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_druglike_priority'").fetchone()
+                and conn.execute('SELECT 1 FROM iteration_druglike_priority WHERE iteration=?',
+                                 (iteration,)).fetchone())
+
+
+def uses_druglike_priority(path, iteration):
+    with connect(path) as conn:
+        return _uses_druglike_priority(conn, iteration)
+
+
+def _druglike_order(conn, iteration):
+    if not _uses_druglike_priority(conn, iteration):
+        return 'id'
+    return 'rdk_ro5_violations, rdk_qed DESC, rdk_sa_score, id'
+
+
+def _validate_unstarted_druglike_conversion(conn, iteration):
+    rows = conn.execute('SELECT state,failed_stage,failure_message,docking_score,amber_gbsa_score,'
+                        'prime_gbsa_score,md_gbsa_score,fep_score,synthetic_feasibility '
+                        'FROM compound WHERE iteration=?', (iteration,)).fetchall()
+    if not rows or any(row[0] not in {State.GENERATED, State.DRUGLIKE_REJECTED}
+                       or any(value is not None for value in row[1:]) for row in rows):
+        raise RuntimeError('Cannot reprioritize an iteration with downstream work or failure records')
+    if conn.execute('SELECT 1 FROM compound WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
+        raise RuntimeError('Cannot reprioritize an iteration with later compounds')
+    for table in ('iteration_crem', 'iteration_scaffold', 'iteration_workspace',
+                  'iteration_fep_selection', 'iteration_md_gbsa_selection',
+                  'iteration_sa_selection', 'iteration_combichem', 'iteration_combichem_history'):
+        if conn.execute('SELECT 1 FROM sqlite_master WHERE name=?', (table,)).fetchone():
+            condition = 'iteration>=?' if table in {
+                'iteration_fep_selection', 'iteration_md_gbsa_selection', 'iteration_sa_selection'} else 'iteration>?'
+            if conn.execute(f'SELECT 1 FROM {table} WHERE {condition} LIMIT 1', (iteration,)).fetchone():
+                raise RuntimeError('Cannot reprioritize saved downstream or later iteration work')
+
+
 def druglike_population(path, iteration):
     with connect(path) as conn:
         return [dict(id=cid, smiles=smiles, qed=qed, sa_score=sa, ro5_violations=ro5)
@@ -1431,8 +1467,14 @@ def druglike_report(path, iteration):
                             'WHERE c.iteration=? ORDER BY c.id', (iteration,)).fetchall()
 
 
-def apply_druglike_selection(path, iteration, target_count, selections, sa_ratio=1.0):
-    """Freeze the full population and every exclusion in the same transaction."""
+def apply_druglike_selection(path, iteration, target_count, selections, sa_ratio=1.0,
+                             *, priority_only=False, replace_unstarted=False):
+    """Freeze assessment atomically; priority mode admits the complete population.
+
+    Saved decisions remain unchanged unless explicitly replacing an entirely
+    unstarted latest iteration. Caller must hold driver/all-stage locks and back
+    up SQLite before that explicit conversion; saved jobs must be absent.
+    """
     from graft.config import sa_accepted_ratio
     sa_ratio = sa_accepted_ratio({'sa-accepted-ratio': sa_ratio})
     with connect(path) as conn:
@@ -1448,16 +1490,49 @@ def apply_druglike_selection(path, iteration, target_count, selections, sa_ratio
                              'FROM iteration_druglike_selection WHERE iteration=?', (iteration,)).fetchone()
         if saved:
             _validate_druglike_population(conn, iteration)
-            return saved
+            if not (priority_only and replace_unstarted) or _uses_druglike_priority(conn, iteration):
+                return saved
+            _validate_unstarted_druglike_conversion(conn, iteration)
         if not _uses_raw_generation(conn, iteration):
             return None
         rows = conn.execute('SELECT id,state FROM compound WHERE iteration=? ORDER BY id', (iteration,)).fetchall()
         if _generation_readiness_reason(conn, iteration, target_count):
             raise RuntimeError('Drug likeness waits for the complete generated population')
-        if any(state != State.GENERATED for _, state in rows):
+        allowed = {State.GENERATED, State.DRUGLIKE_REJECTED} if saved else {State.GENERATED}
+        if any(state not in allowed for _, state in rows):
             raise RuntimeError('Drug likeness cannot change an iteration with downstream work')
         if [cid for cid, _ in rows] != [row['id'] for row in selections]:
             raise RuntimeError('Drug likeness population changed before commit')
+        if priority_only:
+            if any(not row['druglike_selected'] for row in selections):
+                raise ValueError('Priority assessment must include every molecule')
+            values = conn.execute('SELECT rdk_ro5_violations,rdk_qed,rdk_sa_score '
+                                  'FROM compound WHERE iteration=?', (iteration,)).fetchall()
+            if any(value is None or not math.isfinite(value) for row in values for value in row):
+                raise RuntimeError('Drug likeness priority requires finite descriptors')
+            conn.execute('CREATE TABLE IF NOT EXISTS iteration_druglike_priority ('
+                         'iteration INTEGER PRIMARY KEY, previous_selection TEXT)')
+            previous = None
+            if saved:
+                import json
+                history = dict(summary=saved, compounds=conn.execute(
+                    'SELECT compound_id,passed,reason,iteration FROM compound_druglike_selection '
+                    'WHERE iteration=? ORDER BY compound_id', (iteration,)).fetchall())
+                for table in ('stage_timing', 'iteration_timing'):
+                    if conn.execute('SELECT 1 FROM sqlite_master WHERE name=?', (table,)).fetchone():
+                        history[table] = conn.execute(f'SELECT * FROM {table} WHERE iteration=?',
+                                                      (iteration,)).fetchall()
+                        condition = " AND stage!='generate'" if table == 'stage_timing' else ''
+                        conn.execute(f'UPDATE {table} SET finished_at=NULL WHERE iteration=?{condition}',
+                                     (iteration,))
+                previous = json.dumps(history)
+                conn.execute('DELETE FROM compound_druglike_selection WHERE iteration=?', (iteration,))
+                conn.execute('DELETE FROM iteration_druglike_selection WHERE iteration=?', (iteration,))
+                conn.execute('UPDATE compound SET state=?,modified_at=CURRENT_TIMESTAMP '
+                             'WHERE iteration=? AND state=?',
+                             (State.GENERATED, iteration, State.DRUGLIKE_REJECTED))
+            conn.execute('INSERT INTO iteration_druglike_priority VALUES (?,?)', (iteration, previous))
+            sa_ratio = 1.0  # SA contributes to ordering, never a population cutoff.
         chosen = [row for row in selections if row['druglike_selected']]
         chosen.sort(key=lambda row: (row['sa_score'], row['id']))
         sa_ids = {row['id'] for row in chosen[:math.ceil(len(chosen) * sa_ratio)]}
@@ -1845,9 +1920,22 @@ def ligprep_pending_rows(path, iteration, synthetic_enabled):
             "AND (state IN (?,?) OR (state=? AND failed_stage='glide' "
             "AND failure_message='No LigPrep structures for reference group' "
             "AND docking_score IS NULL AND prime_gbsa_score IS NULL AND fep_score IS NULL)) "
-            "AND (?=0 OR synthetic_feasibility IS NOT NULL) ORDER BY id",
+            f"AND (?=0 OR synthetic_feasibility IS NOT NULL) ORDER BY {_druglike_order(conn, iteration)}",
             (iteration, State.GENERATED, State.LIGPREP_RUNNING, State.FAILED, int(synthetic_enabled)),
         ).fetchall()
+
+
+def glide_pending_rows(path, iteration):
+    """Priority order also orders reference groups by their best pending molecule."""
+    with connect(path) as conn:
+        order = _druglike_order(conn, iteration)
+        if order == 'id':
+            order = 'similar_to,id'
+        return conn.execute(
+            'SELECT id,name,smiles,similar_to,similarity FROM compound '
+            'WHERE iteration=? AND state IN (?,?) AND docking_score IS NULL '
+            f'AND similar_to IS NOT NULL ORDER BY {order}',
+            (iteration, State.LIGPREPPED, State.GLIDE_RUNNING)).fetchall()
 
 
 def fresh_glide_references(path, iteration):
@@ -2311,6 +2399,12 @@ def ensure_md_gbsa_schema(conn):
     conn.execute('CREATE TABLE IF NOT EXISTS md_gbsa_local_cleanup ('
                  'compound_id INTEGER PRIMARY KEY REFERENCES compound(id), '
                  'iteration INTEGER NOT NULL, completed INTEGER NOT NULL DEFAULT 0)')
+    conn.execute('CREATE TABLE IF NOT EXISTS md_gbsa_remote_cleanup ('
+                 'compound_id INTEGER PRIMARY KEY REFERENCES compound(id), '
+                 'iteration INTEGER NOT NULL, completed INTEGER NOT NULL DEFAULT 0)')
+    conn.execute('CREATE TABLE IF NOT EXISTS md_gbsa_run_cleanup ('
+                 'iteration INTEGER PRIMARY KEY, request TEXT NOT NULL, '
+                 'completed INTEGER NOT NULL DEFAULT 0)')
 
 
 def md_gbsa_selection(path, iteration):
@@ -2420,6 +2514,10 @@ def extend_reference_md_gbsa_selection(path, expected, settings, ids):
             raise RuntimeError('Reference MD extension requires a fresh local run directory')
         if conn.execute('SELECT 1 FROM md_gbsa_local_cleanup WHERE iteration=0 AND completed=0').fetchone():
             raise RuntimeError('Reference MD cleanup is pending; extension blocked')
+        if conn.execute('SELECT 1 FROM md_gbsa_remote_cleanup WHERE iteration=0 AND completed=0').fetchone():
+            raise RuntimeError('Reference MD remote cleanup is pending; extension blocked')
+        if conn.execute('SELECT 1 FROM md_gbsa_run_cleanup WHERE iteration=0 AND completed=0').fetchone():
+            raise RuntimeError('Reference MD run cleanup is pending; extension blocked')
         rows = {r[0]: r for r in conn.execute(
             'SELECT id,md_gbsa_score,state,prime_gbsa_score FROM compound WHERE iteration=0')}
         for cid in saved['ids']:
@@ -2452,6 +2550,11 @@ def md_gbsa_completion_reason(path, iteration, minimum=0):
     selection = md_gbsa_selection(path, iteration)
     if selection is None:
         return 'MD-GBSA candidates have not been selected'
+    if pending_md_remote_cleanup_ids(path, iteration):
+        return 'MD-GBSA remote trajectory cleanup pending'
+    cleanup = md_run_cleanup_record(path, iteration)
+    if cleanup is not None and not cleanup['completed']:
+        return 'MD-GBSA remote run directory cleanup pending'
     with connect(path) as conn:
         rows = {r[0]:r for r in conn.execute('SELECT id,md_gbsa_score,state,failed_stage FROM compound WHERE iteration=?', (iteration,))}
         if selection['settings'].get('local_compute') and conn.execute(
@@ -2509,10 +2612,117 @@ def store_md_gbsa_result(path, iteration, cid, result):
         if settings['settings'].get('local_compute'):
             conn.execute('INSERT OR IGNORE INTO md_gbsa_local_cleanup(compound_id,iteration) VALUES (?,?)',
                          (cid,iteration))
+        if (settings['settings'].get('ssh_host') and result.get('native') and
+                len(result['native']) == settings['settings']['replicates'] and
+                all(r.get('md', {}).get('job_id') for r in result['native'])):
+            conn.execute('INSERT OR IGNORE INTO md_gbsa_remote_cleanup(compound_id,iteration) VALUES (?,?)',
+                         (cid,iteration))
         conn.execute('UPDATE compound SET md_gbsa_score=?,md_gbsa_std=?,md_gbsa_snapshots=?,state=CASE WHEN fep_score IS NOT NULL THEN ? ELSE ? END, '
                      'failed_stage=NULL,failure_message=NULL,modified_at=CURRENT_TIMESTAMP WHERE id=? AND iteration=? '
                      'AND md_gbsa_score IS NULL',
                      (result['mean'],result['std'],len(frames),State.FEP_DONE,State.MD_GBSA_DONE,cid,iteration))
+
+
+def pending_md_remote_cleanup_ids(path, iteration):
+    with connect(path) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='md_gbsa_remote_cleanup'").fetchone():
+            return set()
+        return {r[0] for r in conn.execute(
+            'SELECT compound_id FROM md_gbsa_remote_cleanup WHERE iteration=? AND completed=0', (iteration,))}
+
+
+def md_run_cleanup_record(path, iteration):
+    import json
+    with connect(path) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='md_gbsa_run_cleanup'").fetchone():
+            return None
+        row = conn.execute('SELECT request,completed FROM md_gbsa_run_cleanup WHERE iteration=?',
+                           (iteration,)).fetchone()
+        return dict(request=json.loads(row[0]), completed=bool(row[1])) if row else None
+
+
+def _md_run_cleanup_ready(conn, iteration, selection):
+    """Historical scores alone never authorize deleting an old working tree."""
+    ids = set(selection['ids'])
+    if not ids:
+        return False
+    rows = {row[0]: row[1:] for row in conn.execute(
+        'SELECT c.id,c.md_gbsa_score,r.completed FROM compound c '
+        'JOIN md_gbsa_remote_cleanup r ON r.compound_id=c.id '
+        'WHERE c.iteration=? AND r.iteration=?', (iteration, iteration))}
+    if not all(cid in rows and rows[cid][0] is not None and math.isfinite(rows[cid][0])
+               and rows[cid][1] == 1 for cid in ids):
+        return False
+    if conn.execute('SELECT 1 FROM md_gbsa_local_cleanup WHERE iteration=? AND completed=0',
+                    (iteration,)).fetchone():
+        return False
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='score_restart_retry'").fetchone():
+        if conn.execute("SELECT 1 FROM score_restart_retry WHERE iteration=? AND stage='md_gbsa' "
+                        'AND pending=1', (iteration,)).fetchone():
+            return False
+    return True
+
+
+def md_run_cleanup_ready(path, iteration):
+    selection = md_gbsa_selection(path, iteration)
+    with connect(path) as conn:
+        return selection is not None and _md_run_cleanup_ready(conn, iteration, selection)
+
+
+def begin_md_run_cleanup(path, iteration, request):
+    """Recheck all commits/cleanup acknowledgments and save intent atomically."""
+    import json
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        ensure_md_gbsa_schema(conn)
+        row = conn.execute('SELECT candidates,settings FROM iteration_md_gbsa_selection WHERE iteration=?',
+                           (iteration,)).fetchone()
+        selection = dict(ids=json.loads(row[0]), settings=json.loads(row[1])) if row else None
+        if selection is None or selection != request['selection'] or not _md_run_cleanup_ready(conn, iteration, selection):
+            raise RuntimeError('MD run cleanup requires all selected results committed and collected')
+        encoded = json.dumps(request, sort_keys=True)
+        old = conn.execute('SELECT request FROM md_gbsa_run_cleanup WHERE iteration=?', (iteration,)).fetchone()
+        if old and old[0] != encoded:
+            raise RuntimeError('MD run cleanup intent changed')
+        conn.execute('INSERT OR IGNORE INTO md_gbsa_run_cleanup(iteration,request) VALUES (?,?)',
+                     (iteration, encoded))
+
+
+def finish_md_run_cleanup(path, iteration, request):
+    import json
+    with connect(path) as conn:
+        updated = conn.execute('UPDATE md_gbsa_run_cleanup SET completed=1 WHERE iteration=? AND request=?',
+                               (iteration, json.dumps(request, sort_keys=True))).rowcount
+        if not updated:
+            raise RuntimeError('MD run cleanup acknowledgment does not match saved intent')
+
+
+def md_cleanup_result(path, iteration, cid):
+    import json
+    with connect(path) as conn:
+        row = conn.execute('SELECT r.result,c.md_gbsa_score FROM compound_md_gbsa_result r '
+                           'JOIN compound c ON c.id=r.compound_id WHERE c.id=? AND c.iteration=?',
+                           (cid, iteration)).fetchone()
+        if row and row[1] is not None and math.isfinite(row[1]):
+            result = json.loads(row[0])
+            if result['mean'] == row[1]:
+                return result
+    return None
+
+
+def finish_md_remote_cleanup(path, iteration, cid):
+    with connect(path) as conn:
+        conn.execute('UPDATE md_gbsa_remote_cleanup SET completed=1 WHERE compound_id=? AND iteration=? '
+                     'AND EXISTS (SELECT 1 FROM compound WHERE id=? AND md_gbsa_score IS NOT NULL)',
+                     (cid, iteration, cid))
+
+
+def amber_cleanup_scores(path, iteration, ids):
+    wanted = set(ids)
+    with connect(path) as conn:
+        return {cid: score for cid, score in conn.execute(
+            'SELECT id,amber_gbsa_score FROM compound WHERE iteration=?', (iteration,))
+                if cid in wanted and score is not None and math.isfinite(score)}
 
 
 def finish_md_local_cleanup(path, iteration, cid):

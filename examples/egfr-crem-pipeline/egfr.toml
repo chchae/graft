@@ -32,10 +32,10 @@ mcs-timeout = 300                 # 자동 MCS 탐색 제한(초); 복잡한 eli
 prime-gbsa-elite-count = 10
 
 
-# 3. Drug likeness: 생성된 iteration 전체를 DB에서 평가하고 탈락 이유도 보존
-# RO5 violation <= 1, QED 내림차순·SA 오름차순으로 전체의 최대 절반 통과
+# 3. Drug likeness: 전체 분자를 평가하여 처리 우선순위에 사용 (탈락 없음)
+# RO5 위반 수 오름차순 → QED 내림차순 → SA 오름차순 → compound ID
 sa-score-cpus = 16
-sa-accepted-ratio = 1.0           # 별도 SA 비율 절삭 없음; <1이면 drug likeness 통과군에 추가 적용
+sa-accepted-ratio = 1.0           # legacy 필터 호환 옵션; 새 priority 정책에서는 절삭하지 않음
 
 # 선택적 합성 가능성 평가: Drug likeness 이후, LigPrep 이전; 경로 평가 자체는 필터가 아님
 synthetic-feasibility-enabled = false
@@ -45,7 +45,7 @@ aizynth-remote-env = "/home1/astrazeneca/AiZynthFinder/env"
 aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 
-# 4. LigPrep → constrained Glide: Drug likeness 통과 화합물만 처리
+# 4. LigPrep → constrained Glide: 전체 화합물을 drug likeness 우선순위로 처리
 schrodinger = "/share/opt/schrodinger/2026-1" # submission client compatible with Slurm JobServer
 host = "t41-cpu:128"  # 일반 Prime 등의 기본 host; use-slurm=true이면 LigPrep/Glide는 slurm-cpu
 ligprep-cpus = 124

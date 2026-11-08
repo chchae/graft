@@ -166,6 +166,18 @@ def test_jobserver_lookup_failure_blocks_transition(tmp_path, monkeypatch):
     assert 'cannot verify' in driver.external_completion_reason(args, 3, 'glide')
 
 
+def test_live_glide_does_not_block_completed_ligprep_recovery(tmp_path, monkeypatch):
+    args = project(tmp_path, State.GLIDE_RUNNING)
+    (tmp_path/'iter3/glide/ref_6').mkdir(parents=True)
+    live = {'jobId': 'child', 'status': 'RUNNING', 'spec': {'launchParams': {
+        'launchDirectory': str(tmp_path/'iter3/glide/ref_6')}}}
+    monkeypatch.setattr(guard, 'active_jobs', lambda suite: [live])
+    assert driver.external_completion_reason(args, 3, 'ligprep') is None
+    assert 'still active' in driver.external_completion_reason(args, 3, 'glide')
+    live['spec']['launchParams']['launchDirectory'] = str(tmp_path/'iter3/ligprep')
+    assert 'still active' in driver.external_completion_reason(args, 3, 'ligprep')
+
+
 def test_uncertain_glide_record_and_unretired_prime_queue_block_transition(tmp_path):
     args = project(tmp_path)
     directory = tmp_path/'iter3/glide/ref_6'
