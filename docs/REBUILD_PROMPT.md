@@ -1,5 +1,74 @@
 # Independent Graft reconstruction prompt
 
+## Submit ready MD frames without an all-frame preparation barrier (2026-11-09)
+
+**Confirmed user request:** reduce the gap between a molecule's completed MD
+and starting its ensemble GBSA; start postprocessing as soon as it is ready.
+
+**Observed evidence:** sampled iteration-2 archived journals show about 1m42s
+through 4m43s between MD `finished_at` (successful output collection, not the
+simulation's physical end time) and Prime `started_at` (launch intent, not the
+native computation's exact start). These include extraction/transfer and host
+reservation waits; the samples do not establish one cause for the entire gap.
+The worker prepared every ready molecule's frames serially before attempting
+the first Prime submission, creating an avoidable preparation barrier.
+
+**Implementation:** retain GPU admission/reconciliation first, then prepare and
+attempt Prime submission for each eligible molecule in the same pass. Do not
+wait to extract/transfer every peer before trying the first launch. Native pools
+still combine other already prepared inputs; an active/uncertain parent retains
+its host reservation. The initial pool may contain fewer molecules. Preserve
+cross-project exclusions, configured slot budgets, frozen native commands,
+scientific helpers, MD completion verification, checksummed transport, result
+identity and commit/cleanup rules. Existing jobs are recovered; no job is canceled
+or restarted. This controller change is used by subsequent stage subprocesses;
+polling, frame extraction and resource waits still prevent zero-latency starts.
+
+**Verification:** 213 MD admission, pooling, local transport, native recovery,
+remote-job and retry regressions passed. Tests verify first-ready submission
+before peer preparation, preserved GPU admission priority, single-parent host
+reservation and saved-job recovery. Compileall, package/CLI imports and diff
+checks passed. These are synthetic/mocked tests; no production job was submitted
+or restarted for validation, and the actual reduction in wall time is unmeasured.
+
+
+## CReM limits measure fragment connection depth (2026-11-09)
+
+**Confirmed user requirement:** interpret CReM `reference-mcs` dummy `[*:N]`
+as maximum fragment connection depth N, superseding the earlier cumulative
+fragment-addition budget. Core depth is zero; one attached fragment adds one
+step regardless of atom count. Freeze all growth sites in fragments at depth N.
+Allow H-bearing atoms in shallower fragments to add siblings repeatedly:
+core-A-B-C -> core-A-B(-C)-D -> core-A-B(-C)(-D)-E for N=3.
+C, D and E each remain frozen at depth three. Bare `[*]` remains unlimited;
+`[*:999]` is literal depth 999. Other generation backends retain cycle budgets.
+
+**Implementation:** derive depths from exact saved atom UIDs, fragment identities
+and molecular bonds, requiring a connected fragment tree. Enforce the same site
+policy before methyl probes/CReM enumeration and in assembly. Preserve cumulative
+`growth_counts` as informational addition counters and birth-cycle tags as birth
+cycles. New histories identify `crem_fragment_depth_limits`; retain the historical
+`initial_attachment_max_cycles` storage key for compatibility. For a new pipeline
+plan, clone elite histories and apply current TOML limits only with identical
+core and attachment identities. Never rewrite previous pose histories or frozen
+plans. If limits decrease, retain existing deeper fragments and freeze their
+sites; do not delete atoms or scientific results. Existing implementation/settings
+fingerprints continue to block incompatible unfinished-generation recovery.
+The EGFR pipeline input now uses N-side depth 3 and phenyl-side depth 1.
+
+**Evidence limits:** synthetic graph, CReM and workflow regression tests validate
+branch selection and persistence; they do not establish binding accuracy.
+
+**Verification:** full suite: 2,222 passed, 7 skipped, 3 failed. All three
+failures also reproduce against unchanged HEAD: the known real-fragment clash
+assertion and two MD pending-log expectations. Coverage includes depth-three
+sibling growth past three cumulative additions, frozen-tip assembly rejection,
+multi-atom fragments counting as one step, unlimited/literal-999 limits, UID
+reordering, lowered-limit structure retention and new-plan elite-history
+immutability. Compileall, package/CLI imports and diff checks passed. Production
+calculations and scientific results were not modified for verification.
+
+
 ## MD recovery polling messages only in verbose mode (2026-11-09)
 
 **Confirmed user request:** show recurring MD-GBSA recovery/start banners and
@@ -1014,8 +1083,10 @@ isolated synthetic outputs; existing EGFR results were not removed during testin
 **Confirmed user requirements:** reimplement 3D growth using CReM with the supplied
 `/home1/crem/database/chembl22_sa2_hac12.db`, existing project TOML inputs, local
 multiprocessing and direct SSH execution. The input `reference-mcs` is the fixed
-starting frame. `[*:N]` caps the number of fragment additions originating at that
-attachment, while bare `[*]` is unlimited. Preserve the rest of the frame against
+starting frame. **Historical requirement (superseded for CReM on 2026-11-09):**
+`[*:N]` originally capped cumulative fragment additions. Current CReM limits
+measure fragment connection depth as specified above; bare `[*]` is unlimited.
+Preserve the rest of the frame against
 substitution via CReM `protected_ids`. Before generation, methyl-probe all
 H-bearing sites across the entire active branch and block sites without a passing
 pose. A child adds exactly one fragment and consumes one count on only that root.

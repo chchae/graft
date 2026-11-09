@@ -243,14 +243,10 @@ def run(args, iteration):
            if rows[cid][1] is None and rows[cid][2:]!=(State.FAILED,'md_gbsa')]
     tasks.sort(key=lambda t: str((t[0],t[1])) not in progress)
     admit_md(settings, tasks, progress, status_file)
-    if settings.get('local_compute'):
-        # Make every ready molecule available before admitting a new native
-        # batch. Existing parent commands/jobs are never repartitioned.
-        for cid,replica,root in tasks:
-            if not (md_gbsa_local.task_root(settings,cid,replica)/'input.json').exists():
-                prior=progress.get(str((cid,replica)),{})
-                if prior.get('phase') in ('frames', 'prime'):
-                    md_gbsa_local.poll(settings,cid,replica,root,directory/'adam-results',prepare_only=True)
+    # Prepare and submit each ready molecule in the same pass. Preparing ALL
+    # ready frames first delays the first Prime launch by every peer's extraction
+    # and transfer. The native pool still includes other already prepared inputs,
+    # and retains its host reservation while later molecules become ready.
     for cid,replica,root in tasks:
         key=str((cid,replica)); prior=progress.get(key)
         # Running/uncertain MDs were already polled in the admission pass.

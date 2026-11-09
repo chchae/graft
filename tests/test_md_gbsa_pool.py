@@ -83,6 +83,20 @@ def test_ready_molecule_frames_share_one_native_sixteen_slot_queue(pool):
     assert len(state['commands'])==1
 
 
+def test_first_ready_molecule_launches_while_later_frames_wait_for_host(pool):
+    base,roots,state,helper=pool
+    request=roots[1]/'input.json'
+    config=json.loads(request.read_text())
+    request.unlink()  # The second MD has not finished frame preparation.
+    assert helper.poll(roots[0],Path('/suite'))['status']=='running'
+    first=adapter.pool_binding(roots[0])
+    assert len(json.loads((first/'request.json').read_text())['members'])==1
+    native.save(request,config)
+    assert helper.poll(roots[1],Path('/suite'))['status']=='pending'
+    assert len(state['commands'])==1  # Preserve the native host reservation.
+    assert adapter.pool_binding(roots[1]) is None
+
+
 def test_complete_pool_splits_original_identities_and_survives_collected_member_cleanup(pool):
     base,roots,state,helper=pool
     helper.poll(roots[0],Path('/suite'))

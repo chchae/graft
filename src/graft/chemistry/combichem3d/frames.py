@@ -79,6 +79,31 @@ class ReferencePoses:
         return result
 
 
+def with_crem_depth_limits(history, smarts):
+    """Apply current limits to a new plan's copy of an elite's saved history.
+
+    Previously scored poses and frozen plans remain immutable. Changing the core
+    or its anchor identities requires a new project, rather than remapping UIDs.
+    """
+    query,anchors=frame_query(smarts)
+    if history.get('growth_mode')!='fixed-frame' or history['core_smarts']!=Chem.MolToSmarts(query):
+        raise ValueError('CReM depth limits require the same saved reference core')
+    core={row['core_index']:row['uid'] for row in history['core']}
+    labels={str(i):core[index] for i,index in enumerate(anchors)}
+    if labels!=history['initial_attachment_labels']:
+        raise ValueError('CReM depth limits require the same saved attachment identities')
+    dummies=[a for a in Chem.MolFromSmarts(smarts).GetAtoms() if a.GetAtomicNum()==0]
+    limits={str(i):a.GetAtomMapNum() if a.HasProp('molAtomMapNumber') else None
+            for i,a in enumerate(dummies)}
+    if any(value is not None and value<1 for value in limits.values()):
+        raise ValueError('CReM [*:N] requires positive fragment depths; use [*] for unlimited')
+    result=copy.deepcopy(history)
+    result['initial_attachment_max_cycles']=limits
+    result['initial_attachment_map_values']=dict(limits)
+    result['initial_attachment_notation']='crem_fragment_depth_limits'
+    return result
+
+
 def initial_frame(filename, smarts, *, legacy_limits=None, growth_mode='frame-cycles'):
     references=ReferencePoses(filename,smarts)
     record,source,match,_=references.records[0]
@@ -88,11 +113,11 @@ def initial_frame(filename, smarts, *, legacy_limits=None, growth_mode='frame-cy
     if growth_mode=='fixed-frame':
         dummies=[a for a in source_query.GetAtoms() if a.GetAtomicNum()==0]
         if any(a.HasProp('molAtomMapNumber') and a.GetAtomMapNum()<1 for a in dummies):
-            raise ValueError('CReM [*:N] requires positive growth counts; use [*] for unlimited')
+            raise ValueError('CReM [*:N] requires positive fragment depths; use [*] for unlimited')
         labels=[str(i) for i in range(len(dummies))]
         limits={label:a.GetAtomMapNum() if a.HasProp('molAtomMapNumber') else None
                 for label,a in zip(labels,dummies)}
-        notation='crem_addition_limits'
+        notation='crem_fragment_depth_limits'
     mol=Chem.Mol(source)
     for atom in mol.GetAtoms():
         if atom.GetAtomicNum()>1:

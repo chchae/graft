@@ -117,6 +117,8 @@ def run_stage(args, requested_iteration):
         parents = database.crem_parent_poses(args.db_path, iteration-1, args.elite_count)
         if not parents:
             raise RuntimeError('No finite MD-GBSA elites with saved CReM provenance; generation stopped')
+        parents=[dict(parent,history=frames.with_crem_depth_limits(parent['history'],cfg['reference-mcs']))
+                 for parent in parents]
     fingerprint = _fingerprint(cfg, parents)
     plan = dict(protocol='crem_pipeline_single_expansion_v1',target_count=args.target_count,
                 elite_count=args.elite_count,score_source='md_gbsa',parents=parents,fingerprint=fingerprint)

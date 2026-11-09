@@ -126,8 +126,11 @@ def final_analysis_lines(db):
             for label,uid in h['initial_attachment_labels'].items():
                 used=h.get('growth_counts',{}).get(label)
                 limit=h.get('initial_attachment_max_cycles',{}).get(label,999)
-                lines.append(f"  ROOT {label}: initial_uid={uid} growth_cycles_used={used if used is not None else '이전 기록 없음'} "
-                             f"max_cycles={'unlimited' if limit is None or limit==999 and h.get('growth_mode')!='fixed-frame' else limit} "
+                depth_policy=h.get('initial_attachment_notation')=='crem_fragment_depth_limits'
+                used_label='fragment_additions' if depth_policy else 'growth_cycles_used'
+                limit_label='max_fragment_depth' if depth_policy else 'max_cycles'
+                lines.append(f"  ROOT {label}: initial_uid={uid} {used_label}={used if used is not None else '이전 기록 없음'} "
+                             f"{limit_label}={'unlimited' if limit is None or limit==999 and h.get('growth_mode')!='fixed-frame' else limit} "
                              f"input_map_value={h.get('initial_attachment_map_values',{}).get(label,'이전 기록 없음')} "
                              f"cumulative_selected_sites={h.get('attachment_selection_counts',{}).get(label,'이전 기록 없음')}")
         probes=report.get('probes',{})

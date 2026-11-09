@@ -16,7 +16,7 @@ from graft import database
 from graft.states import PoseVerdict
 from graft.chemistry.combichem3d import history as provenance
 from graft.chemistry.combichem3d.assembly import assemble
-from graft.chemistry.combichem3d.attachment_policy import growth_available, root_for_site
+from graft.chemistry.combichem3d.attachment_policy import fragment_depths, growth_available, root_for_site
 from graft.chemistry.combichem3d.logging_utils import logger
 from graft.chemistry.combichem3d.search import methyl_probe
 
@@ -42,6 +42,7 @@ def candidate_sites(parent, history):
     """One logical site per H-bearing heavy atom, covering every active branch."""
     core={row['uid'] for row in history['core']}
     anchors=set(history['attachments'])
+    depths=fragment_depths(parent,history)
     result=[]
     for atom in parent.GetAtoms():
         if atom.GetAtomicNum()<=1 or atom.GetTotalNumHs(includeNeighbors=True)<1:
@@ -49,7 +50,7 @@ def candidate_sites(parent, history):
         uid=atom.GetProp('_mn_uid')
         if uid in core and uid not in anchors:
             continue
-        if growth_available(history,root_for_site(history,uid)):
+        if growth_available(history,root_for_site(history,uid),depth=depths[uid]):
             result.append(uid)
     return sorted(result)
 

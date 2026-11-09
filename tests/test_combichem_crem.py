@@ -17,7 +17,7 @@ from graft import database
 from graft.config import combichem_3d_settings
 from graft.chemistry.combichem3d import crem_growth, frames, history as provenance
 from graft.chemistry.combichem3d.assembly import assemble
-from graft.chemistry.combichem3d.attachment_policy import growth_available, root_for_site
+from graft.chemistry.combichem3d.attachment_policy import fragment_depths, growth_available
 from graft.chemistry.combichem3d.output import export_results, export_cycle_results
 from graft.stages import combichem_3d as stage
 
@@ -102,37 +102,103 @@ def test_incompatible_protocols_rejected(project,setting,message):
     with pytest.raises(ValueError,match=message):combichem_3d_settings(path)
 
 
-def test_frame_budgets_protection_and_all_branch_atoms(project):
+def test_fragment_depth_caps_freeze_tips_but_allow_siblings(project):
     frame,h=frames.initial_frame(project['parents'],project['reference-mcs'],growth_mode='fixed-frame')
-    assert frame.GetNumHeavyAtoms()==6 # original reference decorations are removed
+    assert frame.GetNumHeavyAtoms()==6
     assert h['initial_attachment_max_cycles']=={'0':1,'1':3}
     assert set(crem_growth.candidate_sites(frame,h))==set(h['attachments'])
-    product,birth=assemble(frame,h,[h['attachments'][0]],['*CC'],'first')
-    assert birth['growth_counts']=={'0':1,'1':0}
-    assert not growth_available(birth,'0')
+    product,birth=assemble(frame,h,[h['attachments'][0]],['*CC'],'root0')
     capped_site=next(a['uid'] for a in birth['atoms'] if a['branch']=='branch_1')
-    with pytest.raises(ValueError,match='cycle limit'):
+    with pytest.raises(ValueError,match='fragment depth limit'):
         assemble(product,birth,[capped_site],['*C'],'forbidden')
-    # Grow the other branch twice; old as well as newest fragment atoms remain eligible.
-    product,birth=assemble(product,birth,[h['attachments'][1]],['*CC'],'second')
-    old_sites=crem_growth.candidate_sites(product,birth)
-    branch_site=next(uid for uid in old_sites if uid not in h['attachments'])
-    product,birth=assemble(product,birth,[branch_site],['*C'],'third')
+    assert capped_site not in crem_growth.candidate_sites(product,birth)
+
+    def grow(site,token):
+        nonlocal product,birth
+        before={a['uid'] for a in birth['atoms']}
+        product,birth=assemble(product,birth,[site],['*C'],token)
+        return next(a['uid'] for a in birth['atoms'] if a['uid'] not in before)
+
+    # Core-A-B-C: depth counts fragment edges, not addition iteration.
+    a=grow(h['attachments'][1],'A')
+    b=grow(a,'B')
+    c=grow(b,'C')
+    assert fragment_depths(product,birth)[c]==3
+    assert c not in crem_growth.candidate_sites(product,birth)
+    with pytest.raises(ValueError,match='fragment depth limit'):
+        assemble(product,birth,[c],['*C'],'too-deep')
+    # B still has H: A-B(-C)-D, then A-B(-C)(-D)-E.
+    d=grow(b,'D')
+    e=grow(b,'E')
+    depths=fragment_depths(product,birth)
+    assert {depths[uid] for uid in (c,d,e)}=={3}
+    assert birth['growth_counts']=={'0':1,'1':5}
     sites=crem_growth.candidate_sites(product,birth)
-    assert branch_site in sites
-    assert all(root_for_site(birth,uid)=='1' for uid in sites)
-    assert birth['growth_counts']=={'0':1,'1':2}
-    product,birth=assemble(product,birth,[branch_site],['*C'],'fourth')
-    assert not crem_growth.candidate_sites(product,birth)
+    assert a in sites and not set((b,c,d,e)) & set(sites)
+    # Persistent UIDs, rather than symmetry or atom order, define ancestry.
+    reordered=Chem.RenumberAtoms(product,list(reversed(range(product.GetNumAtoms()))))
+    assert fragment_depths(reordered,birth)==depths
+
+
+def test_multi_atom_fragment_is_one_depth_step_and_counters_do_not_cap(project):
+    frame,h=frames.initial_frame(project['parents'],project['reference-mcs'],growth_mode='fixed-frame')
+    product,birth=assemble(frame,h,[h['attachments'][1]],['*CCCC'],'long-fragment')
+    depths=fragment_depths(product,birth)
+    assert {depths[a['uid']] for a in birth['atoms'] if a['branch']=='branch_2'}=={1}
+    birth['growth_counts']['1']=1000
+    sites=crem_growth.candidate_sites(product,birth)
+    assert {uid for uid in sites if depths[uid]==1}=={a['uid'] for a in birth['atoms'] if a['branch']=='branch_2'}
 
 
 def test_unmapped_dummy_is_unlimited_and_999_is_literal(project):
     frame,h=frames.initial_frame(project['parents'],'c1([*])ccc([*:999])cc1',growth_mode='fixed-frame')
     assert h['initial_attachment_max_cycles']=={'0':None,'1':999}
     h['growth_counts']={'0':5000,'1':999}
-    assert growth_available(h,'0') and not growth_available(h,'1')
-    with pytest.raises(ValueError,match='positive growth counts'):
+    assert growth_available(h,'0',depth=5000)
+    assert growth_available(h,'1',depth=998) and not growth_available(h,'1',depth=999)
+    with pytest.raises(ValueError,match='requires the site fragment depth'):
+        growth_available(h,'1')
+    with pytest.raises(ValueError,match='positive fragment depths'):
         frames.initial_frame(project['parents'],'c1([*:0])ccc([*:3])cc1',growth_mode='fixed-frame')
+
+
+def test_depth_limits_rebase_only_new_history_and_preserve_existing_pose(project):
+    frame,h=frames.initial_frame(project['parents'],'c1([*:99])ccc([*:99])cc1',growth_mode='fixed-frame')
+    original=json.dumps(h,sort_keys=True)
+    updated=frames.with_crem_depth_limits(h,project['reference-mcs'])
+    assert json.dumps(h,sort_keys=True)==original
+    assert updated['initial_attachment_max_cycles']=={'0':1,'1':3}
+    assert updated['initial_attachment_notation']=='crem_fragment_depth_limits'
+    assert updated['atoms']==h['atoms'] and updated['pose_coordinates']==h['pose_coordinates']
+    with pytest.raises(ValueError,match='same saved reference core'):
+        frames.with_crem_depth_limits(h,'C1([*:1])CCC([*:3])CC1')
+    with pytest.raises(ValueError,match='same saved attachment identities'):
+        frames.with_crem_depth_limits(h,'c1c([*:1])cc([*:3])cc1')
+
+
+def test_depth_rejects_incomplete_uid_provenance(project):
+    frame,h=frames.initial_frame(project['parents'],project['reference-mcs'],growth_mode='fixed-frame')
+    h['atoms'].pop()
+    with pytest.raises(ValueError,match='exact saved atom UID provenance'):
+        crem_growth.candidate_sites(frame,h)
+
+
+def test_lowered_depth_limit_retains_existing_deeper_fragments_but_blocks_growth(project):
+    product,h=frames.initial_frame(project['parents'],project['reference-mcs'],growth_mode='fixed-frame')
+    site=h['attachments'][1]
+    for token in ('A','B','C'):
+        old={a['uid'] for a in h['atoms']}
+        product,h=assemble(product,h,[site],['*C'],token)
+        site=next(a['uid'] for a in h['atoms'] if a['uid'] not in old)
+    before=provenance.canonical_smiles(product)
+    limited=frames.with_crem_depth_limits(h,project['reference-mcs'].replace('[*:3]','[*:2]'))
+    sites=crem_growth.candidate_sites(product,limited)
+    depths=fragment_depths(product,limited)
+    assert max(depths.values())==3
+    assert all(depths[uid]<2 for uid in sites)
+    assert limited['atoms']==h['atoms'] and provenance.canonical_smiles(product)==before
+    with pytest.raises(ValueError,match='fragment depth limit'):
+        assemble(product,limited,[site],['*C'],'blocked')
 
 
 def test_real_crem_candidates_reassemble_at_only_requested_anchor(project):

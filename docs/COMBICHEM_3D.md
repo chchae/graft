@@ -9,11 +9,23 @@ to the existing project TOML and run `graft combichem-3d egfr.toml` as before.
 fragment backend and its protocols below remain separate. `crem-db` supplies the
 CReM database instead of the SMILES `sidechain-library`.
 
-For `c1nc(N[*:1])c2cc(-c3ccc([*:3])cc3)[nH]c2n1`, the N branch allows one
-addition and the phenyl branch three. Numbers are budgets, not atom IDs; repeated
-values are allowed. Bare `[*]` is unlimited and `[*:999]` means exactly 999 in this
+For `c1nc(N[*:1])c2cc(-c3ccc([*:3])cc3)[nH]c2n1`, the N branch allows fragment depth one
+and the phenyl branch depth three. The retained core is depth zero; each newly
+attached fragment is one depth step, regardless of its atom count. A fragment
+at the limit cannot accept another fragment. Shallower fragments may keep adding
+sibling branches at remaining H-bearing positions, even after more than N total
+additions. For example, core-A-B-C can become core-A-B(-C)-D, then
+core-A-B(-C)(-D)-E; C, D and E have depth three and are all frozen. Numbers are
+depth limits, not atom IDs or cumulative addition budgets; repeated values are
+allowed. Bare `[*]` is unlimited and `[*:999]` means exactly depth 999 in this
 backend. `:0` and legacy `initial-attachment-max-cycles` settings are rejected.
 Global `max-iteration` and `max-seconds` still bound all runs.
+For a new scored-pipeline iteration, current TOML limits are applied to a copy
+of each elite history only after checking unchanged core and anchor identities.
+Previously scored poses and frozen plans are retained. Existing fragments already
+deeper than a lowered limit are retained and cannot grow; they are never trimmed.
+An unfinished frozen generation cannot resume across implementation/settings
+changes; complete it with its original version or use verified workspace recovery.
 
 The first compatible reference-pose record supplies the original frame coordinates.
 Original reference decorations are removed. The original frame graph and mapped
@@ -34,7 +46,9 @@ per-product reference-coordinate switching. At each step:
    5–10 heavy atoms per site with a stable per-parent/site seed. Contexts with no
    matches produce no candidates; they never trigger unconditioned substitution.
 4. Each child contains exactly one added fragment, at one site. This increments
-   only its originating branch's count by one. Extract the CReM fragment and
+   only its originating branch's informational addition count by one; the count
+   does not gate growth. Depth comes from saved fragment UIDs and actual bonds,
+   independently of atom order and birth cycle. Extract the CReM fragment and
    require exact canonical isomeric reassembly using the retained atom UIDs.
    No methyl probe remains in a product. Independently generate and optimize the
    full child pose with the core fixed, then check receptor and internal clashes.

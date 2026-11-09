@@ -3,7 +3,7 @@ import hashlib
 import numpy as np
 from rdkit import Chem
 from graft.chemistry.combichem3d.history import frontier_uids, snapshot, tag_atom_cycles
-from graft.chemistry.combichem3d.attachment_policy import root_for_site, growth_available
+from graft.chemistry.combichem3d.attachment_policy import fragment_depths, root_for_site, growth_available
 
 
 def growth_sites(parent, history):
@@ -37,6 +37,7 @@ def assemble(parent, history, sites, choices, token):
     iteration = history['iteration'] + 1
     lineage = hashlib.sha256((history.get('lineage_id','') + '/' + token + '/' + repr(list(zip(sites,choices)))).encode()).hexdigest()
     fragments = []
+    depths=fragment_depths(parent,history) if history.get('growth_mode')=='fixed-frame' else {}
     grown_roots=set()
     label = max((a.GetAtomMapNum() for a in mol.GetAtoms()), default=0) + 1
     rw = Chem.RWMol(mol)
@@ -51,8 +52,9 @@ def assemble(parent, history, sites, choices, token):
             continue
         if history.get('initial_attachment_labels'):
             root=root_for_site(history,site)
-            if not growth_available(history,root):
-                raise ValueError(f'Initial attachment {root} reached its cycle limit')
+            if not growth_available(history,root,depth=depths.get(site)):
+                limit_kind='fragment depth' if depths else 'cycle'
+                raise ValueError(f'Initial attachment {root} reached its {limit_kind} limit')
             grown_roots.add(root)
         fragment = Chem.MolFromSmiles(choice)
         dummies = [a for a in fragment.GetAtoms() if a.GetAtomicNum() == 0]

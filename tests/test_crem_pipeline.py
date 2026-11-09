@@ -113,6 +113,22 @@ def test_next_iteration_uses_md_ranked_elites_and_only_one_addition(project):
         assert conn.execute('SELECT count(*)-count(DISTINCT smiles) FROM compound').fetchone()[0]==0
 
 
+def test_new_iteration_applies_current_depth_limits_without_rewriting_elites(project):
+    args=project
+    path=Path(args.toml_file)
+    current=path.read_text()
+    path.write_text(current.replace('[*:3]','[*:99]'))
+    generate._run_stage(args,1)
+    _score_generation(args,1)
+    before=database.crem_parent_poses(args.db_path,1,args.elite_count)
+    assert all(p['history']['initial_attachment_max_cycles']['1']==99 for p in before)
+    path.write_text(current)
+    generate._run_stage(args,2)
+    parents=database.crem_generation(args.db_path,2)['plan']['parents']
+    assert all(p['history']['initial_attachment_max_cycles']['1']==3 for p in parents)
+    assert database.crem_parent_poses(args.db_path,1,args.elite_count)==before
+
+
 def test_target_caps_raw_candidates_and_keeps_downstream_gates(project):
     args=project;args.target_count=2
     generate._run_stage(args,1)

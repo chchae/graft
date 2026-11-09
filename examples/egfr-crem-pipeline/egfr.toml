@@ -17,7 +17,7 @@ debug = false
 # 1. 프로젝트 입력과 생성 목표
 out-dir = "./output"
 reference-pose = "../egfr-crem/input/egfr-ligands-docked.maegz"
-reference-mcs = "c1nc(N[*:99])c2cc(-c3ccc([*:1])cc3)[nH]c2n1"
+reference-mcs = "c1nc(N[*:3])c2cc(-c3ccc([*:1])cc3)[nH]c2n1"
 dock-grid = "../egfr-crem/input/egfr-grid.zip"
 max-iteration = 10
 # 유효성·중복 제거 후 DB에 저장할 생성 화합물 수. Drug likeness 적용 전 수입니다.
