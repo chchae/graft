@@ -5,6 +5,38 @@ import pytest
 
 from graft import _core
 from graft.config import prime_gbsa_job_options, schrodinger_cpu_settings, schrodinger_job_options
+from graft.config import glide_job_options
+
+
+@pytest.mark.parametrize('count',[1,49,50,51,99,100,101,5000,10001])
+@pytest.mark.parametrize('host',['slurm-cpu:1','slurm-cpu:8','slurm-cpu:128','a:4 b:8','slurm-cpu'])
+def test_glide_subjobs_cap_prepared_structures_without_increasing_host_budget(count,host):
+    options=glide_job_options(host,count)
+    assert options[options.index('-HOST')+1]==host
+    njobs=int(options[options.index('-NJOBS')+1])
+    assert 1 <= njobs <= count
+    assert (count+njobs-1)//njobs <= 100
+    if host=='slurm-cpu:1' or host=='slurm-cpu':
+        assert njobs == (count+99)//100
+    if ':' in host:
+        slots=sum(int(entry.rsplit(':',1)[1]) for entry in host.split())
+        assert njobs >= min(slots,count)
+
+
+@pytest.mark.parametrize('count',[0,-1,True,1.5,'50'])
+def test_invalid_glide_structure_counts(count):
+    with pytest.raises(ValueError,match='ligand_count'):
+        glide_job_options('slurm-cpu:8',count)
+
+
+def test_glide_submission_splits_large_group_into_more_jobs_than_cpu_slots(tmp_path,monkeypatch):
+    from graft import glide_recovery
+    calls=[]
+    monkeypatch.setattr(glide_recovery,'submit',lambda suite,cmd,folder:calls.append(cmd) or 'job')
+    _core.submit_glide(Path('/suite'),tmp_path/'glide.in',tmp_path,'slurm-cpu:8',ligand_count=5000)
+    command=calls[0]
+    assert command[-5:]==['-HOST','slurm-cpu:8','-NJOBS','50','-OVERWRITE']
+    assert '-WAIT' not in command
 
 
 @pytest.mark.parametrize("stage", ["ligprep", "glide", "prime_gbsa"])

@@ -370,7 +370,7 @@ def md_gbsa_settings(config: dict[str, Any], base: Path | None = None) -> dict[s
                 or any(c.isspace() for c in value) or ':' in value):
             raise ValueError(f'Invalid md-gbsa-{suffix}')
         result['md_gbsa_' + suffix.replace('-', '_')] = value
-    for suffix, default in [('schrodinger', '/share/opt/schrodinger/default'),
+    for suffix, default in [('schrodinger', '/share/opt/schrodinger/2026-4'),
                             ('remote-work-dir', str(output / 'graft-md-gbsa-runs')),
                             ('local-work-dir', '/home1/prime_share'),
                             ('local-schrodinger', '/home/schrodinger/2025-3-IL')]:
@@ -665,6 +665,20 @@ def schrodinger_job_options(host: str, cpus: int | None = None,
     return options
 
 
+def glide_job_options(host: str, ligand_count: int, cpus: int | None = None) -> list[str]:
+    """Keep the host budget, splitting prepared structures into batches <=100."""
+    if isinstance(ligand_count, bool) or not isinstance(ligand_count, int) or ligand_count < 1:
+        raise ValueError('Glide ligand_count must be a positive integer')
+    options = schrodinger_job_options(host, cpus, split_jobs=True)
+    minimum = (ligand_count + 99) // 100
+    if '-NJOBS' in options:
+        index = options.index('-NJOBS') + 1
+        options[index] = str(min(ligand_count, max(minimum, int(options[index]))))
+    else:
+        options += ['-NJOBS', str(minimum)]
+    return options
+
+
 def prime_gbsa_job_options(host: str, ligand_count: int) -> list[str]:
     """Queue one ligand per subjob; host slots bound concurrent execution."""
     if isinstance(ligand_count, bool) or not isinstance(ligand_count, int) or ligand_count < 1:
@@ -831,10 +845,10 @@ def remote_reinvent_settings(config: dict[str, Any]) -> dict[str, str] | None:
 
 
 def submission_installation(config: dict[str, Any], base: Path) -> Path | None:
-    """Optional project-local client; remote MD/Prime installations are separate."""
+    """Pin new Slurm clients; explicit and local installations keep precedence."""
     value = config.get('schrodinger')
     if value is None and 'schrodinger' not in config:
-        return None
+        return Path('/share/opt/schrodinger/2026-4') if config.get('use-slurm', False) else None
     if not isinstance(value, str) or not value.strip():
         raise ValueError('schrodinger must be a nonempty local installation path')
     path = Path(value).expanduser()

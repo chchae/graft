@@ -45,12 +45,12 @@ def test_final_prime_selection_is_frozen_before_claim_and_no_refill(db):
     assert 'need 2' in database.md_gbsa_completion_reason(db,1,2)
 
 
-def test_default_alias_does_not_rewrite_existing_native_selection(db):
+def test_versioned_default_does_not_rewrite_existing_native_selection(db):
     old = dict(protocol=dict(snapshots=20), replicates=1, root='/immutable',
                suite='/share/opt/schrodinger/saved-installation')
     saved = database.freeze_md_gbsa_selection(db, 1, old, target_count=4, prime_count=4)
     changed = old | {'suite': md_gbsa_settings({})['md_gbsa_schrodinger']}
-    assert changed['suite'] == '/share/opt/schrodinger/default'
+    assert changed['suite'] == '/share/opt/schrodinger/2026-4'
     assert database.freeze_md_gbsa_selection(db, 1, changed, target_count=4, prime_count=4) == saved
     assert database.md_gbsa_selection(db, 1)['settings']['suite'] == old['suite']
 

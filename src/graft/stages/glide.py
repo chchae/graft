@@ -12,7 +12,7 @@ import sqlite3
 import time
 from graft import _core as c
 from graft import database
-from graft.config import glide_group_resources, schrodinger_job_options
+from graft.config import glide_group_resources, glide_job_options
 from graft.stages._logging import work_started, timed_stage, format_elapsed
 from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
@@ -354,10 +354,10 @@ def _run_stage(args, ns):
         refname = job['reference_name']
         compounds = job['compounds']
         host = resources[refid]
-        options = schrodinger_job_options(host, split_jobs=True)
+        options = glide_job_options(host, counts[refid])
         njobs = options[options.index('-NJOBS') + 1] if '-NJOBS' in options else 'host default'
         print(f"Glide reference {refid}: {counts[refid]} prepared ligands; "
-              f'NJOBS={njobs}, HOST={host}.', flush=True)
+              f'NJOBS={njobs}, HOST={host}; at most 100 prepared structures/subjob.', flush=True)
 
         c.extract_reference_pose(
             args.schrodinger, ref_extractor, args.reference_poses,
@@ -378,7 +378,7 @@ def _run_stage(args, ns):
                 verify_submission_host(args.schrodinger, host)
                 submission_verified = True
             submitted = c.submit_glide(
-                args.schrodinger, inp, gdir, host,
+                args.schrodinger, inp, gdir, host, ligand_count=counts[refid],
             )
         except SubmissionBlocked as exc:
             print(f'Iteration {iteration}: Glide submissions waiting: {exc}.')

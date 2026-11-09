@@ -10,8 +10,14 @@ import uuid
 from graft import database
 from graft.paths import stage_directory
 from graft.states import CompoundState as State
+from graft.stages._logging import progress as log_progress
 
 _dispatch_uploaded = set()
+
+
+def report_pending(reason):
+    """Ordinary compound polling is verbose; operational blockers stay visible."""
+    (log_progress if reason.startswith('MD-GBSA still pending for compound ') else print)(reason)
 
 
 def ssh(host, command, *, input=None, timeout=240):
@@ -113,7 +119,8 @@ def admit_md(settings, tasks, progress, status_file):
         save(status_file, progress)
         if result.get('phase') == 'md' and result.get('status') in ('running', 'pending'):
             active += 1
-        print(f"CMPID_{cid} replica {replica+1}: {result.get('phase','md')} {result['status']}")
+        (print if result['status']=='failed' else log_progress)(
+            f"CMPID_{cid} replica {replica+1}: {result.get('phase','md')} {result['status']}")
 
 
 def settings_for(args, iteration):
@@ -272,7 +279,8 @@ def run(args, iteration):
             print(str(exc)); return
         progress[key]=result
         save(status_file,progress)
-        print(f"CMPID_{cid} replica {replica+1}: {result.get('phase','ensemble')} {result['status']}")
+        (print if result['status']=='failed' else log_progress)(
+            f"CMPID_{cid} replica {replica+1}: {result.get('phase','ensemble')} {result['status']}")
         if result['status']=='failed':
             # Keep the selected compound owned until every submitted replica retires.
             continue
@@ -308,7 +316,7 @@ def run(args, iteration):
         if settings.get('local_compute'):
             md_gbsa_local.finish_cleanup(settings,saved['ids'])
     if reason:
-        print(reason)
+        report_pending(reason)
     else:
         scored=len(set(saved['ids']) & database.completed_md_ids(args.db_path,iteration))
         print(f'MD-GBSA resolved: selected={len(saved["ids"])}, scored={scored}, '

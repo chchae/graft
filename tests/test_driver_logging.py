@@ -115,6 +115,48 @@ def verbosity():
     _logging._log_level.reset(token)
 
 
+@pytest.mark.parametrize('level',[1,2,3])
+@pytest.mark.parametrize('supervised',[False,True])
+def test_md_recovery_banner_is_verbose_but_keeps_work_protocol(monkeypatch,capsys,verbosity,level,supervised):
+    from graft.stages import md_gbsa as stage
+    verbosity(level)
+    monkeypatch.setenv('GRAFT_SUPERVISED','1' if supervised else '0')
+    monkeypatch.setattr(stage.md_gbsa,'run',lambda *a:None)
+    stage._run_stage(object(),6)
+    output=capsys.readouterr().out
+    assert ('recovering or starting Desmond/Prime MD-GBSA' in output)==(level>=2)
+    assert (WORK_STARTED in output)==supervised
+
+
+@pytest.mark.parametrize('level',[1,2,3])
+def test_md_compound_pending_is_verbose_but_blockers_remain_visible(capsys,verbosity,level):
+    from graft.md_gbsa import report_pending
+    verbosity(level)
+    report_pending('MD-GBSA still pending for compound 114732')
+    report_pending('Cannot verify external jobs; submissions withheld: network failure')
+    output=capsys.readouterr().out
+    assert ('still pending for compound' in output)==(level>=2)
+    assert 'Cannot verify external jobs' in output
+
+
+@pytest.mark.parametrize('level',[1,2])
+@pytest.mark.parametrize('rc',[0,1])
+def test_md_supervisor_pending_is_verbose_but_worker_failures_stay_visible(tmp_path,monkeypatch,capsys,verbosity,level,rc):
+    from graft import driver,database
+    from graft.stages import _summary
+    from test_stage_timing import project
+    args=project(tmp_path)
+    verbosity(level)
+    monkeypatch.setattr(driver,'md_stage_required',lambda *a:True)
+    monkeypatch.setattr(driver,'stream_process',lambda *a:rc)
+    monkeypatch.setattr(database,'stage_completion_reason',lambda *a:'MD-GBSA still pending for compound 114732')
+    monkeypatch.setattr(_summary,'md_pending_summary',lambda *a:None)
+    assert not driver.supervise_iteration(args,tmp_path/'p.toml',1,[('md-gbsa','module')],30,driver.StopFlag(),once=True)
+    output=capsys.readouterr().out
+    assert ('md-gbsa pending:' in output)==(level>=2 or rc!=0)
+    if rc:assert 'worker exited with status 1' in output
+
+
 @pytest.mark.parametrize('level', [1, 2, 3, 4])
 def test_console_verbosity_thresholds(verbosity, capsys, level):
     from graft.stages._logging import detail, progress

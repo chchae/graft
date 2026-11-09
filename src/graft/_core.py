@@ -3157,13 +3157,15 @@ REF_LIGAND_FILE {reference_file}
     return glide_input
 
 
-def submit_glide(schrodinger, glide_input, group_dir, host, cpus=None):
+def submit_glide(schrodinger, glide_input, group_dir, host, cpus=None, *, ligand_count=None):
     """Submit a Glide job and return immediately; intentionally no -WAIT."""
-    from graft.config import schrodinger_job_options
+    from graft.config import glide_job_options, schrodinger_job_options
+    options = (glide_job_options(host, ligand_count, cpus) if ligand_count is not None
+               else schrodinger_job_options(host, cpus, split_jobs=True))
     cmd = [
         schrodinger / "glide",
         glide_input,
-        *schrodinger_job_options(host, cpus, split_jobs=True),
+        *options,
         "-OVERWRITE",
     ]
 

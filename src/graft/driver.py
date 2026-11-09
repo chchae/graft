@@ -435,7 +435,9 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
                                  and reason.startswith(('prime_gbsa still running for ',
                                                         'reference prime_gbsa still running for ',
                                                         'Existing Prime claims still running')))
-            report = progress if routine_prime_gbsa_poll else print
+            routine_md_gbsa_poll = (rc == 0 and stage == 'md-gbsa'
+                                   and reason.startswith('MD-GBSA still pending for compound '))
+            report = progress if routine_prime_gbsa_poll or routine_md_gbsa_poll else print
             timing = ''
             if stage == 'md-gbsa':
                 from graft.stages._summary import md_pending_summary

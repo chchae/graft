@@ -1,5 +1,97 @@
 # Graft specification
 
+## MD recovery polling messages only in verbose mode (2026-11-09)
+
+**Confirmed user request:** show recurring MD-GBSA recovery/start banners and
+`MD-GBSA still pending for compound ...` messages only in verbose mode.
+
+**Implementation:** use the existing numeric verbosity policy (default 1,
+verbose >=2). The worker recovery banner uses work_started(level=2), retaining
+its supervision marker and timing signal even when text is hidden. Routine
+per-replica progress and compound-pending output use verbose progress logging;
+failed replica statuses and operational blockers remain visible. The supervisor
+also gates successful ordinary MD compound-pending polls at level 2, while
+nonzero worker exits remain visible at every level. Retain completion summaries,
+tracebacks, native recovery, claims, persistence and polling intervals.
+
+**Verification:** 168 driver-logging, MD and stage-timing tests passed, including
+quiet/verbose worker output, supervised markers, retained errors and supervisor
+pending behavior. Compileall, package/CLI imports and diff checks passed. No
+scientific calculation behavior or current native job was changed.
+
+## Cap new Glide subjobs at 100 prepared structures (2026-11-09)
+
+**Confirmed user request and scope (revised from 50 to 100):** limit each Slurm Glide calculation batch
+to at most 100 structures. Reference-pose grouping remains the scientific grouping;
+the cap applies to native subjobs within each reference group. Count actual
+LigPrep structures so multiple states of one original compound consume separate
+batch entries.
+
+**Implementation:** keep the existing group-weighted HOST CPU-slot allocation.
+For each new reference submission, set NJOBS to at least ceil(prepared_count/100)
+and at least its allocated slots, capped by its structure count. This separates
+the total queued batch count from maximum simultaneous execution. Forward the
+prepared count into the actual submit_glide command, including bare-host cases.
+The installed 2026-4 Glide driver balances explicit NJOBS by floor/remainder
+structure counts. Retain asynchronous submission, constrained docking inputs,
+CMPID identity/state reduction and group-result persistence. Saved native jobs
+are recovered with their original commands; the parent-group timeout policy is
+unchanged. No existing job is canceled or resubmitted to apply this cap.
+
+**Verification:** 148 parallel-allocation, Glide-resource/recovery/timeout tests
+passed, covering 99/100/101 boundaries, multiple/bare hosts, >CPU-slot queue counts,
+prepared-state rather than original-molecule counts, the actual submission
+command and frozen-command recovery. Compileall, package/CLI imports and diff
+checks passed. Mock tests do not validate scientific docking accuracy.
+
+## Explain active remote work during deletion recovery (2026-11-09)
+
+**Observed issue:** iteration 5's rows/output were deleted while its Amber
+array 211070 still had running tasks. Recovery correctly withheld regeneration,
+but formatting CalledProcessError echoed the entire inline SSH program and hid
+the remote cause.
+
+**Implementation:** workspace reconciliation reports the final nonempty remote
+stderr/stdout diagnostic, decoding byte output and bounding its length. Missing
+diagnostics and timeouts have short conservative pending messages without the
+inline command. Apply the same formatting to existing-folder reconciliation.
+Check Amber retirement before expensive historical native queries, so an active
+owned array is reported promptly. Preserve all retirement, ownership, backup and
+transaction gates; never cancel active jobs or reset their population automatically.
+
+**Verification:** 72 deletion/workspace/MD recovery tests passed, including text/
+byte stderr, missing diagnostics, timeout formatting, no inline-program leakage,
+retained metadata and Amber-before-history ordering. Compileall, package/CLI
+imports and diff checks passed. Native inspection confirmed all 500 entries of
+array 211070 belong to the deleted iteration-5 population; existing execution
+continues while Generate waits for retirement. No scientific job was canceled.
+
+## Pin Slurm Schrödinger installations to 2026-4 (2026-11-09)
+
+**Confirmed user request:** use Schrödinger 2026-4 for Slurm work instead of
+the mutable default installation alias. Pin the EGFR CReM project's preparation/
+docking client and remote MD installation to `/share/opt/schrodinger/2026-4`.
+The shared MD default and unspecified Slurm submission-client default use that
+same explicit version. Explicit installation overrides remain supported; local
+non-Slurm defaults and the separate Prime-host installation remain independent.
+Saved native commands and frozen MD selections are never rewritten on restart.
+
+**Operational compatibility:** the installed 2026-4 client uses API v1.21.3,
+while the Slurm JobServer was still 2026-1/v1.19.4. Verified no nonterminal jobs
+across all users, stopped the service, rechecked that gate, and backed up native
+SQLite/WAL, configuration and binaries under
+`/opt/schrodinger/jobserver-backup-2026-4-1794193725262660318/`. Upgraded using the
+vendor's 2026-4 admin tool, restored existing root/group/setuid permissions for
+Slurm helpers, and started the service. Client/server versions now both report
+2026-4 API v1.21.3; CPU/GPU submission compatibility checks passed. All 14,587
+pre-upgrade native job identities and statuses were preserved. Independent
+running Amber jobs were retained; no production calculation was resubmitted.
+
+**Verification:** 266 configuration/MD/native-guard tests and 106 additional
+host-preflight/parallel/CReM/deleted-MD regressions passed. Compileall, package/CLI
+imports and diff checks passed. Tests and read-only native checks do not validate
+real scientific calculations under the new installation.
+
 ## Recover deleted populations with durable MD selections (2026-11-09)
 
 **Observed issue and user intent:** the user again deleted iteration-4 compound

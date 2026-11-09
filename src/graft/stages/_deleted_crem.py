@@ -68,6 +68,7 @@ def reconcile(args, iteration, root):
         md = reconcile_md(context['md'])
     elif stages & {'md-gbsa', 'md_gbsa'}:
         raise RuntimeError('MD selection was deleted; explicit remote reconciliation required')
+    amber = reconcile_amber(args, context, stages)
     command = [str(Path(args.schrodinger)/'jsc'), 'list', '--any-status', '--id-only', '--without-subjobs']
     if context['since'] is not None:
         command += ['--created-after', time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(context['since']-86400))]
@@ -94,6 +95,10 @@ def reconcile(args, iteration, root):
                       for row in rows)
     if stages & {'ligprep', 'glide', 'prime_gbsa', 'prime_gbsa-recovery'} and not native:
         raise RuntimeError('No native history found for the deleted calculation journals')
+    return dict(native=native, amber=amber, md=md)
+
+
+def reconcile_amber(args, context, stages):
     amber = []
     if stages & {'amber-gbsa', 'amber-gbsa-recovery'}:
         if not getattr(args, 'use_slurm', False):
@@ -108,4 +113,4 @@ def reconcile(args, iteration, root):
         amber = json.loads(response.stdout)
         if not amber:
             raise RuntimeError('No surviving Amber ownership/task evidence; recovery withheld')
-    return dict(native=native, amber=amber, md=md)
+    return amber

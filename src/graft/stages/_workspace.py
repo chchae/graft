@@ -17,6 +17,22 @@ class WorkspaceReconciliationPending(RuntimeError):
     """Retain old work until its native/remote retirement is established."""
 
 
+def reconciliation_error(exc):
+    """Show remote diagnostics without echoing an inline SSH program."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        detail = exc.stderr or exc.stdout
+        if not detail:
+            return f'External workspace inspection failed (exit status {exc.returncode}); recovery withheld'
+    elif isinstance(exc, subprocess.TimeoutExpired):
+        return 'External workspace inspection timed out; recovery withheld'
+    else:
+        detail = str(exc)
+    if isinstance(detail, bytes):
+        detail = detail.decode(errors='replace')
+    lines = [line.strip() for line in detail.splitlines() if line.strip()]
+    return lines[-1][-1000:] if lines else 'External workspace inspection failed; recovery withheld'
+
+
 def reconcile_amber_job(path):
     from graft import amber_gbsa as amber, amber_slurm
     record = json.loads(path.read_text())
@@ -72,7 +88,8 @@ def _prepare(args, iteration, deleted):
         try:
             deletion_proof = reconcile(args, iteration, root)
         except Exception as exc:
-            raise WorkspaceReconciliationPending(f'Deleted CReM recovery waiting: {exc}') from exc
+            raise WorkspaceReconciliationPending(
+                f'Deleted CReM recovery waiting: {reconciliation_error(exc)}') from exc
 
     # Configuration inputs must never be relocated while clearing working output.
     for key in ('db_path', 'toml_file', 'grid', 'reference_poses', 'libinvent_prior',
@@ -96,9 +113,7 @@ def _prepare(args, iteration, deleted):
                     proof = reconcile_remote_run(path)
                 remote_evidence[str(path.relative_to(root))] = proof
             except Exception as exc:
-                detail = str(exc)
-                if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
-                    detail = str(exc.stderr)[-1000:]
+                detail = reconciliation_error(exc)
                 raise WorkspaceReconciliationPending(
                     f'Remote work requires reconciliation; files retained: {path}: {detail}') from exc
         if path.name in ('ligprep_job.json', 'glide_job.json', 'prime_gbsa_job.json',

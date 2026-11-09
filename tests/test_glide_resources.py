@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from graft import _core, database
-from graft.config import glide_group_resources, schrodinger_job_options
+from graft.config import glide_group_resources, glide_job_options, schrodinger_job_options
 from graft.glide_recovery import save_record, load_record
 from graft.stages import glide
 
@@ -101,7 +101,7 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
     submitted = {}
     def split(*a):
         # One original compound each, but very different LigPrep state counts.
-        (root / 'ligprep_counts.json').write_text(json.dumps({1: 2, 2: 10, 3: 100}))
+        (root / 'ligprep_counts.json').write_text(json.dumps({1: 2, 2: 10, 3: 1001}))
         files = {}
         for ref in (1, 2, 3):
             directory = root / f'ref_{ref}'
@@ -118,8 +118,11 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
         assert kwargs.get('cpus') is None
         assert host.startswith((stage_host or 'compute')+':')
         submitted[ref] = host
-        options = schrodinger_job_options(host, split_jobs=True)
-        assert int(options[options.index('-NJOBS') + 1]) == requested_slots(host)
+        count = {1: 2, 2: 10, 3: 1001}[ref]
+        assert kwargs['ligand_count'] == count
+        options = glide_job_options(host, count)
+        njobs = int(options[options.index('-NJOBS') + 1])
+        assert (count + njobs - 1) // njobs <= 100
         return {}
     monkeypatch.setattr(_core, 'assign_reference_compounds', lambda *a: None)
     monkeypatch.setattr(_core, 'split_ligprep_by_reference', split)
@@ -136,7 +139,7 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
     else:
         assert requested_slots(submitted[3]) > requested_slots(submitted[2])
         assert sum(requested_slots(host) for host in submitted.values()) == (7 if legacy else 12)
-        assert '100 prepared ligands; NJOBS=' in capsys.readouterr().out
+        assert '1001 prepared ligands; NJOBS=' in capsys.readouterr().out
     if legacy:
         assert load_record(root / 'ref_1') == original_record
     with database.connect(db) as conn:

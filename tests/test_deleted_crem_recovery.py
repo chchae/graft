@@ -95,6 +95,43 @@ def test_native_lookup_failure_is_pending_without_reset(deleted, monkeypatch):
     assert database.crem_generation(deleted.db_path, 1) is not None
 
 
+@pytest.mark.parametrize('diagnostic', [
+    'Traceback (most recent call last):\n  File "<string>", line 25\nRuntimeError: Amber job remains active: 123\n',
+    b'RuntimeError: Amber job remains active: 123\n',
+])
+def test_remote_error_shows_cause_without_inline_program_or_reset(deleted,monkeypatch,diagnostic):
+    def active(*args):
+        raise subprocess.CalledProcessError(1,['ssh','python3 -c INLINE_PROGRAM'],stderr=diagnostic)
+    monkeypatch.setattr(_deleted_crem,'reconcile',active)
+    from graft.stages import generate
+    # The real Generate boundary converts pending reconciliation into a normal
+    # worker return so the supervisor can retry without a traceback.
+    with pytest.raises(WorkspaceReconciliationPending) as error:
+        prepare_iteration_directory(deleted,1)
+    assert str(error.value).endswith('RuntimeError: Amber job remains active: 123')
+    assert 'INLINE_PROGRAM' not in str(error.value)
+    assert 'Traceback' not in str(error.value)
+    assert generate.prepare_workspace(deleted,1) is False
+    assert database.crem_generation(deleted.db_path,1)['population_count']==2
+
+
+def test_remote_error_without_diagnostics_stays_compact():
+    from graft.stages._workspace import reconciliation_error
+    error=subprocess.CalledProcessError(255,['ssh','python3 -c INLINE_PROGRAM'])
+    assert reconciliation_error(error)=='External workspace inspection failed (exit status 255); recovery withheld'
+    assert 'timed out' in reconciliation_error(subprocess.TimeoutExpired(['ssh','INLINE_PROGRAM'],30))
+
+
+def test_active_amber_is_checked_before_native_history_scan(deleted,monkeypatch):
+    database.start_stage_timer(deleted.db_path,1,'amber-gbsa')
+    def active(*a):
+        raise RuntimeError('Amber job remains active: 123')
+    monkeypatch.setattr(_deleted_crem,'reconcile_amber',active)
+    monkeypatch.setattr(_deleted_crem.subprocess,'run',lambda *a,**kw:pytest.fail('queried history before active Amber'))
+    with pytest.raises(WorkspaceReconciliationPending,match='Amber job remains active: 123'):
+        prepare_iteration_directory(deleted,1)
+
+
 def test_later_iteration_metadata_blocks_reset_and_restores_absence(deleted):
     database.mark_iteration_workspace_prepared(deleted.db_path, 2)
     with pytest.raises(WorkspaceReconciliationPending, match='Later saved'):

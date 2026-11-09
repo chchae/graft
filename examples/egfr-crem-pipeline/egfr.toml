@@ -46,7 +46,7 @@ aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
 aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
 
 # 4. LigPrep → constrained Glide: 전체 화합물을 drug likeness 우선순위로 처리
-schrodinger = "/share/opt/schrodinger/2026-1" # submission client compatible with Slurm JobServer
+schrodinger = "/share/opt/schrodinger/2026-4" # Slurm JobServer와 동일한 명시적 버전
 host = "t41-cpu:128"  # 일반 Prime 등의 기본 host; use-slurm=true이면 LigPrep/Glide는 slurm-cpu
 ligprep-cpus = 124
 ligprep-ph = 7.4
@@ -97,7 +97,7 @@ prime-gbsa-license-retries = 3
 
 
 md-gbsa = true
-md-gbsa-schrodinger = "/share/opt/schrodinger/default"
+md-gbsa-schrodinger = "/share/opt/schrodinger/2026-4"
 # md-gbsa-remote-work-dir 기본값: <out-dir>/graft-md-gbsa-runs (완료·결과 보관 확인 후 삭제)
 md-gbsa-input-count = 24  # Prime 점수 상위 24개; 비율 설정보다 우선
 md-gbsa-snapshots = 20  # 추출 목표; NJOBS는 실제 입력 MAEGZ 프레임 수로 결정

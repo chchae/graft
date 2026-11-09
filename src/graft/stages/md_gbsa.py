@@ -7,7 +7,7 @@ from graft.stages._logging import timed_stage, work_started
 
 @timed_stage('MD-GBSA worker')
 def _run_stage(args, iteration):
-    work_started(f'Iteration {iteration}: recovering or starting Desmond/Prime MD-GBSA.')
+    work_started(f'Iteration {iteration}: recovering or starting Desmond/Prime MD-GBSA.', level=2)
     md_gbsa.run(args,iteration)
 
 
