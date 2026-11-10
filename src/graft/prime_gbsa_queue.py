@@ -11,7 +11,7 @@ from graft import prime_gbsa_async as prime
 from graft.schrodinger_guard import submission_guard, SubmissionBlocked
 from graft.states import CompoundState as State
 from graft.config import prime_gbsa_flexdist
-from graft.stages._logging import format_elapsed
+from graft.stages._logging import format_elapsed, current_time
 
 MAX_ACTIVE = 7
 MODE = 'compound_queue_v1'
@@ -276,5 +276,5 @@ def poll_queue(iteration, args, directory, record):
     elapsed = format_elapsed(record['finished_at'] - record['started_at'])
     failed = sum(state == 'failed' for state in record['entries'].values())
     print(f'Iteration {iteration}: prime_gbsa queue completed; total elapsed={elapsed} '
-          f'(including waiting/recovery), failed={failed}.', flush=True)
+          f'(including waiting/recovery), failed={failed}; current_time={current_time()}.', flush=True)
     return updated

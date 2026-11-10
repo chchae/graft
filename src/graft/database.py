@@ -2180,7 +2180,8 @@ def _validate_glide_timeout_scores(conn, iteration, reference_id, scores):
             raise RuntimeError('Glide timeout result belongs to unrelated failed or active work')
 
 
-def store_glide_timeout_scores(path, iteration, reference_id, job_id, scores, timeout_seconds, summary):
+def store_glide_timeout_scores(path, iteration, reference_id, job_id, scores, timeout_seconds, summary,
+                               *, timeout_ids=None):
     """Publish real scores and resolve unscored timeout members atomically."""
     import json
     with connect(path) as conn:
@@ -2189,14 +2190,23 @@ def store_glide_timeout_scores(path, iteration, reference_id, job_id, scores, ti
         if not conn.execute('SELECT 1 FROM glide_timeout_collection WHERE iteration=? AND reference_id=? '
                             'AND job_id=? AND completed=0', (iteration, reference_id, job_id)).fetchone():
             raise RuntimeError('Glide timeout collection has no pending ownership')
+        if timeout_ids is not None:
+            members = {row[0] for row in conn.execute('SELECT id FROM compound WHERE iteration=? AND similar_to=?',
+                                                    (iteration, reference_id))}
+            if not set(timeout_ids) <= members:
+                raise ValueError('Glide subjob timeout has a foreign compound identity')
         for cid, score in scores.items():
             conn.execute('UPDATE compound SET docking_score=?,state=?,failed_stage=NULL,failure_message=NULL,'
                          'modified_at=CURRENT_TIMESTAMP WHERE id=? AND docking_score IS NULL',
                          (score, State.DOCKED, cid))
-        conn.execute('UPDATE compound SET state=?,failed_stage=?,failure_message=?,modified_at=CURRENT_TIMESTAMP '
+        message = f'Glide job exceeded {timeout_seconds}s; no valid score/pose recovered'
+        marks = ','.join('?' for _ in timeout_ids) if timeout_ids is not None else ''
+        failure = f"CASE WHEN id IN ({marks}) THEN ? ELSE 'No Glide pose' END" if marks else '?'
+        failure_values = [*timeout_ids, message] if marks else [message if timeout_ids is None else 'No Glide pose']
+        conn.execute(f'UPDATE compound SET state=?,failed_stage=?,failure_message={failure},modified_at=CURRENT_TIMESTAMP '
                      'WHERE iteration=? AND similar_to=? AND docking_score IS NULL AND '
                      '(state IN (?,?) OR (state=? AND failed_stage=? AND failure_message LIKE ?))',
-                     (State.FAILED, 'glide', f'Glide job exceeded {timeout_seconds}s; no valid score/pose recovered',
+                     (State.FAILED, 'glide', *failure_values,
                       iteration, reference_id, State.LIGPREPPED, State.GLIDE_RUNNING, State.FAILED,
                       'glide', 'Glide job exceeded %'))
         conn.execute('UPDATE glide_timeout_collection SET completed=1,summary=? WHERE iteration=? '

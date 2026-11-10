@@ -332,10 +332,11 @@ def submit_or_poll(command, directory, compound_ids, *, wait_seconds=300, retrie
                 and not all_failed and set(failed) != set(record["compound_ids"])):
             record["atomtyping_failed_ids"] = failed
             _save(directory, record)
-            from graft.stages._logging import job_elapsed, format_elapsed
+            from graft.stages._logging import job_elapsed, format_elapsed, current_time
             elapsed = job_elapsed(parent)
             if elapsed is not None:
-                detail(f"PRIME_GBSA (Prime) calculation completed; elapsed={format_elapsed(elapsed)}.", flush=True)
+                detail(f"PRIME_GBSA (Prime) calculation completed; elapsed={format_elapsed(elapsed)}; "
+                       f"current_time={current_time()}.", flush=True)
             return True
         if failed:
             _retire_failed_submission(directory, record)

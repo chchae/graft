@@ -12,7 +12,7 @@ from graft import _core as core, database, prime_gbsa_async as prime
 from graft.config import prime_gbsa_job_options, prime_gbsa_flexdist
 from graft.prime_gbsa_streaming import collect_completed_subjobs
 from graft.schrodinger_guard import submission_guard, SubmissionBlocked
-from graft.stages._logging import format_elapsed
+from graft.stages._logging import format_elapsed, current_time
 
 MODE = 'native_batch_v1'
 
@@ -225,5 +225,5 @@ def poll_batch(iteration, args, directory, record):
     prime._save(directory, current)
     prime.job_file(directory).replace(Path(directory) / f"batch-{time.time_ns()}.completed.json")
     print(f'Iteration {iteration}: Prime batch completed; total elapsed='
-          f"{format_elapsed(current['finished_at'] - current['started_at'])}.", flush=True)
+          f"{format_elapsed(current['finished_at'] - current['started_at'])}; current_time={current_time()}.", flush=True)
     return updated

@@ -18,10 +18,10 @@ from graft import _core as c
 from graft import database
 from graft.glide_timing import record as record_timing
 from graft.config import glide_group_resources, glide_job_options
-from graft.stages._logging import work_started, timed_stage, format_elapsed
+from graft.stages._logging import work_started, timed_stage, format_elapsed, current_time
 from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
-from graft.glide_recovery import timeout_pose_files, save_record
+from graft.glide_recovery import timeout_pose_files, save_record, output_paths, has_timeouts
 from graft.schrodinger_guard import active_jobs, belongs_to_directory, SubmissionBlocked, job_details, TERMINAL
 
 
@@ -166,6 +166,8 @@ def merge_current_best(args, glide_root, merger):
 
 
 def process_completed_job(iteration, args, job, extractor, merger, glide_root):
+    if has_timeouts(load_record(job['group_dir'])):
+        return process_timeout_job(iteration, args, job, merger, glide_root)
     started = time.monotonic()
     score_file, best_file = c.extract_scores_and_best_poses(
         args.schrodinger, extractor, job["output_file"], job["group_dir"]
@@ -203,26 +205,47 @@ def process_completed_job(iteration, args, job, extractor, merger, glide_root):
                           logfile.read_text(errors="replace"))
         if match:
             detail(f"Glide reference {job['reference_id']} calculation completed; "
-                  f"elapsed={format_elapsed(float(match.group(1)))}.", flush=True)
+                  f"elapsed={format_elapsed(float(match.group(1)))}; current_time={current_time()}.", flush=True)
 
 
 
 def process_timeout_job(iteration, args, job, merger, glide_root):
     directory = job['group_dir']
     record = load_record(directory)
-    if not record or not record.get('timeout_requested_at'):
+    if not has_timeouts(record):
         raise RuntimeError('Glide timeout recovery has no durable native identity')
     summary = database.begin_glide_timeout_collection(
         args.db_path, iteration, job['reference_id'], record['job_id'])
     if summary is None:
-        sources = timeout_pose_files(args.schrodinger, directory)
+        subjobs = record.get('subjob_timeouts')
+        extra = {}
+        if subjobs:
+            native = job_details(args.schrodinger, record['job_id'], directory)
+            if any(row.get('status') not in TERMINAL for row in native):
+                raise RuntimeError('Glide subjob result collection waits for parent and children')
+            parent = next(row for row in native if row['jobId'] == record['job_id'])
+            if parent['status'] != 'DONE' or not record.get('downloaded'):
+                raise RuntimeError('Glide parent must finish merging and download before subjob result collection')
+            log_file, output_file = output_paths(directory)
+            archive = directory / f'{log_file.stem}_subjobs.tar.gz'
+            sources = [output_file] if output_file.exists() and output_file.stat().st_size else []
+            # A child can finish between timeout intent and native stop. Native
+            # DONE wins; retain that complete result rather than excluding it.
+            successful = {row.get('jobName') for row in native
+                          if row['jobId'] != record['job_id'] and row.get('status') == 'DONE'}
+            excluded = {item['job_name'] for item in subjobs.values()} - successful
+            extra = dict(exclude_subjobs=sorted(excluded),
+                         subjob_archive=str(archive.resolve()),
+                         ligprep_input=str((directory/'ligprep_group.maegz').resolve()))
+        else:
+            sources = timeout_pose_files(args.schrodinger, directory)
         folder = directory / 'timeout-results' / 'extracted'
         folder.mkdir(parents=True, exist_ok=True)
         ids = [row[0] for row in job['compounds']]
         scores = {}
         report = dict(scored=0, read_errors=[], inputs=[])
-        if sources:
-            request = dict(inputs=[str(p.resolve()) for p in sources], ids=ids, output=str(folder.resolve()))
+        if sources or extra:
+            request = dict(inputs=[str(p.resolve()) for p in sources], ids=ids, output=str(folder.resolve()), **extra)
             request_file = folder / 'request.json'
             request_file.write_text(json.dumps(request))
             helper = Path(__file__).resolve().parents[1] / 'glide_timeout_results.py'
@@ -242,8 +265,11 @@ def process_timeout_job(iteration, args, job, merger, glide_root):
         record = load_record(directory)
         summary = dict(job_id=record['job_id'], timeout_seconds=record['timeout_seconds'],
                        scored_ids=sorted(scores), sources=record.get('timeout_sources', []), report=report)
+        if subjobs:
+            summary['subjob_timeouts'] = subjobs
         database.store_glide_timeout_scores(args.db_path, iteration, job['reference_id'],
-            record['job_id'], scores, record['timeout_seconds'], summary)
+            record['job_id'], scores, record['timeout_seconds'], summary,
+            timeout_ids=report.get('timeout_ids'))
     record = load_record(directory)
     record['timeout_results_imported'] = True
     record['timeout_result_count'] = len(summary['scored_ids'])
@@ -256,7 +282,7 @@ def recover_timeout_groups(args, iteration, glide_root):
     records = [(path.parent, load_record(path.parent))
                for path in sorted(glide_root.glob('ref_*/glide_job.json'))]
     pending = [(directory, record) for directory, record in records
-               if record.get('timeout_requested_at') and not record.get('timeout_results_imported')]
+               if has_timeouts(record) and not record.get('timeout_results_imported')]
     if not pending:
         return
     # Legacy workers may already have marked timeout members failed. Enroll
@@ -276,7 +302,8 @@ def recover_timeout_groups(args, iteration, glide_root):
     merger = c.create_best_pose_merger(glide_root)
     for directory, record in pending:
         refid = int(directory.name.removeprefix('ref_'))
-        status = group_status(args.schrodinger, directory, directory/'glide.log', directory/'glide_lib.maegz',
+        log_file, output_file = output_paths(directory)
+        status = group_status(args.schrodinger, directory, log_file, output_file,
                               timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
         if status not in TERMINAL:
             continue
@@ -297,6 +324,7 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
     pending = []
     terminal = 0
     for job in jobs:
+        job['log_file'], job['output_file'] = output_paths(job['group_dir'])
         # Between submissions, skip known active trees cheaply. The normal
         # polling pass still reconciles their runtime limits and live children.
         if skip_active and any(belongs_to_directory(native, job['group_dir']) for native in live):
@@ -305,18 +333,22 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
         started = time.monotonic()
         status = group_status(args.schrodinger, job['group_dir'], job['log_file'], job['output_file'], live,
                               timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
+        # Recovery may have just discovered a native name or downloaded its log.
+        job['log_file'], job['output_file'] = output_paths(job['group_dir'])
         elapsed = time.monotonic()-started
         record_timing(job['group_dir'], 'status_download', elapsed)
         detail(f"Glide timing: reference {job['reference_id']} status/download="
                f'{elapsed:.2f}s.', flush=True)
         if status == 'DONE':
-            if job['output_file'].exists() and job['output_file'].stat().st_size:
+            if has_timeouts(load_record(job['group_dir'])):
+                process_timeout_job(iteration, args, job, merger, glide_root)
+            elif job['output_file'].exists() and job['output_file'].stat().st_size:
                 process_completed_job(iteration, args, job, extractor, merger, glide_root)
             else:
                 mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide',
                            message='Completed Glide job produced no poses')
         elif status is not None and status not in ('RUNNING', 'UNKNOWN'):
-            if (load_record(job['group_dir']) or {}).get('timeout_requested_at'):
+            if has_timeouts(load_record(job['group_dir'])):
                 process_timeout_job(iteration, args, job, merger, glide_root)
             else:
                 mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide',
@@ -405,8 +437,7 @@ def _run_stage(args, ns):
         gdir = glide_root / f"ref_{refid}"
         gdir.mkdir(parents=True, exist_ok=True)
         ref_file = gdir / "_reference.maegz"
-        output_file = gdir / "glide_lib.maegz"
-        log_file = gdir / "glide.log"
+        log_file, output_file = output_paths(gdir)
 
         job = dict(reference_id=refid, reference_name=refname,
                    group_dir=gdir, reference_file=ref_file,
@@ -415,6 +446,8 @@ def _run_stage(args, ns):
 
         status = group_status(args.schrodinger, gdir, log_file, output_file, live,
                               timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
+        log_file, output_file = output_paths(gdir)
+        job.update(log_file=log_file, output_file=output_file)
         if refid in fresh_references and status in TERMINAL:
             discard_terminal_results(gdir)
             status = None
@@ -428,7 +461,9 @@ def _run_stage(args, ns):
                             else None)
             continue
         if status == 'DONE':
-            if output_file.exists() and output_file.stat().st_size:
+            if has_timeouts(load_record(gdir)):
+                process_timeout_job(iteration, args, job, merger, glide_root)
+            elif output_file.exists() and output_file.stat().st_size:
                 process_completed_job(iteration, args, job, score_extractor, merger, glide_root)
             else:
                 mark_group(args.db_path, compounds, State.FAILED, failed_stage='glide',

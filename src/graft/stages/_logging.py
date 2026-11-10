@@ -54,6 +54,11 @@ def format_elapsed(seconds):
     return f'{int(hours):02d}:{int(minutes):02d}:{seconds:04.1f}'
 
 
+def current_time():
+    """Local wall-clock time at message emission, including the timezone."""
+    return datetime.datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
+
+
 def job_elapsed(job):
     start = job.get('timeStarted') or job.get('timeCreated')
     end = job.get('statusUpdated')
@@ -84,6 +89,6 @@ def timed_stage(label):
                 if timing['start'] is not None:
                     elapsed = format_elapsed(time.monotonic() - timing['start'])
                     (progress if outcome == 'completed' else print)(
-                        f'{label} {outcome}; elapsed={elapsed}.', flush=True)
+                        f'{label} {outcome}; elapsed={elapsed}; current_time={current_time()}.', flush=True)
         return wrapped
     return decorate

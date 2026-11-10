@@ -94,6 +94,7 @@ def test_retry_failure_cannot_advance_stage(tmp_path, monkeypatch):
 ])
 def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatch, capsys, stage, reason):
     args = project(tmp_path, State.DOCKED, iteration=60)
+    monkeypatch.setattr(driver, 'current_time', lambda: '2026-11-10 14:15:03 KST')
     args.md_gbsa_enabled = True
     monkeypatch.setattr(database.time, 'time', lambda: 100.)
     database.start_stage_timer(args.db_path, 60, stage)
@@ -106,9 +107,10 @@ def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatc
         30, driver.StopFlag(), once=True,
     )
     expected = ('iteration 60: amber-gbsa pending: 493 compounds still running; '
-                'elapsed=00:10:00.0 .' if stage == 'amber-gbsa' else
+                'elapsed=00:10:00.0; current_time=2026-11-10 14:15:03 KST.' if stage == 'amber-gbsa' else
                 f'iteration 60: {stage} pending: {reason}; '
-                'elapsed=00:10:00.0 (including waiting, polling and restart recovery).')
+                'elapsed=00:10:00.0 (including waiting, polling and restart recovery); '
+                'current_time=2026-11-10 14:15:03 KST.')
     assert expected in capsys.readouterr().out
 
 
@@ -315,7 +317,7 @@ def test_driver_reports_total_time_only_after_verified_completion(tmp_path, monk
     with database.connect(args.db_path) as conn:
         finished = conn.execute('SELECT finished_at FROM iteration_timing').fetchone()[0]
     if completed:
-        assert 'iteration 3: finished; total elapsed=01:01:01.0.' in output
+        assert 'iteration 3: finished; total elapsed=01:01:01.0; current_time=' in output
         assert finished == 4661
     else:
         assert 'paused; restart to resume' in output

@@ -22,6 +22,26 @@ def load_record(directory):
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def output_paths(directory):
+    """Follow the saved input basename; retain legacy and lost-record recovery."""
+    directory = Path(directory)
+    saved = load_record(directory) or {}
+    command = saved.get('command', [])
+    if len(command) > 1 and Path(command[1]).suffix == '.in':
+        basename = Path(command[1]).stem
+    elif saved.get('job_name'):
+        basename = saved['job_name']
+        if Path(basename).name != basename:
+            raise RuntimeError('Invalid recovered Glide job name')
+    else:
+        reference = re.fullmatch(r'ref_(\d+)', directory.name)
+        # A legacy log must still be reconciled, even if new inputs were prepared.
+        candidates = (['glide', f'glide_ref_{int(reference[1]):02d}',
+                       f'glide_{int(reference[1]):02d}'] if reference else ['glide'])
+        basename = next((name for name in candidates if (directory/f'{name}.log').exists()), 'glide')
+    return directory/f'{basename}.log', directory/f'{basename}_lib.maegz'
+
+
 def save_record(directory, record):
     path = record_file(directory)
     pending = path.with_suffix('.tmp')
@@ -41,7 +61,7 @@ def discard_terminal_results(directory):
     print(f'Removed previous Glide results in {directory.name}; starting a fresh calculation.', flush=True)
 
 
-def enforce_timeout(suite, directory, record, timeout_seconds):
+def _enforce_tree_timeout(suite, directory, record, timeout_seconds):
     """Stop a timed-out native tree; retain claims until every job terminates."""
     if not record or not record.get('job_id'):
         return None
@@ -77,6 +97,84 @@ def enforce_timeout(suite, directory, record, timeout_seconds):
     return 'RUNNING'
 
 
+def has_timeouts(record):
+    return bool(record and (record.get('timeout_requested_at') or record.get('subjob_timeouts')))
+
+
+def _started_at(job):
+    try:
+        value = datetime.fromisoformat(job['timeStarted'].replace('Z', '+00:00'))
+        return value.timestamp() if value.tzinfo is not None else None
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def enforce_timeout(suite, directory, record, timeout_seconds):
+    """Stop only overrun computing children, allowing their parent to merge.
+
+    Older durable whole-tree stop intents retain their original reconciliation.
+    A serial job with no driver/children is itself the scientific calculation.
+    """
+    if not record or not record.get('job_id'):
+        return None
+    if record.get('timeout_requested_at'):
+        return _enforce_tree_timeout(suite, directory, record, timeout_seconds)
+    intents = record.get('subjob_timeouts', {})
+    if timeout_seconds <= 0 and not intents:
+        return None
+    jobs = job_details(suite, record['job_id'], directory)
+    parent = next(j for j in jobs if j['jobId'] == record['job_id'])
+    children = [j for j in jobs if j['jobId'] != record['job_id']]
+    if not children and not intents:
+        command = record.get('command', [])
+        native = parent.get('spec', {}).get('taskSpec', {}).get('commandLineArguments', [])
+        driver = any(Path(str(arg)).name == 'glide_driver.py' for arg in native)
+        if '-NJOBS' in command:
+            driver = driver or int(command[command.index('-NJOBS')+1]) > 1
+        started = _started_at(parent)
+        if (driver or parent.get('status') != 'RUNNING' or started is None or
+                timeout_seconds <= 0 or time.time()-started < timeout_seconds):
+            return None
+        return _enforce_tree_timeout(suite, directory, record, timeout_seconds)
+
+    now = time.time()
+    limit = record.get('timeout_seconds', timeout_seconds)
+    ancestors = {j.get('parentJobId') for j in jobs if j.get('parentJobId')}
+    changed = False
+    for child in children:
+        identity = child['jobId']
+        # No timer for queued, unknown, or intermediate driver jobs. A retry
+        # has a new native identity and must prove its own actual start time.
+        if (identity in intents or identity in ancestors or child.get('status') != 'RUNNING' or
+                timeout_seconds <= 0):
+            continue
+        started = _started_at(child)
+        if started is None or now-started < limit:
+            continue
+        name = child.get('jobName')
+        if not name or Path(name).name != name:
+            raise RuntimeError('Cannot identify overrun Glide child for result exclusion')
+        intents[identity] = dict(job_name=name, started_at=started, requested_at=now,
+                                 timeout_seconds=limit)
+        changed = True
+    if changed:
+        record['subjob_timeouts'] = intents
+        record['timeout_seconds'] = limit
+        save_record(directory, record)  # Durable exclusion before any native stop.
+    running = {j['jobId'] for j in children if j.get('status') == 'RUNNING'}
+    stop = [identity for identity, intent in intents.items() if identity in running and
+            now-intent.get('stop_sent_at', 0) >= 30]
+    if stop:
+        subprocess.run([str(Path(suite)/'jsc'), 'stop', *stop], cwd=directory,
+                       check=True, capture_output=True, text=True, timeout=30)
+        for identity in stop:
+            intents[identity]['stop_sent_at'] = now
+        save_record(directory, record)
+        print(f"Glide {record['job_id']}: {limit}s subjob timeout; stop requested for "
+              f"{len(stop)} child job(s); parent retained to merge completed results.", flush=True)
+    return 'RUNNING' if any(j.get('status') not in TERMINAL for j in jobs) and intents else None
+
+
 def group_status(suite, directory, log_file, output_file, live=None, timeout_seconds=0):
     """Return a native status, UNKNOWN, or None for an unsubmitted group."""
     directory = Path(directory)
@@ -90,7 +188,8 @@ def group_status(suite, directory, log_file, output_file, live=None, timeout_sec
             # Recover a legacy/duplicate launch even if the local log is older.
             parent = max(parents, key=lambda j: j.get('timeCreated', ''))
             if record is None or record.get('job_id') and record['job_id'] != parent['jobId']:
-                record = {'job_id': parent['jobId'], 'recovered': True, 'downloaded': False}
+                record = {'job_id': parent['jobId'], 'job_name': parent.get('jobName'),
+                          'recovered': True, 'downloaded': False}
                 save_record(directory, record)
         timeout_status = enforce_timeout(suite, directory, record, timeout_seconds)
         if timeout_status is not None and timeout_status != 'STOPPED':
@@ -100,7 +199,8 @@ def group_status(suite, directory, log_file, output_file, live=None, timeout_sec
     if record is None and log_file.exists():
         match = re.search(r'^JobId\s*:\s*(\S+)', log_file.read_text(errors='replace'), re.MULTILINE)
         if match:
-            record = {'job_id': match.group(1), 'recovered': True, 'downloaded': False}
+            record = {'job_id': match.group(1), 'job_name': log_file.stem,
+                      'recovered': True, 'downloaded': False}
             save_record(directory, record)
     if record is not None:
         if not record.get('job_id'):
@@ -188,7 +288,7 @@ def submit(suite, command, directory):
                 raise RuntimeError('Glide group saved job still running')
         archive = directory / f'previous-{time.time_ns()}'
         old = [path for path in directory.glob('glide*')
-               if path.name != 'glide.in']
+               if path.name != Path(command[1]).name]
         old += [path for name in ('best_poses.maegz', 'docking_scores.tsv', 'glide_launch.log')
                 if (path := directory / name).exists()]
         if old:

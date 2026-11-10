@@ -1,5 +1,119 @@
 # Graft specification
 
+## Current wall-clock time beside elapsed reports (2026-11-10)
+
+**Confirmed user requirement:** include the current time alongside elapsed times
+for each calculation, including the driver's per-iteration stage summaries.
+
+**Implementation:** append `current_time=YYYY-MM-DD HH:MM:SS TZ` using the emitting
+process's local wall clock/timezone. Apply this to calculation-stage completion,
+other stage completion (including druglike/FEP), timed pending messages, iteration
+completion, common worker duration reports and native LigPrep/Glide/Prime duration
+reports (including Prime batches, queues and streaming subjobs). The timestamp is
+message emission time, not a reconstructed native completion time. Preserve
+elapsed measurements, timing persistence, verbosity/polling and scientific state.
+
+**Verification:** 381 relevant timing, supervisor, Glide/recovery and Prime tests
+passed; the documented MD pending-log expectation still fails because that routine
+message is suppressed at normal verbosity. Compileall, package/CLI imports and
+diff whitespace checks passed. No scientific calculation was submitted or DB/job
+reset for this logging change.
+
+## Exclude only overrun Glide subjobs (2026-11-10)
+
+**Confirmed user requirement:** stop only time-expired Glide subjobs and retain
+results from completed peers, rather than stopping their entire reference group.
+This supersedes the parent-group runtime limit for groups without a previously
+recorded whole-tree stop intent.
+
+**Implementation:** `glide-job-timeout` remains 1,800 seconds by default (zero disables new limits),
+but uses each native computing child's actual RUNNING/timeStarted timestamp.
+Queued, unknown, missing/invalid-start and intermediate driver jobs do not time
+out from the parent's age. Preserve the native parent so it can incorporate
+finished peers and publish its ordinary merged outputs and subjob archives.
+Persist each child's JobId/name/start/limit/stop intent before sending stop;
+retry uncertain stop responses without duplicate submission. Already requested
+stops remain reconciled after configuration disables new limits. Native retries
+keep distinct identities/start times. Serial calculations retain their own actual
+runtime limit. Historical persisted parent-stop intents retain their original
+whole-tree termination/partial-result recovery path.
+
+Inspect installed native JobDJ semantics: a stopped child is marked done rather
+than automatically retried; the ordinary Glide parent can merge available poses.
+Do not accept partial poses from intentionally excluded children. After the parent
+is DONE, every child is terminal and its outputs have been downloaded, read the
+excluded children's exact LIGAND_START/END/OFFSET from the native subjob input
+archive. Match final pose i_i_glide_lignum and CMPID to the prepared group input,
+exclude those input ranges, and select the lowest finite remaining state/pose per
+original compound. A child which races to native DONE is retained. Missing or
+ambiguous native boundaries/input identity block collection instead of guessing.
+Keep source checksums, native timeout identities and excluded ranges in the
+existing SQLite timeout-collection summary. Publish matching best poses before
+an atomic score/failure/collection transaction; preserve existing scientific
+scores and downstream gates. Only unscored compounds covered by excluded inputs
+receive the timeout label; unrelated no-pose compounds retain their ordinary
+failure reason. Existing legacy timeout results keep their historical labels.
+
+Do not reset production rows/jobs, reconstruct poses from logged scores, or
+resubmit deleted results to validate this change. Native read-only validation on
+a saved iteration-4 group excluded the specified child's 50 poses and retained
+2,791 compounds with matching poses in a temporary directory; this validates
+identity/filtering, not docking accuracy or future cluster throughput.
+
+**Verification:** 355 focused naming, subjob/runtime, native recovery, exclusion,
+partial-result persistence, guard, resource and stage-barrier/timing regressions
+passed. A full suite run passed 2,420 tests with seven skips and the same three
+documented baseline failures (real-fragment clash and two MD pending-log
+expectations); five further collection/transaction regressions added afterward
+also passed in the focused run. Installed 2026-4 JobDJ's actual stopped-job
+transition was verified as DONE rather than FAILED_RETRYABLE without launching
+a job. Compileall, package/CLI imports and diff whitespace checks passed.
+
+## Short Glide job names (2026-11-10, latest naming correction)
+
+**Confirmed user requirement:** use `glide_03` instead of `glide_ref_03` for new
+Glide jobs, retaining minimum two-digit reference formatting. This supersedes
+the prior naming choice below, without changing reference IDs/group directories.
+New inputs are `glide_NN.in`; use the native input basename for parent/child names
+and output prefixes. Saved commands and recovered native identities continue to
+select their original paths. Preserve both `glide_ref_NN` and legacy `glide`
+recovery, including JobId-bearing logs after a lost launch record. Do not rename,
+cancel or resubmit existing jobs; scientific options and scheduling are unchanged.
+
+**Verification:** 333 focused naming/input/resource/recovery/timeout,
+submission-guard, parallel-command and stage-barrier/timing regressions passed.
+Installed 2026-4 non-submitting launch specifications confirmed `glide_03`,
+`glide_08` and `glide_100` names and log prefixes. Compileall, package/CLI imports
+and diff whitespace checks passed; no scientific job was submitted for validation.
+
+## Reference-numbered Glide job names (2026-11-10)
+
+**Confirmed user requirement:** name new Glide jobs `glide_ref_08` rather than
+`glide`; use a minimum two-digit reference number (`01`, `08`, `23`, `100`).
+
+**Implementation:** write new reference-group inputs as `glide_ref_NN.in`.
+The native launcher derives its parent job name and output prefix from the input
+basename; child names inherit that prefix. Keep group directories and SQLite
+reference IDs unchanged. Resolve logs/pose outputs from the durable original
+input command, recovered native job name or JobId-bearing log. Refresh those
+paths after native recovery/download. Archive prior artifacts without moving the
+current named input. Preserve legacy `glide.in`/`glide.log`/`glide_lib.maegz`
+recovery, parent/child termination checks, timeout-result imports and incremental
+pose-before-score persistence. Do not rename or resubmit existing native jobs.
+Scientific inputs/options, resource limits and scheduling remain unchanged.
+
+**Native evidence:** inspected installed 2026-4 help and launcher source; used the
+vendor's non-submitting launch-specification adapter to verify parent names,
+log names and SCHRODINGER_JOBNAME for references 01, 08, 23 and 100. Only temporary
+inputs/specifications were created; no scientific job was submitted for validation.
+
+**Verification:** 330 focused naming, input/resource/recovery/timeout,
+submission-guard, parallel-command and stage-barrier/timing regressions passed.
+Full suite: 2,400 passed, seven skipped and the same three documented baseline
+failures (real-fragment clash and two MD pending-log expectations). Compileall,
+package/CLI imports and diff whitespace checks passed. These checks validate
+naming and recovery rather than docking accuracy or production throughput.
+
 ## Overlap Glide submission and result collection (2026-11-10)
 
 **Confirmed user requirement:** reduce gaps between reference-group submissions

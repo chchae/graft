@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from graft.stages._logging import job_elapsed, format_elapsed
+from graft.stages._logging import job_elapsed, format_elapsed, current_time
 
 
 class LigPrepReconciliationPending(RuntimeError):
@@ -139,5 +139,6 @@ def run_or_recover(command, directory, compound_ids, output):
     if elapsed is None and record.get('submitted_at') is not None:
         elapsed = time.time() - record['submitted_at']
     if elapsed is not None:
-        print(f'LigPrep calculation completed; elapsed={format_elapsed(elapsed)}.', flush=True)
+        print(f'LigPrep calculation completed; elapsed={format_elapsed(elapsed)}; '
+              f'current_time={current_time()}.', flush=True)
     return True  # Retain record until the stage commits its compound states.

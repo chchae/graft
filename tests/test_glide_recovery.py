@@ -147,9 +147,10 @@ def test_legacy_prime_retry_fenced_before_launch_marker(tmp_path,monkeypatch):
 
 
 @pytest.mark.parametrize('parent_status', ['RUNNING', 'DONE'])
-def test_timeout_stops_only_live_tree_and_waits_for_children(tmp_path, monkeypatch, parent_status):
+def test_legacy_timeout_stops_only_live_tree_and_waits_for_children(tmp_path, monkeypatch, parent_status):
     log, out = files(tmp_path)
-    recovery.save_record(tmp_path, {'job_id': 'parent', 'submitted_at': 1})
+    recovery.save_record(tmp_path, {'job_id': 'parent', 'submitted_at': 1,
+                                    'timeout_requested_at': 1810, 'timeout_seconds': 1800})
     jobs = [{'jobId': 'parent', 'status': parent_status, 'timeStarted': '1970-01-01T00:00:10Z'},
             {'jobId': 'child', 'status': 'RUNNING'}, {'jobId': 'finished', 'status': 'DONE'}]
     monkeypatch.setattr(recovery, 'job_details', lambda *a: jobs)
@@ -186,7 +187,8 @@ def test_timeout_stop_failure_keeps_durable_intent_and_claims(tmp_path, monkeypa
     log, out = files(tmp_path)
     recovery.save_record(tmp_path, {'job_id': 'parent', 'submitted_at': 1})
     monkeypatch.setattr(recovery.time, 'time', lambda: 1801)
-    monkeypatch.setattr(recovery, 'job_details', lambda *a: [{'jobId': 'parent', 'status': 'RUNNING'}])
+    monkeypatch.setattr(recovery, 'job_details', lambda *a: [{'jobId': 'parent', 'status': 'RUNNING',
+                 'timeStarted': '1970-01-01T00:00:01Z'}])
     def fail(*a, **kw):
         raise OSError('JobServer unavailable')
     monkeypatch.setattr(recovery.subprocess, 'run', fail)

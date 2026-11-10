@@ -5,7 +5,7 @@ from pathlib import Path
 
 from graft import _core
 from graft.prime_gbsa_async import _save
-from graft.stages._logging import job_elapsed, format_elapsed
+from graft.stages._logging import job_elapsed, format_elapsed, current_time
 
 
 def _fetch_output(jsc, directory, record, child, output):
@@ -60,7 +60,8 @@ def collect_completed_subjobs(args, iteration, directory, record, jobs):
         _save(directory, record)
         total_updated += updated
         elapsed = job_elapsed(child)
-        timing = f'; calculation elapsed={format_elapsed(elapsed)}' if elapsed is not None else ''
+        timing = (f'; calculation elapsed={format_elapsed(elapsed)}; current_time={current_time()}'
+                  if elapsed is not None else '')
         #print(f"Iteration {iteration}: Prime subjob {child['jobName']} completed; "
         #      f"GBSA DB scores updated={updated}{timing}.", flush=True)
         print(f"{iteration}  : {child['jobName']} completed; "

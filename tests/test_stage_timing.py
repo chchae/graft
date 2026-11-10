@@ -21,6 +21,7 @@ def project(tmp_path):
                                        ('amber-gbsa','Amber GBSA'), ('prime_gbsa','PRIME_GBSA (Prime)')])
 def test_each_calculation_stage_reports_total_after_verified_completion(tmp_path, monkeypatch, capsys, stage, label):
     args = project(tmp_path)
+    monkeypatch.setattr(driver, 'current_time', lambda: '2026-11-10 14:15:03 KST')
     clock = [1000.0]
     monkeypatch.setattr(database.time,'time',lambda:clock[0])
     def process(*a):
@@ -31,6 +32,7 @@ def test_each_calculation_stage_reports_total_after_verified_completion(tmp_path
     assert driver.supervise_iteration(args,tmp_path/'p.toml',1,[(stage,'module')],30,driver.StopFlag())
     output = capsys.readouterr().out
     assert f'{label} stage complete; total elapsed=01:01:01.5' in output
+    assert '; current_time=2026-11-10 14:15:03 KST.' in output
     timeout = 'timeout_failed=0; ' if stage == 'glide' else ''
     assert f'compounds=1 (ok=1, failed=0); {timeout}wall/compound=3661.50s' in output
     with database.connect(args.db_path) as conn:

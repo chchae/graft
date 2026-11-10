@@ -12,7 +12,7 @@ from pathlib import Path
 from graft.paths import iteration_directory, stage_directory, stage_in_iteration
 from graft import _core as c
 from graft import database
-from graft.stages._logging import WORK_STARTED, format_elapsed, progress
+from graft.stages._logging import WORK_STARTED, format_elapsed, progress, current_time
 
 BASE_STAGES = [
     ("generate", "graft.stages.generate"),
@@ -297,12 +297,12 @@ def external_completion_reason(args, iteration, stage):
         if stage == "prime_gbsa" and load_prime(stage_in_iteration(directory, 'prime_gbsa')) is not None:
             return "prime_gbsa queue still requires recovery"
         if stage == "glide":
-            from graft.glide_recovery import load_record
+            from graft.glide_recovery import load_record, has_timeouts
             for record_path in (stage_in_iteration(directory, 'glide')).glob("*/glide_job.json"):
                 record = load_record(record_path.parent)
                 if not record.get("job_id"):
                     return "Glide launch identity remains uncertain"
-                if record.get('timeout_requested_at') and not record.get('timeout_results_imported'):
+                if has_timeouts(record) and not record.get('timeout_results_imported'):
                     return f"Glide timeout results require recovery: {record['job_id']}"
                 # Already downloaded records were verified terminal by the worker.
                 if not record.get("downloaded"):
@@ -422,11 +422,12 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
                     print(f"[driver  ] iteration {iteration}: {CALCULATION_LABELS[stage]} stage complete; "
                           f"total elapsed={format_elapsed(elapsed)} "
                           "(including waiting, polling and restart recovery); "
-                          f"{completion_summary(args, iteration, stage, elapsed)}.", flush=True)
+                          f"{completion_summary(args, iteration, stage, elapsed)}; current_time={current_time()}.", flush=True)
                 else:
                     # Recovery alone does not finish the final Prime candidate set.
                     print(f"[driver  ] iteration {iteration}: {stage} complete "
-                          f"({time.monotonic() - started:.1f} s including recovery/polling).", flush=True)
+                          f"({time.monotonic() - started:.1f} s including recovery/polling); "
+                          f"current_time={current_time()}.", flush=True)
                 report_stage = ('fep' if getattr(args, 'fep_enabled', False) else
                                 'md-gbsa' if getattr(args, 'md_gbsa_enabled', False) else
                                 'prime_gbsa' if getattr(args, 'prime_gbsa_enabled', True) else
@@ -450,9 +451,10 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
             if stage in {'amber-gbsa', 'md-gbsa'}:
                 elapsed = database.stage_elapsed(args.db_path, iteration, stage)
                 if elapsed is not None:
-                    timing = (f'; elapsed={format_elapsed(elapsed)} '
+                    timing = (f'; elapsed={format_elapsed(elapsed)}'
                               + ('' if stage == 'amber-gbsa' else
-                                 '(including waiting, polling and restart recovery)'))
+                                 ' (including waiting, polling and restart recovery)')
+                              + f'; current_time={current_time()}')
             pending_key = (rc, reason)  # Elapsed time alone is not a progress change.
             if stage != 'amber-gbsa' or rc != 0 or pending_key != previous_pending:
                 display_reason = (reason.removesuffix(' Amber GBSA screening')
@@ -574,7 +576,7 @@ def main(argv=None):
                       f'selected={len(md_selection["ids"])}, scored={scored}, '
                       f'final_failed={len(md_selection["ids"])-scored}.', flush=True)
             print(f"[driver  ] iteration {iteration}: finished; "
-                  f"total elapsed={format_elapsed(elapsed)}{qualifier}.", flush=True)
+                  f"total elapsed={format_elapsed(elapsed)}{qualifier}; current_time={current_time()}.", flush=True)
         else:
             print(f"[driver  ] iteration {iteration}: paused; restart to resume.", flush=True)
     finally:

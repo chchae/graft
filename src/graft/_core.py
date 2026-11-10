@@ -3128,7 +3128,9 @@ def write_constrained_glide_input(
     core_smarts=None,
     core_atoms=None,
 ):
-    glide_input = group_dir / "glide.in"
+    reference = re.fullmatch(r'ref_(\d+)', group_dir.name)
+    basename = f'glide_{int(reference[1]):02d}' if reference else 'glide'
+    glide_input = group_dir / f'{basename}.in'
 
     if core_smarts:
         if not core_atoms:

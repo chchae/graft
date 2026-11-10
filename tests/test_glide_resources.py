@@ -281,8 +281,8 @@ def test_completed_group_commits_during_next_submission_and_survives_restart(tmp
 
 
 def test_interleaved_collection_skips_live_tree_without_blocking_finished_peer(tmp_path, monkeypatch):
-    jobs = [dict(reference_id=ref, group_dir=tmp_path/f'ref_{ref}',log_file=tmp_path/f'{ref}.log',
-                 output_file=tmp_path/f'{ref}.maegz') for ref in (1,2)]
+    jobs = [dict(reference_id=ref, group_dir=tmp_path/f'ref_{ref}',log_file=tmp_path/f'ref_{ref}/glide.log',
+                 output_file=tmp_path/f'ref_{ref}/glide_lib.maegz') for ref in (1,2)]
     for job in jobs:
         job['group_dir'].mkdir()
     jobs[1]['output_file'].write_text('finished native poses')
