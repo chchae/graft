@@ -162,6 +162,8 @@ def submission_guard(suite, stage, *, md_controller=False):
             if live:
                 raise SubmissionBlocked(f"{job_kind(live[0])} still active in JobServer: " +
                                         ', '.join(j['jobId'] for j in live))
-            yield
+            # Consumers may reuse this fresh snapshot while holding the mutex;
+            # it must never be cached beyond the guarded submission.
+            yield jobs
         finally:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)

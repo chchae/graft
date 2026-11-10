@@ -1,5 +1,57 @@
 # Graft specification
 
+## Overlap Glide submission and result collection (2026-11-10)
+
+**Confirmed user requirement:** reduce gaps between reference-group submissions
+when CPUs are available; add phase timings, batch reference/core preparation and
+keep immediate per-group result persistence without blocking later submissions.
+
+**Implementation:** prepare only new, resource-admitted groups in one installed
+Schrodinger Python invocation. Read references once, preserve the first matching
+pose and native evaluate_smarts(..., True) first-match atom order, validate all
+requested references/cores before publishing inputs, and retain constrained SP,
+original CMPIDs, lowest-score state/pose reduction and the 50-structure NJOBS policy.
+Never rewrite saved/uncertain native inputs, commands or JobIds to apply the change.
+
+Within the independent Glide stage, one submitter queues groups only after native
+identity persistence; one concurrent collector exclusively owns download, pose
+publication and per-group SQLite import. It checks during slow input preparation
+and submissions (up to five seconds between checks, plus native/processing time),
+without waiting for the entire submission loop. A collector failure stops subsequent
+submissions at the next boundary; an already in-flight launch remains recoverable.
+On submission exit/failure, join the collector before returning or resuming the
+existing tail-polling policy, preserving pending and terminal counts. There is no
+scientific calculation or new scheduling logic in the sequential driver.
+
+Retain the Glide/Prime cross-project submission mutex and a fresh fail-closed
+native/remote safety query for every launch. Reuse that query only inside the same
+locked submission instead of issuing a duplicate scan; never cache it for a later
+launch. Keep native parent/child, timeout, download and restart verification.
+Persist preparation, safety/recovery, native launch, collection query,
+status/download, extraction, pose publication and DB durations to
+`glide_timing.jsonl` in the Glide root or reference directory, with normal console
+summaries and detailed query timings at verbose level. Timings overlap and must
+not be summed as stage wall time.
+
+This supersedes the synchronous collect-after-each-submission implementation;
+immediate verified result persistence remains required. Mock regressions validate
+overlap, pose-before-score publication, later submission failure/restart, collector
+error propagation and current-lock safety snapshots. A read-only installed 2026-4
+probe prepared all 19 iteration-1 references in approximately 0.45 seconds and
+matched existing core atom lists exactly; a further native check matched atom
+order, coordinates, elements, charges, bonds and titles for all 19. Outputs were
+in temporary directories only. These checks do not measure production throughput
+or establish scientific accuracy. The already running iteration-2 Glide worker
+started before these edits; no production process/job/database was reset or
+manually submitted to apply or test the change.
+
+**Verification:** 393 focused input/resource/recovery/timeout, submission-guard,
+parallel-command, stage-barrier/timing and scaffold regressions passed. Final full
+suite: 2,392 passed, seven skipped and the same three documented baseline failures
+(real-fragment clash and two MD pending-log expectations). Editable installation,
+compileall, package/CLI imports and diff whitespace checks passed. Production
+speedup remains to be measured on the next worker execution.
+
 ## Optional attraction_point selection preference (2026-11-10)
 
 **Confirmed user requirement:** use the option name `attraction_point` and

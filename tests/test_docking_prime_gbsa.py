@@ -437,7 +437,8 @@ def test_glide_submits_new_job_instead_of_importing_legacy_results(monkeypatch, 
         ligand.write_text('CMPID_2')
         return {1: ligand}
     monkeypatch.setattr(_core, 'split_ligprep_by_reference', split)
-    monkeypatch.setattr(_core, 'extract_reference_pose', lambda *a: None)
+    monkeypatch.setattr(glide, 'prepare_new_inputs', lambda args,entries,root:{
+        job['reference_id']:job['group_dir']/'glide.in' for job,_ in entries})
     submits = []
     def submit(*a, **kw):
         submits.append(a)

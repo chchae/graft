@@ -126,7 +126,8 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
         return {}
     monkeypatch.setattr(_core, 'assign_reference_compounds', lambda *a: None)
     monkeypatch.setattr(_core, 'split_ligprep_by_reference', split)
-    monkeypatch.setattr(_core, 'extract_reference_pose', lambda *a: None)
+    monkeypatch.setattr(glide, 'prepare_new_inputs', lambda args, entries, root: {
+        job['reference_id']: job['group_dir'] / 'glide.in' for job, _ in entries})
     monkeypatch.setattr(_core, 'submit_glide', submit)
     monkeypatch.setattr(glide, 'active_jobs', lambda *a: [])
     monkeypatch.setattr(glide, 'group_status', status)
@@ -177,7 +178,8 @@ def test_splitter_records_actual_prepared_structure_counts(tmp_path, monkeypatch
     assert (tmp_path / 'ref_1/ligprep_group.maegz').read_text().splitlines() == ['CMPID_10', 'CMPID_10']
 
 
-def test_completed_group_commits_before_next_submission_and_survives_restart(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize('later_failure', [False, True])
+def test_completed_group_commits_during_next_submission_and_survives_restart(tmp_path, monkeypatch, capsys, later_failure):
     db = tmp_path/'project.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)
@@ -193,6 +195,8 @@ def test_completed_group_commits_before_next_submission_and_survives_restart(tmp
     prepared.parent.mkdir(parents=True)
     prepared.write_text('prepared')
     root = tmp_path/'iter1/glide'
+    from threading import Event
+    second_started, committed = Event(), Event()
     launched, events = set(), []
     def split(*a):
         files = {}
@@ -207,14 +211,18 @@ def test_completed_group_commits_before_next_submission_and_survives_restart(tmp
         return ('DONE' if ref == 1 else 'RUNNING') if ref in launched else None
     def submit(suite, inp, folder, host, **kw):
         ref = int(folder.name.removeprefix('ref_'))
+        events.append(('submit',ref))
+        if ref == 2:
+            second_started.set()
         if ref != 1:
-            # Separate DB connection observes committed results while peers are
-            # still being submitted, before the final polling loop even starts.
+            assert committed.wait(5), 'Collector blocked behind submission'
+            # Separate DB connection observes results during a later submission.
             with database.connect(db) as conn:
                 assert conn.execute('SELECT docking_score,state FROM compound WHERE id=4').fetchone() == (-9., 'docked')
                 assert conn.execute('SELECT docking_score FROM compound WHERE id=5').fetchone() == (None,)
             assert (root/'best_poses.maegz').read_text() == 'published matching pose'
-        events.append(('submit',ref))
+        if ref == 3 and later_failure:
+            raise OSError('later submission failed')
         launched.add(ref)
         save_record(folder, dict(job_id=f'job-{ref}', command=['/suite/glide','-HOST',host]))
         if ref == 1:
@@ -222,6 +230,7 @@ def test_completed_group_commits_before_next_submission_and_survives_restart(tmp
         return dict(job_id=f'job-{ref}')
     def extract(suite, extractor, output, folder):
         assert folder.name == 'ref_1'
+        assert second_started.wait(5), 'Submission blocked behind collection'
         scores, best = folder/'docking_scores.tsv', folder/'best_poses.maegz'
         scores.write_text('id\tdocking_score\n4\t-9\n')
         best.write_text('matching pose')
@@ -234,10 +243,12 @@ def test_completed_group_commits_before_next_submission_and_survives_restart(tmp
         assert (root/'best_poses.maegz').exists()
         changed = update(scores, path)
         events.append(('commit',1))
+        committed.set()
         return changed
     monkeypatch.setattr(_core,'assign_reference_compounds',lambda *a:None)
     monkeypatch.setattr(_core,'split_ligprep_by_reference',split)
-    monkeypatch.setattr(_core,'extract_reference_pose',lambda *a:None)
+    monkeypatch.setattr(glide,'prepare_new_inputs',lambda args,entries,root:{
+        job['reference_id']:job['group_dir']/'glide.in' for job,_ in entries})
     monkeypatch.setattr(_core,'submit_glide',submit)
     monkeypatch.setattr(_core,'extract_scores_and_best_poses',extract)
     monkeypatch.setattr(_core,'merge_best_pose_files',merge)
@@ -246,15 +257,24 @@ def test_completed_group_commits_before_next_submission_and_survives_restart(tmp
     monkeypatch.setattr(glide,'active_jobs',lambda *a:[])
     monkeypatch.setattr(glide.time,'sleep',lambda *a:None)
     ns = SimpleNamespace(iteration=1,poll_interval=1,completion_fraction=0,tail_timeout=0)
-    glide._run_stage(args,ns)
-    assert events.index(('commit',1)) < events.index(('submit',2))
+    if later_failure:
+        with pytest.raises(OSError, match='later submission failed'):
+            glide._run_stage(args,ns)
+    else:
+        glide._run_stage(args,ns)
+    assert events.index(('submit',2)) < events.index(('commit',1))
     assert events.index(('commit',1)) < events.index(('submit',3))
     assert 'Reference 1 completed: DB updated=1, no-pose=0' in capsys.readouterr().out
     assert database.docking_completion_reason(db,1,3) is not None
     with database.connect(db) as conn:
         assert conn.execute('SELECT state,docking_score FROM compound WHERE id IN (5,6)').fetchall() == [
             ('glide_running',None),('glide_running',None)]
-    monkeypatch.setattr(_core,'submit_glide',lambda *a,**k:pytest.fail('Resubmitted saved job'))
+    def resume(suite, inp, folder, host, **kw):
+        assert later_failure and folder.name == 'ref_3', 'Resubmitted saved job'
+        launched.add(3)
+        save_record(folder, dict(job_id='job-3', command=['/suite/glide','-HOST',host]))
+        return dict(job_id='job-3')
+    monkeypatch.setattr(_core,'submit_glide',resume)
     glide._run_stage(args,ns)
     assert events.count(('commit',1)) == 1
     assert (root/'best_poses.maegz').read_text() == 'published matching pose'
@@ -263,6 +283,8 @@ def test_completed_group_commits_before_next_submission_and_survives_restart(tmp
 def test_interleaved_collection_skips_live_tree_without_blocking_finished_peer(tmp_path, monkeypatch):
     jobs = [dict(reference_id=ref, group_dir=tmp_path/f'ref_{ref}',log_file=tmp_path/f'{ref}.log',
                  output_file=tmp_path/f'{ref}.maegz') for ref in (1,2)]
+    for job in jobs:
+        job['group_dir'].mkdir()
     jobs[1]['output_file'].write_text('finished native poses')
     native = dict(spec=dict(launchParams=dict(launchDirectory=str(jobs[0]['group_dir']))))
     monkeypatch.setattr(glide,'active_jobs',lambda *a:[native])

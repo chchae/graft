@@ -10,14 +10,74 @@ from graft.paths import stage_directory
 from graft.stages._logging import detail, progress
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from queue import Empty, Queue
+from threading import Event
 from graft import _core as c
 from graft import database
+from graft.glide_timing import record as record_timing
 from graft.config import glide_group_resources, glide_job_options
 from graft.stages._logging import work_started, timed_stage, format_elapsed
 from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
 from graft.glide_recovery import timeout_pose_files, save_record
 from graft.schrodinger_guard import active_jobs, belongs_to_directory, SubmissionBlocked, job_details, TERMINAL
+
+
+def prepare_new_inputs(args, entries, glide_root):
+    """Batch only unsubmitted groups; never rewrite saved native job inputs."""
+    if not entries:
+        return {}
+    started = time.monotonic()
+    request_file = glide_root / 'new_reference_inputs.json'
+    result_file = glide_root / 'new_reference_cores.json'
+    result_file.unlink(missing_ok=True)
+    request_file.write_text(json.dumps(dict(
+        references=str(args.reference_poses.resolve()), smarts=args.mcs_smarts,
+        groups=[dict(id=job['reference_id'], name=job['reference_name'],
+                     output=str(job['reference_file'].resolve())) for job, _ in entries],
+        result=str(result_file.resolve()))))
+    helper = Path(__file__).resolve().parents[1] / 'glide_inputs.py'
+    c.run_command([args.schrodinger / 'run', helper, request_file.resolve()], cwd=glide_root)
+    cores = json.loads(result_file.read_text())
+    if set(cores) != {str(job['reference_id']) for job, _ in entries}:
+        raise RuntimeError('Batched Glide references have incomplete group coverage')
+    inputs = {}
+    for job, ligand_file in entries:
+        core = cores[str(job['reference_id'])]
+        if not job['reference_file'].is_file() or (args.mcs_smarts and not core):
+            raise RuntimeError('Batched Glide reference or core atoms missing')
+        inputs[job['reference_id']] = c.write_constrained_glide_input(
+            job['group_dir'], args.grid, ligand_file, job['reference_file'], args.mcs_smarts, core)
+    elapsed = time.monotonic() - started
+    record_timing(glide_root, 'prepare_reference_inputs', elapsed)
+    print(f'Glide timing: prepare {len(entries)} reference inputs={elapsed:.2f}s.', flush=True)
+    return inputs
+
+
+def collect_during_submissions(iteration, args, initial, incoming, done, wake,
+                               extractor, merger, glide_root):
+    """One collector owns all result publication while the main thread submits.
+
+    Jobs enter the queue only after their durable JobId has been saved. The
+    collector never submits work and hands remaining jobs back before tail polling.
+    """
+    pending = list(initial)
+    terminal = 0
+    while True:
+        wake.clear()
+        while True:
+            try:
+                pending.append(incoming.get_nowait())
+            except Empty:
+                break
+        pending, finished = collect_finished_groups(
+            iteration, args, pending, extractor, merger, glide_root)
+        terminal += finished
+        if done.is_set() and incoming.empty():
+            return pending, terminal
+        wake.wait(min(5, max(0.1, args.poll_interval)))
 
 
 def prepare_glide_files(glide_root, ligprep_file, live=(), suite=None):
@@ -106,11 +166,14 @@ def merge_current_best(args, glide_root, merger):
 
 
 def process_completed_job(iteration, args, job, extractor, merger, glide_root):
+    started = time.monotonic()
     score_file, best_file = c.extract_scores_and_best_poses(
         args.schrodinger, extractor, job["output_file"], job["group_dir"]
     )
+    extracted = time.monotonic()
     # Publish complete poses before making the group's scores eligible for GBSA.
     merge_current_best(args, glide_root, merger)
+    published = time.monotonic()
     updated = c.update_scores(score_file, args.db_path)
     with c.open_sqlite(args.db_path) as conn:
         scored = {r[0] for r in conn.execute(
@@ -128,6 +191,12 @@ def process_completed_job(iteration, args, job, extractor, merger, glide_root):
             db_path=args.db_path,
         )
     print(f"Reference {job['reference_id']} completed: DB updated={updated}, no-pose={len(failed)}", flush=True)
+    committed = time.monotonic()
+    for phase, seconds in [('extract', extracted-started), ('publish', published-extracted),
+                           ('db', committed-published)]:
+        record_timing(job['group_dir'], phase, seconds)
+    print(f"Glide timing: reference {job['reference_id']} extract={extracted-started:.2f}s, "
+          f"publish={published-extracted:.2f}s, db={committed-published:.2f}s.", flush=True)
     logfile = job.get("log_file", job["group_dir"] / "glide.log")
     if logfile.exists():
         match = re.search(r"Total elapsed time for Glide script\s*=\s*([0-9.]+)\s*seconds",
@@ -220,7 +289,11 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
     """Publish each verified finished group without waiting for its peers."""
     if not jobs:
         return [], 0
+    started = time.monotonic()
     live = active_jobs(args.schrodinger)
+    elapsed = time.monotonic()-started
+    record_timing(glide_root, 'collection_active_job_query', elapsed)
+    detail(f'Glide timing: collection active-job query={elapsed:.2f}s.', flush=True)
     pending = []
     terminal = 0
     for job in jobs:
@@ -229,8 +302,13 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
         if skip_active and any(belongs_to_directory(native, job['group_dir']) for native in live):
             pending.append(job)
             continue
+        started = time.monotonic()
         status = group_status(args.schrodinger, job['group_dir'], job['log_file'], job['output_file'], live,
                               timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
+        elapsed = time.monotonic()-started
+        record_timing(job['group_dir'], 'status_download', elapsed)
+        detail(f"Glide timing: reference {job['reference_id']} status/download="
+               f'{elapsed:.2f}s.', flush=True)
         if status == 'DONE':
             if job['output_file'].exists() and job['output_file'].stat().st_size:
                 process_completed_job(iteration, args, job, extractor, merger, glide_root)
@@ -312,10 +390,8 @@ def _run_stage(args, ns):
     if not group_ligand_files:
         raise RuntimeError('LigPrep output contains no current compound IDs; '
                            'rerun LigPrep for this iteration. Glide claims remain retryable.')
-    ref_extractor = c.create_reference_extractor(glide_root)
     score_extractor = c.create_score_extractor(glide_root)
     merger = c.create_best_pose_merger(glide_root)
-    core_matcher = c.create_core_atom_matcher(glide_root)
 
     jobs = []
     unsubmitted = []
@@ -379,51 +455,49 @@ def _run_stage(args, ns):
     if deferred:
         print(f'Glide: {deferred} reference groups waiting for the shared core budget.', flush=True)
 
-    submission_verified = False
-    collected_during_submission = 0
-    for job, ligand_file in unsubmitted:
-        refid = job['reference_id']
-        if refid not in resources:
-            continue
-        gdir, ref_file = job['group_dir'], job['reference_file']
-        refname = job['reference_name']
-        compounds = job['compounds']
-        host = resources[refid]
-        options = glide_job_options(host, counts[refid])
-        njobs = options[options.index('-NJOBS') + 1] if '-NJOBS' in options else 'host default'
-        print(f"Glide reference {refid}: {counts[refid]} prepared ligands; "
-              f'NJOBS={njobs}, HOST={host}; target ~50 prepared structures/subjob.', flush=True)
-
-        c.extract_reference_pose(
-            args.schrodinger, ref_extractor, args.reference_poses,
-            refname, ref_file, gdir
-        )
-        core_atoms = None
-        if args.mcs_smarts:
-            core_atoms = c.get_core_atoms_from_reference(
-                args.schrodinger, core_matcher, ref_file, args.mcs_smarts, gdir
-            )
-        inp = c.write_constrained_glide_input(
-            gdir, args.grid, ligand_file, ref_file,
-            args.mcs_smarts, core_atoms
-        )
+    selected = [(job, ligand) for job, ligand in unsubmitted if job['reference_id'] in resources]
+    incoming, done, wake = Queue(), Event(), Event()
+    # Each thread opens its own SQLite connections. Only the collector writes
+    # result files/merged poses; the submitter owns new launch records until queued.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='glide-collector') as pool:
+        collector = pool.submit(copy_context().run, collect_during_submissions,
+                                iteration, args, jobs, incoming, done, wake,
+                                score_extractor, merger, glide_root)
         try:
-            if getattr(args, 'use_slurm', False) and not submission_verified:
-                from graft.schrodinger_guard import verify_submission_host
-                verify_submission_host(args.schrodinger, host)
-                submission_verified = True
-            submitted = c.submit_glide(
-                args.schrodinger, inp, gdir, host, ligand_count=counts[refid],
-            )
-        except SubmissionBlocked as exc:
-            print(f'Iteration {iteration}: Glide submissions waiting: {exc}.')
-            return
-        job.update(submitted)
-        mark_group(args.db_path, compounds, "glide_running")
-        jobs.append(job)
-        jobs, finished = collect_finished_groups(iteration, args, jobs, score_extractor, merger,
-                                                glide_root, skip_active=True)
-        collected_during_submission += finished
+            inputs = prepare_new_inputs(args, selected, glide_root)
+            submission_verified = False
+            for job, ligand_file in selected:
+                if collector.done():
+                    collector.result()  # Stop new launches after a collection failure.
+                refid = job['reference_id']
+                host = resources[refid]
+                options = glide_job_options(host, counts[refid])
+                njobs = options[options.index('-NJOBS') + 1] if '-NJOBS' in options else 'host default'
+                print(f"Glide reference {refid}: {counts[refid]} prepared ligands; "
+                      f'NJOBS={njobs}, HOST={host}; target ~50 prepared structures/subjob.', flush=True)
+                started = time.monotonic()
+                try:
+                    if getattr(args, 'use_slurm', False) and not submission_verified:
+                        from graft.schrodinger_guard import verify_submission_host
+                        verify_submission_host(args.schrodinger, host)
+                        submission_verified = True
+                    submitted = c.submit_glide(
+                        args.schrodinger, inputs[refid], job['group_dir'], host,
+                        ligand_count=counts[refid])
+                except SubmissionBlocked as exc:
+                    print(f'Iteration {iteration}: Glide submissions waiting: {exc}.')
+                    return
+                job.update(submitted)
+                mark_group(args.db_path, job['compounds'], "glide_running")
+                incoming.put(job)
+                wake.set()
+                elapsed = time.monotonic()-started
+                record_timing(job['group_dir'], 'submission', elapsed)
+                print(f'Glide timing: reference {refid} submission={elapsed:.2f}s.', flush=True)
+        finally:
+            done.set()
+            wake.set()
+            jobs, collected_during_submission = collector.result()
 
     if not jobs:
         print("No running Glide jobs remain.")

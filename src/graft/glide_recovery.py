@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from graft.stages._logging import detail
+from graft.glide_timing import record as record_timing
 
 from graft.schrodinger_guard import (active_jobs, belongs_to_directory,
     job_details, job_kind, submission_guard, TERMINAL)
@@ -172,9 +173,11 @@ def timeout_pose_files(suite, directory):
 
 def submit(suite, command, directory):
     directory = Path(directory)
-    with submission_guard(suite, 'glide'):
+    started = time.monotonic()
+    with submission_guard(suite, 'glide') as live:
         # Recheck under the same submission mutex as prime_gbsa.
-        live = active_jobs(suite)
+        # Reuse the guard's fresh query under this lock, not a second full
+        # native/remote scan or a snapshot from a previous submission.
         if any(job_kind(j) == 'glide' and belongs_to_directory(j, directory) for j in live):
             raise RuntimeError('Glide group already has a live external job; recover it instead')
         existing = load_record(directory)
@@ -195,6 +198,7 @@ def submit(suite, command, directory):
         record = {'command': [str(x) for x in command], 'job_id': None,
                   'submitted_at': time.time(), 'downloaded': False}
         save_record(directory, record)
+        verified = time.monotonic()
         result = subprocess.run(record['command'], cwd=directory, check=True,
                                 capture_output=True, text=True)
         with (directory / 'glide_launch.log').open('a') as log:
@@ -208,4 +212,9 @@ def submit(suite, command, directory):
             raise RuntimeError('Glide submission returned no JobId; reconcile before retrying')
         record['job_id'] = match.group(1)
         save_record(directory, record)
+        launched = time.monotonic()
+        record_timing(directory, 'safety_recovery', verified-started)
+        record_timing(directory, 'native_launch', launched-verified)
+        print(f'Glide timing: {directory.name} safety/recovery={verified-started:.2f}s, '
+              f'native launch={launched-verified:.2f}s.', flush=True)
         return record['job_id']
