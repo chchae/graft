@@ -2108,6 +2108,23 @@ def ligprep_pending_rows(path, iteration, synthetic_enabled):
         ).fetchall()
 
 
+def glide_input_rotatable_bonds(path, iteration):
+    """Original Glide population, including completed/failed docking on restart.
+
+    Exclude upstream rejects/failures. Each original ID contributes once, regardless
+    of its prepared state count or whether its reference group is already complete.
+    """
+    states = (State.LIGPREPPED, State.GLIDE_RUNNING, State.DOCKED,
+              State.AMBER_RUNNING, State.PRIME_GBSA_RUNNING, State.PRIME_GBSA_DONE,
+              State.MD_GBSA_RUNNING, State.MD_GBSA_DONE, State.FEP_RUNNING, State.FEP_DONE)
+    with connect(path) as conn:
+        return conn.execute(
+            'SELECT id,smiles,rdk_rotatable_bonds FROM compound WHERE iteration=? '
+            f"AND (state IN ({','.join('?' for _ in states)}) OR docking_score IS NOT NULL "
+            "OR (state=? AND failed_stage IN ('glide','amber_gbsa','prime_gbsa','md_gbsa','fep'))) "
+            'ORDER BY id', (iteration, *states, State.FAILED)).fetchall()
+
+
 def glide_pending_rows(path, iteration):
     """Priority order also orders reference groups by their best pending molecule."""
     with connect(path) as conn:

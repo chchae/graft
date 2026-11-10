@@ -1,5 +1,44 @@
 # Independent Graft reconstruction prompt
 
+## Adaptive Glide batch size from iteration RotB (2026-11-11)
+
+**Confirmed user requirement:** for each iteration, derive molecules per CPU from
+`75 - 2.5 * average_number_of_rotatable_bonds` for the compound population.
+This supersedes the fixed 50-structure subdivision for new stage submissions.
+
+**Implementation choices:** interpret molecules per CPU as prepared structures
+per single-CPU native Glide subjob; HOST remains the concurrency budget. Average
+stored RDKit Strict RotB once per original Glide input compound across the whole
+iteration, including already docked and Glide-failed compounds on restart. Exclude
+upstream failures/rejects and other iterations. LigPrep states do not weight the
+mean. Missing legacy descriptors are calculated from original SMILES with the
+same Strict definition without editing scientific rows; invalid data blocks a new
+submission rather than silently changing the population. Compute
+`batch_size = max(1, floor(75 - 2.5 * mean_RotB))`, then for each reference group
+`NJOBS = ceil(actual_prepared_structure_count / batch_size)`. Thus native balanced
+splitting never exceeds that target; small groups/remainders can be smaller.
+Rounding down and clamping to one are implementation choices, not separately
+confirmed requirements. Log mean RotB, original population count, target and the
+actual NJOBS/HOST. Preserve weighted parallel reference-group CPU allocation,
+CPU overrides, constraints, selected poses and immediate result persistence.
+
+Compute the target only when submitting new groups. Saved commands/JobIds and
+active/uncertain/terminal recovery retain their original subdivision. Do not reset
+or resubmit existing jobs/results to apply this change. Counted compatibility
+callers which do not supply a batch target retain 50; uncounted legacy calls and
+LigPrep's independent 100-input policy remain unchanged.
+
+**Verification:** 300 focused adaptive sizing, resource allocation, native command,
+recovery, timeout, submission-guard and stage-barrier tests passed. The updated
+non-default-target integration and adaptive sizing tests also passed (52 tests).
+Full suite: 2,458 passed, seven skipped and the same three previously documented
+baseline failures (real-fragment clash and two MD pending-log expectations).
+Compileall, package/CLI imports and diff whitespace checks passed. A read-only
+project query gives iteration-6 mean RotB 17.0965 and a prospective batch target
+of 32. These checks validate subdivision/recovery, not scientific docking
+accuracy or cluster throughput; no production job or database was reset or
+manually submitted for validation.
+
 ## Restart deleted CReM work after JobServer reinstallation (2026-11-10)
 
 **Confirmed user requirements:** after deleting iteration-5 compound rows and its

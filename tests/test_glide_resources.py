@@ -79,6 +79,8 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
                          (ref, f'REF{ref}'))
             conn.execute("INSERT INTO compound(id,name,smiles,iteration,state,similar_to) "
                          "VALUES (?,?,'C',1,'ligprepped',?)", (ref + 3, f'GEN{ref}', ref))
+            conn.execute('UPDATE compound SET rdk_rotatable_bonds=? WHERE id=?',
+                         ((ref - 1) * 10 + 2, ref + 3))
     args = SimpleNamespace(db_path=db, output=tmp_path, schrodinger=Path('/suite'),
                            host='compute:128', glide_cpus=12, mcs_smarts=None,
                            reference_poses=Path('refs.maegz'), grid=Path('grid.zip'))
@@ -120,9 +122,12 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
         submitted[ref] = host
         count = {1: 2, 2: 10, 3: 1001}[ref]
         assert kwargs['ligand_count'] == count
-        options = glide_job_options(host, count)
+        # Original-compound mean is 12 even with unequal prepared-state counts,
+        # and includes the reserved legacy group's original compound.
+        assert kwargs['molecules_per_job'] == 45
+        options = glide_job_options(host, count, molecules_per_job=kwargs['molecules_per_job'])
         njobs = int(options[options.index('-NJOBS') + 1])
-        assert njobs == (count + 49) // 50
+        assert njobs == (count + 44) // 45
         return {}
     monkeypatch.setattr(_core, 'assign_reference_compounds', lambda *a: None)
     monkeypatch.setattr(_core, 'split_ligprep_by_reference', split)
@@ -142,7 +147,7 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
         assert sum(requested_slots(host) for host in submitted.values()) == (7 if legacy else 12)
         output = capsys.readouterr().out
         assert '1001 prepared ligands; NJOBS=' in output
-        assert 'target ~50 prepared structures/subjob.' in output
+        assert 'target ~45 prepared structures/subjob.' in output
     if legacy:
         assert load_record(root / 'ref_1') == original_record
     with database.connect(db) as conn:

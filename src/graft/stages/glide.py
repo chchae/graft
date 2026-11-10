@@ -3,6 +3,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -17,12 +18,38 @@ from threading import Event
 from graft import _core as c
 from graft import database
 from graft.glide_timing import record as record_timing
-from graft.config import glide_group_resources, glide_job_options
+from graft.config import glide_group_resources, glide_job_options, glide_molecules_per_job
 from graft.stages._logging import work_started, timed_stage, format_elapsed, current_time
 from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
 from graft.glide_recovery import timeout_pose_files, save_record, output_paths, has_timeouts
 from graft.schrodinger_guard import active_jobs, belongs_to_directory, SubmissionBlocked, job_details, TERMINAL
+
+
+def iteration_batch_size(db_path, iteration):
+    """Use stored Strict RotB; calculate missing legacy descriptors without DB edits."""
+    rows = database.glide_input_rotatable_bonds(db_path, iteration)
+    if not rows:
+        raise RuntimeError(f'Iteration {iteration}: no Glide input population for RotB average')
+    values = []
+    for cid, smiles, value in rows:
+        if value is None:
+            from rdkit import Chem
+            from rdkit.Chem import rdMolDescriptors
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None or not mol.GetNumAtoms():
+                raise ValueError(f'Cannot calculate Glide RotB for CMPID_{cid}')
+            value = rdMolDescriptors.CalcNumRotatableBonds(
+                mol, rdMolDescriptors.NumRotatableBondsOptions.Strict)
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f'Invalid Glide RotB for CMPID_{cid}: {value}')
+        values.append(value)
+    average = math.fsum(values) / len(values)
+    size = glide_molecules_per_job(average)
+    print(f'Iteration {iteration}: Glide mean RotB={average:.4f} '
+          f'({len(values)} original compounds); target={size} prepared structures/subjob '
+          '(floor(75 - 2.5 * mean RotB), minimum 1).', flush=True)
+    return size
 
 
 def prepare_new_inputs(args, entries, glide_root):
@@ -491,6 +518,7 @@ def _run_stage(args, ns):
         print(f'Glide: {deferred} reference groups waiting for the shared core budget.', flush=True)
 
     selected = [(job, ligand) for job, ligand in unsubmitted if job['reference_id'] in resources]
+    molecules_per_job = iteration_batch_size(args.db_path, iteration) if selected else None
     incoming, done, wake = Queue(), Event(), Event()
     # Each thread opens its own SQLite connections. Only the collector writes
     # result files/merged poses; the submitter owns new launch records until queued.
@@ -506,10 +534,10 @@ def _run_stage(args, ns):
                     collector.result()  # Stop new launches after a collection failure.
                 refid = job['reference_id']
                 host = resources[refid]
-                options = glide_job_options(host, counts[refid])
+                options = glide_job_options(host, counts[refid], molecules_per_job=molecules_per_job)
                 njobs = options[options.index('-NJOBS') + 1] if '-NJOBS' in options else 'host default'
                 print(f"Glide reference {refid}: {counts[refid]} prepared ligands; "
-                      f'NJOBS={njobs}, HOST={host}; target ~50 prepared structures/subjob.', flush=True)
+                      f'NJOBS={njobs}, HOST={host}; target ~{molecules_per_job} prepared structures/subjob.', flush=True)
                 started = time.monotonic()
                 try:
                     if getattr(args, 'use_slurm', False) and not submission_verified:
@@ -518,7 +546,7 @@ def _run_stage(args, ns):
                         submission_verified = True
                     submitted = c.submit_glide(
                         args.schrodinger, inputs[refid], job['group_dir'], host,
-                        ligand_count=counts[refid])
+                        ligand_count=counts[refid], molecules_per_job=molecules_per_job)
                 except SubmissionBlocked as exc:
                     print(f'Iteration {iteration}: Glide submissions waiting: {exc}.')
                     return

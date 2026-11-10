@@ -682,11 +682,27 @@ def _capped_structure_job_options(host: str, count: int, cpus: int | None) -> li
     return options
 
 
-def glide_job_options(host: str, ligand_count: int, cpus: int | None = None) -> list[str]:
-    """Target 50 prepared structures per subjob, independent of HOST slots."""
+def glide_molecules_per_job(mean_rotatable_bonds: float) -> int:
+    """Round the iteration's adaptive batch target down, with at least one input."""
+    if (isinstance(mean_rotatable_bonds, bool)
+            or not isinstance(mean_rotatable_bonds, (int, float))
+            or not math.isfinite(mean_rotatable_bonds) or mean_rotatable_bonds < 0):
+        raise ValueError('Glide mean_rotatable_bonds must be finite and nonnegative')
+    return max(1, math.floor(75 - 2.5 * mean_rotatable_bonds))
+
+
+def glide_job_options(host: str, ligand_count: int, cpus: int | None = None,
+                      *, molecules_per_job: int = 50) -> list[str]:
+    """Split prepared structures independently of concurrent HOST slots.
+
+    Counted compatibility callers retain 50; the stage supplies its adaptive target.
+    """
     if isinstance(ligand_count, bool) or not isinstance(ligand_count, int) or ligand_count < 1:
         raise ValueError('Glide ligand_count must be a positive integer')
-    return [*schrodinger_job_options(host, cpus), '-NJOBS', str((ligand_count + 49) // 50)]
+    if isinstance(molecules_per_job, bool) or not isinstance(molecules_per_job, int) or molecules_per_job < 1:
+        raise ValueError('Glide molecules_per_job must be a positive integer')
+    return [*schrodinger_job_options(host, cpus), '-NJOBS',
+            str((ligand_count + molecules_per_job - 1) // molecules_per_job)]
 
 
 def ligprep_job_options(host: str, compound_count: int, cpus: int | None = None) -> list[str]:
