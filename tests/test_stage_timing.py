@@ -31,7 +31,8 @@ def test_each_calculation_stage_reports_total_after_verified_completion(tmp_path
     assert driver.supervise_iteration(args,tmp_path/'p.toml',1,[(stage,'module')],30,driver.StopFlag())
     output = capsys.readouterr().out
     assert f'{label} stage complete; total elapsed=01:01:01.5' in output
-    assert 'compounds=1 (ok=1, failed=0); wall/compound=3661.50s' in output
+    timeout = 'timeout_failed=0; ' if stage == 'glide' else ''
+    assert f'compounds=1 (ok=1, failed=0); {timeout}wall/compound=3661.50s' in output
     with database.connect(args.db_path) as conn:
         assert conn.execute('SELECT iteration,stage,started_at,finished_at FROM stage_timing').fetchone() == (1,stage,1000,4661.5)
         assert conn.execute('SELECT state,docking_score,amber_gbsa_score,prime_gbsa_score FROM compound').fetchone() == ('prime_gbsa_done',-10,-30,-40)

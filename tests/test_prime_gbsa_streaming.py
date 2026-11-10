@@ -130,7 +130,17 @@ def test_later_batch_failure_preserves_streamed_score_and_state(tmp_path,monkeyp
 def test_parent_completion_uses_final_output_without_child_transfers(tmp_path,monkeypatch):
     args,directory,record=project(tmp_path)
     monkeypatch.setattr(prime_gbsa_streaming.subprocess,'run',lambda *a,**kw:pytest.fail('obsolete child transfer'))
-    assert prime_gbsa_streaming.collect_completed_subjobs(args,1,directory,record,jobs('DONE')) is None
+    snapshot = jobs('DONE')
+    snapshot[-1]['status'] = 'DONE'
+    assert prime_gbsa_streaming.collect_completed_subjobs(args,1,directory,record,snapshot) is None
+
+
+def test_done_parent_with_live_child_still_imports_other_completed_children(tmp_path, monkeypatch):
+    args,directory,record = project(tmp_path)
+    mock_results(monkeypatch)
+    assert prime_gbsa_streaming.collect_completed_subjobs(args,1,directory,record,jobs('DONE')) == 1
+    assert database.prime_gbsa_progress_counts(args.db_path,1) == (1,1)
+    assert prime_gbsa_async.load_job(directory)['imported_subjobs'] == ['child-1']
 
 
 @pytest.mark.parametrize('failed',[False,True])
@@ -157,3 +167,21 @@ def test_external_job_duration_uses_server_timestamps():
     assert job_elapsed(jobs()[1])==30
     assert job_elapsed({}) is None
     assert format_elapsed(3661.5)=='01:01:01.5'
+
+
+def test_native_prime_commits_child_before_later_child_transfer_failure(tmp_path, monkeypatch):
+    args,directory,record = project(tmp_path)
+    mock_results(monkeypatch)
+    snapshot = jobs()
+    snapshot[-1]['status'] = 'DONE'
+    def fetch(jsc, folder, saved, child, output):
+        if child['jobId'] == 'child-2':
+            assert database.prime_gbsa_progress_counts(args.db_path,1) == (1,1)
+            raise RuntimeError('later child transfer failed')
+        output.write_bytes(b'verified completed child')
+        return True
+    monkeypatch.setattr(prime_gbsa_streaming,'_fetch_output',fetch)
+    with pytest.raises(RuntimeError,match='later child transfer failed'):
+        prime_gbsa_streaming.collect_completed_subjobs(args,1,directory,record,snapshot)
+    assert prime_gbsa_async.load_job(directory)['imported_subjobs'] == ['child-1']
+    assert database.prime_gbsa_progress_counts(args.db_path,1) == (1,1)

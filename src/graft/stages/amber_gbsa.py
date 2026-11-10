@@ -53,6 +53,8 @@ def _run_stage(args, iteration):
             amber_gbsa.prepare_reference_receptor(args)
         if not args.amber_receptor.is_file():
             raise FileNotFoundError(f'Amber receptor not found: {args.amber_receptor}')
+        from graft.attraction_point import prepare
+        prepare(args, iteration, 'amber_gbsa')
         ids = database.claim_amber_candidates(args.db_path, iteration, args.target_count, args.amber_keep_count)
         if ids:
             record = amber_gbsa.new_record(args, iteration, directory, ids)

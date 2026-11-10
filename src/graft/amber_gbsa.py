@@ -262,7 +262,9 @@ def poll(args, iteration, directory, record):
         raise RuntimeError('Compound identity changed during saved Amber work')
     remote = shlex.quote(record['remote_dir'])
     slurm = record.get('mode') in (amber_slurm.SINGLE, amber_slurm.ARRAY)
-    native = amber_slurm.job_state(directory, record) if slurm else None
+    # Submit a new array before collecting; for existing jobs, commit atomic
+    # completed result files before a slow/unavailable scheduler-status query.
+    native = amber_slurm.job_state(directory, record) if slurm and not record.get('slurm_job_id') else None
     helper = 'amber_array.py' if record.get('mode') == amber_slurm.ARRAY else 'worker.py'
     collect_command = f'python3 {remote}/{helper} collect {remote}'
     if record.get('mode') == amber_slurm.ARRAY:
@@ -277,8 +279,12 @@ def poll(args, iteration, directory, record):
     snapshot = json.loads(response.stdout)
     save(directory / 'remote_snapshot.json', snapshot)
     results = snapshot['results']
-    database.store_amber_results(args.db_path, iteration, results, record['compound_ids'],
-                                 **({'retry_run_id': record['run_id']} if record.get('retry_failed') else {}))
+    updated = database.store_amber_results(args.db_path, iteration, results, record['compound_ids'],
+                                         **({'retry_run_id': record['run_id']} if record.get('retry_failed') else {}))
+    if updated:
+        print(f"Amber {record['run_id']}: DB updated={updated}; completed results committed.", flush=True)
+    if slurm and native is None:
+        native = amber_slurm.job_state(directory, record)
     resolved = amber_slurm.resolve_timeouts(record, saved_input, native, snapshot) if native else None
     if resolved is not None:
         results, timed_out = resolved

@@ -215,7 +215,8 @@ def choose_iteration(args, requested=None):
     for iteration in iterations:
         if (database.md_gbsa_selection(args.db_path,iteration) is not None and
                 database.md_gbsa_completion_reason(args.db_path,iteration,
-                    minimum=1 if getattr(args, 'md_gbsa_enabled', False) else 0)):
+                    minimum=1 if (getattr(args, 'md_gbsa_enabled', False)
+                                  and getattr(args, 'generation_method', None) != 'crem') else 0)):
             return iteration
         from graft.amber_gbsa import load_job
         if load_job(stage_directory(args.output, iteration, 'amber_gbsa')) is not None:
@@ -395,13 +396,15 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
             reason = f"worker exited with status {rc}" if rc else database.stage_completion_reason(
                 args.db_path, iteration, stage, args.target_count, args.prime_gbsa_input_count,
                 args.synthetic_feasibility_enabled, database.amber_keep_count(args),
+                getattr(args, 'prime_gbsa_enabled', True),
             )
             if reason is None:
                 reason = external_completion_reason(args, iteration, stage)
             if (reason is None and stage == 'md-gbsa'
                     and getattr(args, 'md_gbsa_enabled', False)
                     and database.md_gbsa_selection(args.db_path, iteration) is not None):
-                advancement = database.md_gbsa_completion_reason(args.db_path, iteration, minimum=1)
+                advancement = database.md_gbsa_completion_reason(args.db_path, iteration,
+                    minimum=0 if (iteration > 0 and getattr(args, 'generation_method', None) == 'crem') else 1)
                 if advancement:
                     print(f'[driver  ] iteration {iteration}: progression blocked: {advancement}. '
                           'Terminal MD failures are resolved work, not usable scores; '

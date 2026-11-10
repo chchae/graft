@@ -123,12 +123,52 @@ def admit_md(settings, tasks, progress, status_file):
             f"CMPID_{cid} replica {replica+1}: {result.get('phase','md')} {result['status']}")
 
 
-def settings_for(args, iteration):
-    source=stage_directory(args.output,iteration,'prime_gbsa')/'prime_gbsa_final.maegz'
+def pose_source(args, iteration, ranking, run):
+    """Pair original Glide/reference poses with a receptor, without Prime scoring."""
+    from graft import _core
+    folder = stage_directory(args.output, iteration, 'md_gbsa')/'inputs'/run
+    folder.mkdir(parents=True, exist_ok=True)
+    poses = (args.reference_poses if iteration == 0 else
+             stage_directory(args.output, iteration, 'glide')/'best_poses.maegz')
+    if not poses.is_file():
+        raise FileNotFoundError(f'Missing MD source poses: {poses}')
+    receptor = getattr(args, 'prime_gbsa_receptor', None) or getattr(args, 'amber_receptor', None)
+    default = stage_directory(args.output, 0, 'prime_gbsa')/'receptor.maegz'
+    if receptor is None or (receptor == default and not receptor.is_file()):
+        receptor = folder/'receptor.maegz'
+        extractor = _core.create_grid_receptor_extractor(folder)
+        _core.run_command([args.schrodinger/'run', extractor, args.grid, receptor], cwd=folder)
+    if not receptor.is_file():
+        raise FileNotFoundError(f'Missing MD receptor: {receptor}')
+    ids_file = folder/'ids.txt'
+    ids_file.write_text(''.join(f'{cid}\n' for cid in ranking['ids']))
+    source = folder/'md_input.maegz'
+    builder = _core.create_prime_gbsa_pv_builder(folder)
+    command = [args.schrodinger/'run', builder, receptor, poses, ids_file, source]
+    if iteration == 0:
+        reference_map = folder/'reference_ids.json'
+        reference_map.write_text(json.dumps(ranking['reference_ids']))
+        command.append(reference_map)
+    _core.run_command(command, cwd=folder)
     if not source.is_file():
+        raise RuntimeError(f'MD input builder did not publish a pose file: {source}')
+    # Validate every CMPID and receptor/ligand pair before remote work or claims.
+    # Reuse the exact native exporter without changing frozen scientific helpers.
+    validated = folder/'validated'
+    validated.mkdir()
+    _core.run_command([args.schrodinger/'run', Path(__file__).with_name('md_gbsa_native.py'),
+                       'export', validated, '--source', source, '--ids', json.dumps(ranking['ids'])], cwd=folder)
+    return source
+
+
+def settings_for(args, iteration, ranking=None):
+    run=uuid.uuid4().hex
+    source=stage_directory(args.output,iteration,'prime_gbsa')/'prime_gbsa_final.maegz'
+    if ranking is not None and ranking['ranking_source'] != 'prime_gbsa':
+        source = pose_source(args, iteration, ranking, run)
+    elif not source.is_file():
         raise RuntimeError(f'Missing final optimized Prime complex file: {source}')
     helper=Path(__file__).with_name('md_gbsa_native.py')
-    run=uuid.uuid4().hex
     root=args.md_gbsa_remote_work_dir.rstrip('/')+'/'+run
     settings = dict(ssh_host=args.md_gbsa_ssh_host,suite=args.md_gbsa_schrodinger,
                 gpu_host=args.md_gbsa_gpu_host,cpu_host=args.md_gbsa_cpu_host,
@@ -139,6 +179,8 @@ def settings_for(args, iteration):
                 replicates=args.md_gbsa_replicates,
                 protocol={key:getattr(args,'md_gbsa_'+key) for key in
                           ('production_ns','equilibration_ns','snapshots','analysis_start_fraction','seed')})
+    if ranking is not None:
+        settings.update(ranking_source=ranking['ranking_source'], ranking_ids=ranking['ids'])
     from graft.md_gbsa_local import add_settings
     return add_settings(args, settings)
 
@@ -174,26 +216,67 @@ def prepare(settings, ids):
         input=json.dumps(dict(settings=settings,ids=ids)))
 
 
+def persist_ready_compound(args, iteration, cid, settings, progress, directory):
+    """Commit a complete molecule ensemble before inspecting unrelated peers."""
+    from graft.md_gbsa_native import save
+    results=[progress.get(str((cid,r))) for r in range(settings['replicates'])]
+    if all(v and v['status']=='done' for v in results):
+        for replica, result in enumerate(results):
+            expected = dict(settings['protocol'], seed=1+(settings['protocol']['seed']+replica-1)%2147483647)
+            if result.get('id') != cid or result.get('protocol') != expected:
+                raise RuntimeError('Remote MD ensemble identity/protocol does not match the frozen task')
+        frames=[dict(frame,replica=r+1) for r,v in enumerate(results) for frame in v['snapshots']]
+        values=[f['score'] for f in frames]
+        merged=dict(id=cid,mean=statistics.mean(values),std=statistics.stdev(values) if len(values)>1 else 0.0,snapshots=frames,
+                    protocol=settings['protocol'],replicate_means=[v['mean'] for v in results],
+                    qc=dict(ligand_rmsd_mean=statistics.mean(f['ligand_rmsd'] for f in frames),
+                            ligand_rmsd_max=max(f['ligand_rmsd'] for f in frames)),
+                    remote_root=settings['root'],suite=settings['suite'],
+                    native=[v.get('native',{}) for v in results])
+        if settings.get('local_compute'):
+            merged['local_compute']=settings['local_compute']
+        save(directory/f'CMPID_{cid}.json',merged)
+        database.store_md_gbsa_result(args.db_path,iteration,cid,merged)
+        print(f'MD-GBSA CMPID_{cid}: DB committed; snapshots={len(frames)}.', flush=True)
+        return True
+    elif all(v and v['status'] in ('done','failed') for v in results) and any(v['status']=='failed' for v in results):
+        from graft import _core
+        _core.set_compound_state([cid],State.FAILED,failed_stage='md_gbsa',
+                                 failure_message='; '.join(v.get('error','Native calculation failed') for v in results if v['status']=='failed')[:4000],db_path=args.db_path)
+        return True
+    return False
+
+
 def run(args, iteration):
     saved=database.md_gbsa_selection(args.db_path,iteration)
     if saved is None and not getattr(args,'md_gbsa_enabled',False):
         print('MD-GBSA disabled; no saved work to recover.')
         return
     if saved is None:
-        # Retire native upstream work before freezing the final Prime ranking.
+        # Retire native upstream work before freezing any final score ranking.
         from graft.prime_gbsa_async import load_job
         from graft.driver import external_completion_reason
         if load_job(stage_directory(args.output,iteration,'prime_gbsa')) is not None:
             print('MD-GBSA waiting for Prime submission recovery.'); return
-        reason=external_completion_reason(args,iteration,'prime_gbsa')
-        if reason:
-            print('MD-GBSA waiting: '+reason); return
+        for stage in ('ligprep', 'glide', 'amber-gbsa', 'prime_gbsa'):
+            reason=external_completion_reason(args,iteration,stage)
+            if reason:
+                print('MD-GBSA waiting: '+reason); return
+        for worker in ('generate', 'druglike', 'synthetic_feasibility', 'ligprep', 'glide', 'amber_gbsa', 'prime_gbsa', 'fep'):
+            if database.stage_is_running(args.db_path, worker):
+                print(f'MD-GBSA waiting: {worker} worker is still running'); return
+        prime_enabled = getattr(args, 'prime_gbsa_enabled', True)
         reason=database.md_gbsa_readiness_reason(args.db_path,iteration,
                     target_count=args.target_count,prime_count=args.prime_gbsa_input_count,
-                    amber_keep_count=database.amber_keep_count(args))
+                    amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
         if reason:
             print(reason); return
-        proposed=settings_for(args,iteration)
+        from graft.attraction_point import prepare as prepare_priority
+        prepare_priority(args, iteration, 'md_gbsa')
+        ranking = database.md_gbsa_candidates(args.db_path, iteration,
+                    count=getattr(args, 'md_gbsa_input_count', None),
+                    ratio=getattr(args, 'md_gbsa_input_ratio', .5), prime_enabled=prime_enabled)
+        proposed=settings_for(args,iteration,ranking)
         # Read-only compatibility check precedes SQLite claims and job launch.
         ssh(proposed['ssh_host'],'mkdir -p '+shlex.quote(proposed['root']))
         upload(proposed['ssh_host'],Path(__file__).with_name('md_gbsa_native.py'),proposed['helper'])
@@ -204,7 +287,7 @@ def run(args, iteration):
         saved=database.freeze_md_gbsa_selection(args.db_path,iteration,proposed,
                     count=args.md_gbsa_input_count,ratio=args.md_gbsa_input_ratio,
                     target_count=args.target_count,prime_count=args.prime_gbsa_input_count,
-                    amber_keep_count=database.amber_keep_count(args))
+                    amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
     settings=saved['settings']
     directory=stage_directory(args.output,iteration,'md_gbsa')
     if settings.get('local_compute'):
@@ -243,15 +326,28 @@ def run(args, iteration):
            if rows[cid][1] is None and rows[cid][2:]!=(State.FAILED,'md_gbsa')]
     tasks.sort(key=lambda t: str((t[0],t[1])) not in progress)
     admit_md(settings, tasks, progress, status_file)
+    resolved = {cid for cid, row in rows.items()
+                if row[1] is not None or row[2:] == (State.FAILED, 'md_gbsa')}
+    terminal_replicas = set()
+    # Revalidate cached completed ensembles/collected coordinates first. A saved
+    # progress snapshot alone must never bypass native/transport verification.
+    tasks.sort(key=lambda t: progress.get(str((t[0],t[1])),{}).get('status') != 'done')
     # Prepare and submit each ready molecule in the same pass. Preparing ALL
     # ready frames first delays the first Prime launch by every peer's extraction
     # and transfer. The native pool still includes other already prepared inputs,
     # and retains its host reservation while later molecules become ready.
     for cid,replica,root in tasks:
+        if cid in resolved:
+            continue
         key=str((cid,replica)); prior=progress.get(key)
         # Running/uncertain MDs were already polled in the admission pass.
         # Unstarted tasks stay queued; only terminal MD work enters GBSA.
         if prior.get('phase') == 'md':
+            if prior.get('status') == 'failed':
+                terminal_replicas.add((cid,replica))
+                if all((cid,r) in terminal_replicas for r in range(settings['replicates'])):
+                    if persist_ready_compound(args, iteration, cid, settings, progress, directory):
+                        resolved.add(cid)
             continue
         # Local cross-project lock and registry bridge local/remote JobServers.
         # Native Prime parents are serialized (legacy: 7 slots; local: up to 192).
@@ -275,32 +371,16 @@ def run(args, iteration):
             print(str(exc)); return
         progress[key]=result
         save(status_file,progress)
+        if result['status'] in ('done','failed'):
+            terminal_replicas.add((cid,replica))
+        if all((cid,r) in terminal_replicas for r in range(settings['replicates'])):
+            if persist_ready_compound(args, iteration, cid, settings, progress, directory):
+                resolved.add(cid)
         (print if result['status']=='failed' else log_progress)(
             f"CMPID_{cid} replica {replica+1}: {result.get('phase','ensemble')} {result['status']}")
         if result['status']=='failed':
             # Keep the selected compound owned until every submitted replica retires.
             continue
-    for cid in saved['ids']:
-        if rows[cid][1] is not None:
-            continue
-        results=[progress.get(str((cid,r))) for r in range(settings['replicates'])]
-        if all(v and v['status']=='done' for v in results):
-            frames=[dict(frame,replica=r+1) for r,v in enumerate(results) for frame in v['snapshots']]
-            values=[f['score'] for f in frames]
-            merged=dict(id=cid,mean=statistics.mean(values),std=statistics.stdev(values) if len(values)>1 else 0.0,snapshots=frames,
-                        protocol=settings['protocol'],replicate_means=[v['mean'] for v in results],
-                        qc=dict(ligand_rmsd_mean=statistics.mean(f['ligand_rmsd'] for f in frames),
-                                ligand_rmsd_max=max(f['ligand_rmsd'] for f in frames)),
-                        remote_root=settings['root'],suite=settings['suite'],
-                        native=[v.get('native',{}) for v in results])
-            if settings.get('local_compute'):
-                merged['local_compute']=settings['local_compute']
-            save(directory/f'CMPID_{cid}.json',merged)
-            database.store_md_gbsa_result(args.db_path,iteration,cid,merged)
-        elif all(v and v['status'] in ('done','failed') for v in results) and any(v['status']=='failed' for v in results):
-            from graft import _core
-            _core.set_compound_state([cid],State.FAILED,failed_stage='md_gbsa',
-                                     failure_message='; '.join(v.get('error','Native calculation failed') for v in results if v['status']=='failed')[:4000],db_path=args.db_path)
     database.request_md_cycle_retries(args.db_path,iteration)
     if settings.get('local_compute'):
         md_gbsa_local.cleanup_committed(args, iteration, settings, directory)

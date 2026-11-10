@@ -123,12 +123,15 @@ def test_timeout_collection_blocks_downstream_until_pose_publication_and_commit(
         assert conn.execute('SELECT docking_score,state FROM compound WHERE id=2').fetchone() == (-9, 'docked')
         assert conn.execute("SELECT COUNT(*) FROM compound WHERE iteration=1 AND state='failed'").fetchone()[0] == 2
     assert database.docking_completion_reason(args.db_path, 1, 3) is None
+    from graft.stages._summary import completion_summary
+    assert 'compounds=3 (ok=1, failed=2); timeout_failed=2;' in completion_summary(args, 1, 'glide', 120)
     assert recovery.load_record(group)['timeout_results_imported']
     # Lost group marker after commit: repair from SQLite without rereading outputs.
     record = recovery.load_record(group);record.pop('timeout_results_imported');recovery.save_record(group, record)
     monkeypatch.setattr(glide, 'timeout_pose_files', lambda *a: pytest.fail('repeated collection'))
     glide.process_timeout_job(1, args, job, 'merger', group.parent)
     assert recovery.load_record(group)['timeout_results_imported']
+    assert 'timeout_failed=2;' in completion_summary(args, 1, 'glide', 120)
 
 
 def test_zero_native_outputs_preserve_failed_unscored_compounds(project, monkeypatch):
@@ -139,6 +142,8 @@ def test_zero_native_outputs_preserve_failed_unscored_compounds(project, monkeyp
     with database.connect(args.db_path) as conn:
         assert conn.execute('SELECT COUNT(docking_score) FROM compound WHERE iteration=1').fetchone()[0] == 0
     assert recovery.load_record(job['group_dir'])['timeout_result_count'] == 0
+    from graft.stages._summary import completion_summary
+    assert 'timeout_failed=3;' in completion_summary(args, 1, 'glide', 120)
 
 
 def test_partial_import_refuses_foreign_ids_conflicts_and_started_downstream(project):

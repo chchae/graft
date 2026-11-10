@@ -314,3 +314,23 @@ def test_pending_remote_reason_is_visible(project, monkeypatch, capsys):
     state.update(status='pending', reason='Remote CPU/license reservation')
     assert local.poll_batch(0, args, directory, record) is None
     assert 'Remote CPU/license reservation' in capsys.readouterr().out
+
+
+def test_local_prime_commits_first_child_before_later_child_collection_failure(project, monkeypatch):
+    args,directory,record,root,state = project
+    children = ['first-child','second-child']
+    for child in children:
+        path = root/'subjobs'/child/'result.maegz'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(child.encode())
+    first = root/'subjobs'/children[0]/'result.maegz'
+    state.update(status='running',subjobs=[dict(job_id=children[0],sha256=digest(first)),
+                                          dict(job_id=children[1],sha256='invalid checksum')])
+    def extract(command,**kw):
+        Path(command[-1]).write_text('id\tprime_gbsa_score\n1\t-50\n')
+    monkeypatch.setattr(_core,'run_command',extract)
+    with pytest.raises(RuntimeError,match='checksum differs'):
+        local.poll_batch(1,args,directory,record)
+    assert database.prime_gbsa_scored_ids(args.db_path,1) == [1]
+    assert prime.load_job(directory)['imported_subjobs'] == [children[0]]
+    assert root.exists()  # No premature cleanup or loss of the other child.

@@ -127,7 +127,7 @@ def process_completed_job(iteration, args, job, extractor, merger, glide_root):
             failure_message="No Glide pose",
             db_path=args.db_path,
         )
-    detail(f"Reference {job['reference_id']} completed: DB updated={updated}, no-pose={len(failed)}")
+    print(f"Reference {job['reference_id']} completed: DB updated={updated}, no-pose={len(failed)}", flush=True)
     logfile = job.get("log_file", job["group_dir"] / "glide.log")
     if logfile.exists():
         match = re.search(r"Total elapsed time for Glide script\s*=\s*([0-9.]+)\s*seconds",
@@ -214,6 +214,40 @@ def recover_timeout_groups(args, iteration, glide_root):
         rows = database.glide_timeout_rows(args.db_path, iteration, refid)
         job = dict(group_dir=directory, reference_id=refid, compounds=rows)
         process_timeout_job(iteration, args, job, merger, glide_root)
+
+
+def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root, *, skip_active=False):
+    """Publish each verified finished group without waiting for its peers."""
+    if not jobs:
+        return [], 0
+    live = active_jobs(args.schrodinger)
+    pending = []
+    terminal = 0
+    for job in jobs:
+        # Between submissions, skip known active trees cheaply. The normal
+        # polling pass still reconciles their runtime limits and live children.
+        if skip_active and any(belongs_to_directory(native, job['group_dir']) for native in live):
+            pending.append(job)
+            continue
+        status = group_status(args.schrodinger, job['group_dir'], job['log_file'], job['output_file'], live,
+                              timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
+        if status == 'DONE':
+            if job['output_file'].exists() and job['output_file'].stat().st_size:
+                process_completed_job(iteration, args, job, extractor, merger, glide_root)
+            else:
+                mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide',
+                           message='Completed Glide job produced no poses')
+        elif status is not None and status not in ('RUNNING', 'UNKNOWN'):
+            if (load_record(job['group_dir']) or {}).get('timeout_requested_at'):
+                process_timeout_job(iteration, args, job, merger, glide_root)
+            else:
+                mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide',
+                           message=failure_reason(job['group_dir'], status))
+        else:
+            pending.append(job)
+            continue
+        terminal += 1
+    return pending, terminal
 
 
 @timed_stage("Glide stage worker")
@@ -346,6 +380,7 @@ def _run_stage(args, ns):
         print(f'Glide: {deferred} reference groups waiting for the shared core budget.', flush=True)
 
     submission_verified = False
+    collected_during_submission = 0
     for job, ligand_file in unsubmitted:
         refid = job['reference_id']
         if refid not in resources:
@@ -357,7 +392,7 @@ def _run_stage(args, ns):
         options = glide_job_options(host, counts[refid])
         njobs = options[options.index('-NJOBS') + 1] if '-NJOBS' in options else 'host default'
         print(f"Glide reference {refid}: {counts[refid]} prepared ligands; "
-              f'NJOBS={njobs}, HOST={host}; at most 100 prepared structures/subjob.', flush=True)
+              f'NJOBS={njobs}, HOST={host}; target ~50 prepared structures/subjob.', flush=True)
 
         c.extract_reference_pose(
             args.schrodinger, ref_extractor, args.reference_poses,
@@ -386,39 +421,23 @@ def _run_stage(args, ns):
         job.update(submitted)
         mark_group(args.db_path, compounds, "glide_running")
         jobs.append(job)
+        jobs, finished = collect_finished_groups(iteration, args, jobs, score_extractor, merger,
+                                                glide_root, skip_active=True)
+        collected_during_submission += finished
 
     if not jobs:
         print("No running Glide jobs remain.")
         return
 
-    total = len(jobs)
-    terminal = 0
+    total = len(jobs) + collected_during_submission
+    terminal = collected_during_submission
     tail_started = None
     start = time.monotonic()
     pending = list(jobs)
 
     while pending:
-        live = active_jobs(args.schrodinger)
-        rest = []
-        for job in pending:
-            status = group_status(args.schrodinger, job['group_dir'], job['log_file'], job['output_file'], live,
-                                  timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
-            if status == 'DONE':
-                if job['output_file'].exists() and job['output_file'].stat().st_size:
-                    process_completed_job(iteration, args, job, score_extractor, merger, glide_root)
-                else:
-                    mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide', message='Completed Glide job produced no poses')
-                terminal += 1
-                continue
-            if status is not None and status not in ('RUNNING', 'UNKNOWN'):
-                if (load_record(job['group_dir']) or {}).get('timeout_requested_at'):
-                    process_timeout_job(iteration, args, job, merger, glide_root)
-                else:
-                    mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide', message=failure_reason(job['group_dir'], status))
-                terminal += 1
-                continue
-            rest.append(job)
-        pending = rest
+        pending, finished = collect_finished_groups(iteration, args, pending, score_extractor, merger, glide_root)
+        terminal += finished
         if not pending:
             break
 

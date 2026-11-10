@@ -57,16 +57,18 @@ def _ready(args, iteration):
         reason = database.generation_completion_reason(args, previous, 0)
         if reason:
             return f'iteration {previous}: {reason}'
-        for stage in ('glide','prime_gbsa'):
+        for stage in ('ligprep','glide','amber-gbsa','prime_gbsa'):
             reason = external_completion_reason(args, previous, stage)
             if reason:
                 return f'iteration {previous}: {reason}'
-        if database.stage_is_running(args.db_path,'amber_gbsa'):
-            return 'Amber worker is still running'
-        reason = database.md_gbsa_completion_reason(args.db_path, previous,
-                    minimum=1 if getattr(args, 'md_gbsa_enabled', False) else 0)
-        if reason:
-            return f'iteration {previous}: {reason}'
+        for worker in ('amber_gbsa','prime_gbsa','md_gbsa','fep'):
+            if database.stage_is_running(args.db_path, worker):
+                return f'{worker} worker is still running'
+        if (getattr(args, 'md_gbsa_enabled', False)
+                or database.md_gbsa_selection(args.db_path, previous) is not None):
+            reason = database.md_gbsa_completion_reason(args.db_path, previous)
+            if reason:
+                return f'iteration {previous}: {reason}'
     return None
 
 
@@ -107,26 +109,28 @@ def run_stage(args, requested_iteration):
     Path(cfg['reference-smiles']).write_text(''.join(f'{s}\tCMPID_{cid}\n' for cid,s in refs))
     if saved:
         parents = saved['plan']['parents']
+        score_source = saved['plan']['score_source']
     elif iteration == 1:
         mol, history = frames.initial_frame(cfg['parents'], cfg['reference-mcs'], growth_mode='fixed-frame')
         history['lineage_id'] = hashlib.sha256(json.dumps(history,sort_keys=True).encode()).hexdigest()
         parents = [dict(smiles=provenance.canonical_smiles(mol),molblock=Chem.MolToMolBlock(mol),history=history)]
+        score_source = 'reference'
     else:
         if database.crem_generation(args.db_path, iteration-1) is None:
             raise RuntimeError('Preceding iteration has no CReM provenance; use a new project output')
-        parents = database.crem_parent_poses(args.db_path, iteration-1, args.elite_count)
+        score_source, parents = database.crem_parent_selection(args.db_path, iteration-1, args.elite_count)
         if not parents:
-            raise RuntimeError('No finite MD-GBSA elites with saved CReM provenance; generation stopped')
+            raise RuntimeError('No finite scored elites with saved CReM provenance; generation stopped')
         parents=[dict(parent,history=frames.with_crem_depth_limits(parent['history'],cfg['reference-mcs']))
                  for parent in parents]
     fingerprint = _fingerprint(cfg, parents)
     plan = dict(protocol='crem_pipeline_single_expansion_v1',target_count=args.target_count,
-                elite_count=args.elite_count,score_source='md_gbsa',parents=parents,fingerprint=fingerprint)
+                elite_count=args.elite_count,score_source=score_source,parents=parents,fingerprint=fingerprint)
     database.freeze_crem_generation(args.db_path, iteration, plan)
     _save_scaffold(args, iteration, cfg, parents)
     db = folder/'combichem3d.sqlite'
     work_started(f'Iteration {iteration}: CReM single expansion from {len(parents)} parent(s); '
-                 f'target={args.target_count} novel compounds before drug likeness.')
+                 f'ranking={score_source}; target={args.target_count} novel compounds before drug likeness.')
     with database.stage_lock(db,'combichem3d'):
         # SQLite coordination and durable journals are reused, but no inner cycle selection occurs.
         excluded = [s for _,s in database.project_smiles(args.db_path)]

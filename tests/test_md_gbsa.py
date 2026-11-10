@@ -590,3 +590,77 @@ def test_disabling_md_still_waits_for_saved_pending_work(db,iteration):
     with database.connect(db) as conn:
         conn.execute('UPDATE compound SET state=?,failed_stage=NULL WHERE id=1', (State.MD_GBSA_RUNNING,))
     assert driver.choose_iteration(args)==iteration
+
+
+@pytest.mark.parametrize('local_compute', [False, True])
+@pytest.mark.parametrize('replicas', [1, 2])
+@pytest.mark.parametrize('cached', [False, True])
+def test_md_commits_complete_molecule_before_slow_or_failed_peer(db, monkeypatch, local_compute, replicas, cached):
+    from contextlib import nullcontext
+    from graft import schrodinger_guard as guard, md_gbsa_local
+    settings = dict(protocol=dict(snapshots=1,seed=1),replicates=replicas,root='/frozen',suite='/suite',gpus=2)
+    if local_compute:
+        settings['local_compute'] = dict(root=str(db.parent/'share'))
+        for name in ('prepare','cleanup_committed','finish_cleanup'):
+            monkeypatch.setattr(md_gbsa_local,name,lambda *a:None)
+    selection = database.freeze_md_gbsa_selection(db,1,settings,count=2,target_count=4,prime_count=4)
+    directory = db.parent/'iter01/09-md_gbsa'
+    directory.mkdir(parents=True)
+    def complete(cid, replica):
+        score = -50.-replica
+        return dict(status='done',id=cid,mean=score,std=0.,
+                    protocol=dict(settings['protocol'],seed=replica+1),
+                    snapshots=[dict(frame=0,score=score,ligand_rmsd=.5)])
+    if cached:
+        native.save(directory/'progress.json', {str((1,r)):complete(1,r) for r in range(replicas)})
+    monkeypatch.setattr(md_gbsa,'prepare',lambda *a:None)
+    monkeypatch.setattr(guard,'register_md_remote',lambda *a:None)
+    monkeypatch.setattr(guard,'unregister_md_remote',lambda *a:None)
+    monkeypatch.setattr(guard,'submission_guard',lambda *a,**kw:nullcontext())
+    monkeypatch.setattr(guard,'active_jobs',lambda *a:[])
+    first_failure = [True]
+    def poll(cid, replica):
+        if cid == 1:
+            # Cached results are revalidated through the native/transport poll;
+            # every replica must be checked again before the molecule commits.
+            if replica < replicas-1:
+                assert database.md_gbsa_rows(db,1)[1][1] is None
+            return complete(cid,replica)
+        with database.connect(db) as conn:
+            assert conn.execute('SELECT md_gbsa_score,state FROM compound WHERE id=1').fetchone() == (
+                -50.-(replicas-1)/2, 'md_gbsa_done')
+            assert conn.execute('SELECT md_gbsa_score FROM compound WHERE id=2').fetchone() == (None,)
+        assert (directory/'CMPID_1.json').is_file()
+        if first_failure[0]:
+            raise RuntimeError('later molecule transfer failed')
+        return dict(phase='prime',status='running')
+    def remote(config, action, root):
+        if action == 'md-status':
+            return 'GRAFT_MD='+json.dumps(dict(phase='frames',status='pending'))
+        cid = int(root.split('CMPID_')[1].split('/')[0])
+        replica = int(root.rsplit('replica',1)[1])-1
+        return 'GRAFT_MD='+json.dumps(poll(cid,replica))
+    monkeypatch.setattr(md_gbsa,'remote_call',remote)
+    if local_compute:
+        monkeypatch.setattr(md_gbsa_local,'poll',lambda config,cid,replica,*a,**kw:poll(cid,replica))
+    args = SimpleNamespace(db_path=db,output=db.parent,schrodinger=Path('/suite'))
+    with pytest.raises(RuntimeError,match='later molecule transfer failed'):
+        md_gbsa.run(args,1)
+    assert database.md_gbsa_selection(db,1) == selection
+    assert database.completed_md_ids(db,1) == {1}
+    first_failure[0] = False
+    md_gbsa.run(args,1)
+    assert database.completed_md_ids(db,1) == {1}
+    with database.connect(db) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM compound_md_gbsa_result').fetchone() == (1,)
+
+
+def test_cached_md_ensemble_with_wrong_identity_is_not_committed(db):
+    settings = dict(protocol=dict(snapshots=1,seed=1),replicates=1,root='/frozen',suite='/suite')
+    database.freeze_md_gbsa_selection(db,1,settings,count=1,target_count=4,prime_count=4)
+    progress = {'(1, 0)':dict(status='done',id=999,protocol=settings['protocol'],
+                            snapshots=[dict(frame=0,score=-50.,ligand_rmsd=.5)],mean=-50.)}
+    args = SimpleNamespace(db_path=db)
+    with pytest.raises(RuntimeError,match='identity/protocol'):
+        md_gbsa.persist_ready_compound(args,1,1,settings,progress,db.parent)
+    assert database.completed_md_ids(db,1) == set()

@@ -109,6 +109,9 @@ def completion_summary(args, iteration, stage, elapsed):
     successful, failed = database.stage_summary_results(args.db_path, iteration, stage)
     count = len(successful) + len(failed)
     fields = [f'compounds={count} (ok={len(successful)}, failed={len(failed)})']
+    if stage == 'glide':
+        timeout_failed = failed & database.glide_timeout_failed_ids(args.db_path, iteration)
+        fields.append(f'timeout_failed={len(timeout_failed)}')
     fields.append(f'wall/compound={elapsed / count:.2f}s' if count else 'wall/compound=n/a')
     if stage in {'prime_gbsa', 'amber-gbsa'}:
         values = _native_times(args.output, iteration, stage, successful)

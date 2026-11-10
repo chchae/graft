@@ -334,6 +334,7 @@ def test_refills_before_checking_remaining_active_jobs(tmp_path, monkeypatch):
     def check_order(command, folder, ids, **kw):
         if ids == [2]:
             assert launches == list(range(1, 9)), 'Freed slot must be refilled before next status check'
+            assert database.prime_gbsa_submission_rows(args.db_path, [1])[1][2] == -35
         return submit(command, folder, ids, **kw)
     monkeypatch.setattr(prime, 'submit_or_poll', check_order)
     q.poll_queue(1, args, root, prime.load_job(root))

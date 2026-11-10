@@ -173,8 +173,9 @@ def load_project_toml(filename):
 
     output = resolve_path(config["out-dir"])
     from graft.config import prime_gbsa_license_retry_settings, schrodinger_cpu_settings, schrodinger_stage_hosts, glide_job_timeout, amber_settings, log_level, prime_gbsa_flexdist, fep_settings, debug_settings, distribution_settings, md_gbsa_settings
-    from graft.config import prime_gbsa_local_settings, submission_installation
+    from graft.config import prime_gbsa_local_settings, submission_installation, attraction_point_settings
     return debug_settings(config, {
+        **attraction_point_settings(config),
         **prime_gbsa_local_settings(config),
         **distribution_settings(config),
         **md_gbsa_settings(config, base),
@@ -2887,7 +2888,13 @@ def run_ligprep_once(
     compound_ids=None,
 ):
     """Run LigPrep once while limiting state expansion for docking."""
-    from graft.config import schrodinger_job_options
+    from graft.config import ligprep_job_options
+    if compound_ids is None:
+        with input_file.open() as stream:
+            compound_count = sum(bool(line.strip()) for line in stream)
+    else:
+        compound_count = len(compound_ids)
+    job_options = ligprep_job_options(host, compound_count, cpus)
     output_file = glide_root / "ligprep.maegz"
 
     if compound_ids is None and output_file.exists():
@@ -2918,7 +2925,7 @@ def run_ligprep_once(
         "-epik",
         epik_options,
         "-s", str(max_stereo),
-        *schrodinger_job_options(host, cpus, split_jobs=True),
+        *job_options,
         "-WAIT",
     ]
     if compound_ids is None:
@@ -4343,6 +4350,10 @@ def run_iteration_prime_gbsa(
             top_rows = conn.execute(
                 'SELECT id,name,docking_score FROM compound WHERE iteration=0 ORDER BY id'
             ).fetchall()
+        from graft import database
+        priority_ids = database.attraction_order_ids(args.db_path, 0, 'prime_gbsa', [r[0] for r in top_rows])
+        by_id = {r[0]: r for r in top_rows}
+        top_rows = [by_id[cid] for cid in priority_ids]
     else:
         from graft import database
         top_rows = database.prime_selection_rows(

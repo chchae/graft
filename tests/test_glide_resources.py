@@ -122,7 +122,7 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
         assert kwargs['ligand_count'] == count
         options = glide_job_options(host, count)
         njobs = int(options[options.index('-NJOBS') + 1])
-        assert (count + njobs - 1) // njobs <= 100
+        assert njobs == (count + 49) // 50
         return {}
     monkeypatch.setattr(_core, 'assign_reference_compounds', lambda *a: None)
     monkeypatch.setattr(_core, 'split_ligprep_by_reference', split)
@@ -139,7 +139,9 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
     else:
         assert requested_slots(submitted[3]) > requested_slots(submitted[2])
         assert sum(requested_slots(host) for host in submitted.values()) == (7 if legacy else 12)
-        assert '1001 prepared ligands; NJOBS=' in capsys.readouterr().out
+        output = capsys.readouterr().out
+        assert '1001 prepared ligands; NJOBS=' in output
+        assert 'target ~50 prepared structures/subjob.' in output
     if legacy:
         assert load_record(root / 'ref_1') == original_record
     with database.connect(db) as conn:
@@ -173,3 +175,113 @@ def test_splitter_records_actual_prepared_structure_counts(tmp_path, monkeypatch
     runpy.run_path(str(script), run_name='__main__')
     assert json.loads((tmp_path / 'ligprep_counts.json').read_text()) == {'1': 2, '2': 1}
     assert (tmp_path / 'ref_1/ligprep_group.maegz').read_text().splitlines() == ['CMPID_10', 'CMPID_10']
+
+
+def test_completed_group_commits_before_next_submission_and_survives_restart(tmp_path, monkeypatch, capsys):
+    db = tmp_path/'project.sqlite'
+    with database.connect(db) as conn:
+        _core.create_sqlite_schema(conn)
+        for ref in (1,2,3):
+            conn.execute("INSERT INTO compound(id,name,smiles,iteration,state) VALUES (?,?,'C',0,'reference')",
+                         (ref, f'REF{ref}'))
+            conn.execute("INSERT INTO compound(id,name,smiles,iteration,state,similar_to) "
+                         "VALUES (?,?,'C',1,'ligprepped',?)", (ref+3, f'GEN{ref}', ref))
+    args = SimpleNamespace(db_path=db, output=tmp_path, schrodinger=Path('/suite'), host='compute:3',
+                           mcs_smarts=None, reference_poses=Path('refs.maegz'), grid=Path('grid.zip'),
+                           target_count=3)
+    prepared = tmp_path/'iter1/ligprep/ligprep.maegz'
+    prepared.parent.mkdir(parents=True)
+    prepared.write_text('prepared')
+    root = tmp_path/'iter1/glide'
+    launched, events = set(), []
+    def split(*a):
+        files = {}
+        for ref in (1,2,3):
+            folder = root/f'ref_{ref}'
+            folder.mkdir(exist_ok=True)
+            files[ref] = folder/'ligprep_group.maegz'
+            files[ref].write_text('ligand')
+        return files
+    def status(suite, folder, *a, **kw):
+        ref = int(folder.name.removeprefix('ref_'))
+        return ('DONE' if ref == 1 else 'RUNNING') if ref in launched else None
+    def submit(suite, inp, folder, host, **kw):
+        ref = int(folder.name.removeprefix('ref_'))
+        if ref != 1:
+            # Separate DB connection observes committed results while peers are
+            # still being submitted, before the final polling loop even starts.
+            with database.connect(db) as conn:
+                assert conn.execute('SELECT docking_score,state FROM compound WHERE id=4').fetchone() == (-9., 'docked')
+                assert conn.execute('SELECT docking_score FROM compound WHERE id=5').fetchone() == (None,)
+            assert (root/'best_poses.maegz').read_text() == 'published matching pose'
+        events.append(('submit',ref))
+        launched.add(ref)
+        save_record(folder, dict(job_id=f'job-{ref}', command=['/suite/glide','-HOST',host]))
+        if ref == 1:
+            (folder/'glide_lib.maegz').write_text('verified native poses')
+        return dict(job_id=f'job-{ref}')
+    def extract(suite, extractor, output, folder):
+        assert folder.name == 'ref_1'
+        scores, best = folder/'docking_scores.tsv', folder/'best_poses.maegz'
+        scores.write_text('id\tdocking_score\n4\t-9\n')
+        best.write_text('matching pose')
+        return scores,best
+    def merge(suite, merger, inputs, output, cwd):
+        assert root/'ref_1/best_poses.maegz' in inputs
+        output.write_text('published matching pose')
+    update = _core.update_scores
+    def commit(scores, path):
+        assert (root/'best_poses.maegz').exists()
+        changed = update(scores, path)
+        events.append(('commit',1))
+        return changed
+    monkeypatch.setattr(_core,'assign_reference_compounds',lambda *a:None)
+    monkeypatch.setattr(_core,'split_ligprep_by_reference',split)
+    monkeypatch.setattr(_core,'extract_reference_pose',lambda *a:None)
+    monkeypatch.setattr(_core,'submit_glide',submit)
+    monkeypatch.setattr(_core,'extract_scores_and_best_poses',extract)
+    monkeypatch.setattr(_core,'merge_best_pose_files',merge)
+    monkeypatch.setattr(_core,'update_scores',commit)
+    monkeypatch.setattr(glide,'group_status',status)
+    monkeypatch.setattr(glide,'active_jobs',lambda *a:[])
+    monkeypatch.setattr(glide.time,'sleep',lambda *a:None)
+    ns = SimpleNamespace(iteration=1,poll_interval=1,completion_fraction=0,tail_timeout=0)
+    glide._run_stage(args,ns)
+    assert events.index(('commit',1)) < events.index(('submit',2))
+    assert events.index(('commit',1)) < events.index(('submit',3))
+    assert 'Reference 1 completed: DB updated=1, no-pose=0' in capsys.readouterr().out
+    assert database.docking_completion_reason(db,1,3) is not None
+    with database.connect(db) as conn:
+        assert conn.execute('SELECT state,docking_score FROM compound WHERE id IN (5,6)').fetchall() == [
+            ('glide_running',None),('glide_running',None)]
+    monkeypatch.setattr(_core,'submit_glide',lambda *a,**k:pytest.fail('Resubmitted saved job'))
+    glide._run_stage(args,ns)
+    assert events.count(('commit',1)) == 1
+    assert (root/'best_poses.maegz').read_text() == 'published matching pose'
+
+
+def test_interleaved_collection_skips_live_tree_without_blocking_finished_peer(tmp_path, monkeypatch):
+    jobs = [dict(reference_id=ref, group_dir=tmp_path/f'ref_{ref}',log_file=tmp_path/f'{ref}.log',
+                 output_file=tmp_path/f'{ref}.maegz') for ref in (1,2)]
+    jobs[1]['output_file'].write_text('finished native poses')
+    native = dict(spec=dict(launchParams=dict(launchDirectory=str(jobs[0]['group_dir']))))
+    monkeypatch.setattr(glide,'active_jobs',lambda *a:[native])
+    checked, committed = [],[]
+    def status(suite,folder,*a,**kw):
+        checked.append(folder)
+        assert folder == jobs[1]['group_dir']
+        return 'DONE'
+    monkeypatch.setattr(glide,'group_status',status)
+    monkeypatch.setattr(glide,'process_completed_job',lambda iteration,args,job,*a:committed.append(job['reference_id']))
+    args = SimpleNamespace(schrodinger=Path('/suite'))
+    pending,terminal = glide.collect_finished_groups(1,args,jobs,'extractor','merger',tmp_path,skip_active=True)
+    assert pending == [jobs[0]] and terminal == 1 and committed == [2]
+    assert checked == [jobs[1]['group_dir']]
+    # Regular polling still inspects active trees and enforces saved timeouts.
+    def poll(suite,folder,*a,**kw):
+        assert kw['timeout_seconds'] == 1800
+        checked.append(folder)
+        return 'RUNNING'
+    monkeypatch.setattr(glide,'group_status',poll)
+    assert glide.collect_finished_groups(1,args,pending,'extractor','merger',tmp_path) == (pending,0)
+    assert checked[-1] == jobs[0]['group_dir']

@@ -488,3 +488,201 @@ def test_standalone_export_only_keeps_pipeline_and_old_growth_results(project):
     assert (Path(cfg['out-dir'])/'summary.json').exists()
     assert database.iteration_compound_count(project.db_path,0)==1
     assert database.crem_generation(project.db_path,1) is None
+
+
+@pytest.mark.parametrize('source,amber,prime,md', [
+    ('fep', False, False, False),
+    ('md_gbsa', True, True, True),
+    ('prime_gbsa', False, True, False),
+    ('amber_gbsa', True, False, False),
+    ('docking', False, False, False),
+])
+def test_optional_scoring_routes_continue_crem_with_correct_parents(project, source, amber, prime, md):
+    path = Path(project.toml_file)
+    text = path.read_text().replace('amber_gbsa = true', f'amber-gbsa = {str(amber).lower()}')
+    text = text.replace('md-gbsa = true', f'md-gbsa = {str(md).lower()}')
+    path.write_text(f'prime-gbsa = {str(prime).lower()}\nfep-enabled = {str(source == "fep").lower()}\n' + text)
+    args = SimpleNamespace(**_core.load_project_toml(path), schrodinger=Path('/unused'))
+    names = [name for name, _ in driver.iteration_stages(args, 1)]
+    assert ('amber-gbsa' in names) == amber
+    assert ('prime_gbsa' in names) == prime
+    assert ('md-gbsa' in names) == md
+    generate._run_stage(args, 1)
+    druglike._run_stage(args, 1)
+    if md:
+        ids = _score_generation(args, 1)
+    else:
+        with database.connect(args.db_path) as conn:
+            ids = [r[0] for r in conn.execute('SELECT id FROM compound WHERE iteration=1 ORDER BY id LIMIT 2')]
+            conn.execute('UPDATE compound SET state=?,docking_score=-1 WHERE iteration=1', (State.DOCKED,))
+            conn.executemany('UPDATE compound SET docking_score=? WHERE id=?', [(-9, ids[0]), (-10, ids[1])])
+            if source in ('prime_gbsa', 'amber_gbsa'):
+                column = source + '_score'
+                conn.executemany(f'UPDATE compound SET {column}=? WHERE id=?', [(-70, ids[0]), (-80, ids[1])])
+        if source == 'fep':
+            from graft.stages import fep
+            args.fep_input_count = 2
+            fep.export_candidates(args, 1)
+            scores = path.parent/'scores.tsv'
+            scores.write_text(f'id\tfep_score\n{ids[0]}\t-70\n{ids[1]}\t-80\n')
+            assert fep.import_scores(args, scores, 1) == 2
+    assert driver.choose_iteration(args) == 2
+    assert crem_generate._ready(args, 2) is None
+    generate._run_stage(args, 2)
+    saved = database.crem_generation(args.db_path, 2)
+    assert saved['state'] == Growth.DONE
+    assert saved['plan']['score_source'] == source
+    assert [p['compound_id'] for p in saved['plan']['parents']] == list(reversed(ids))
+    with database.connect(args.db_path) as conn:
+        original = [r[0] for r in conn.execute('SELECT prime_gbsa_score FROM compound WHERE iteration=1')]
+        conn.execute('UPDATE compound SET fep_score=-999 WHERE iteration=1')
+    generate._run_stage(args, 2)
+    assert database.crem_generation(args.db_path, 2) == saved
+    if not prime:
+        assert all(score is None for score in original)
+
+
+def test_crem_score_priority_finite_values_ties_and_failed_md_fallback(project, monkeypatch):
+    args = project
+    generate._run_stage(args, 1)
+    druglike._run_stage(args, 1)
+    ids = _score_generation(args, 1)
+    with database.connect(args.db_path) as conn:
+        conn.execute('UPDATE compound SET fep_score=? WHERE iteration=1', (float('inf'),))
+    assert database.crem_parent_selection(args.db_path, 1, 2)[0] == 'md_gbsa'
+    with database.connect(args.db_path) as conn:
+        conn.executemany('UPDATE compound SET fep_score=-20 WHERE id=?', [(cid,) for cid in ids])
+    source, parents = database.crem_parent_selection(args.db_path, 1, 1000)
+    assert source == 'fep'
+    assert [p['compound_id'] for p in parents] == sorted(ids)
+    with database.connect(args.db_path) as conn:
+        conn.execute('UPDATE compound SET fep_score=NULL WHERE iteration=1')
+    assert database.crem_parent_selection(args.db_path, 1, 2)[0] == 'md_gbsa'
+    with database.connect(args.db_path) as conn:
+        conn.executemany('UPDATE compound SET md_gbsa_score=NULL,state=?,failed_stage=? WHERE id=?',
+                         [(State.FAILED, 'md_gbsa', cid) for cid in ids])
+    assert database.md_gbsa_completion_reason(args.db_path, 1) is None
+    assert crem_generate._ready(args, 2) is None
+    assert driver.choose_iteration(args) == 2
+    monkeypatch.setattr(driver, 'stream_process', lambda *a: 0)
+    monkeypatch.setattr(driver, 'refresh_distribution_report', lambda *a: None)
+    assert driver.supervise_iteration(args, args.toml_file, 1,
+        [('md-gbsa', 'graft.stages.md_gbsa')], 1, driver.StopFlag(), once=True)
+    assert database.crem_parent_selection(args.db_path, 1, 2)[0] == 'prime_gbsa'
+    with database.connect(args.db_path) as conn:
+        conn.execute('UPDATE compound SET prime_gbsa_score=NULL WHERE iteration=1')
+    assert database.crem_parent_selection(args.db_path, 1, 2)[0] == 'amber_gbsa'
+    with database.connect(args.db_path) as conn:
+        conn.execute('UPDATE compound SET amber_gbsa_score=NULL WHERE iteration=1')
+    assert database.crem_parent_selection(args.db_path, 1, 2)[0] == 'docking'
+    with database.connect(args.db_path) as conn:
+        conn.execute('UPDATE compound SET docking_score=NULL WHERE iteration=1')
+    assert database.crem_parent_selection(args.db_path, 1, 2) == (None, [])
+
+
+def test_crem_pending_md_never_falls_back_even_with_fep_scores(project):
+    generate._run_stage(project, 1)
+    ids = _score_generation(project, 1)
+    with database.connect(project.db_path) as conn:
+        conn.execute('UPDATE compound SET md_gbsa_score=NULL,state=?,fep_score=-100 WHERE id=?',
+                     (State.MD_GBSA_RUNNING, ids[0]))
+    project.md_gbsa_enabled = False
+    assert crem_generate._ready(project, 2) is not None
+    with pytest.raises(RuntimeError, match='completed preceding MD'):
+        database.crem_parent_selection(project.db_path, 1, 2)
+    assert driver.choose_iteration(project) == 1
+
+
+@pytest.mark.parametrize('source', ['fep', 'prime_gbsa', 'amber_gbsa', 'docking'])
+def test_crem_selected_missing_pose_never_refills_or_changes_score_source(project, source):
+    generate._run_stage(project, 1)
+    with database.connect(project.db_path) as conn:
+        cid = conn.execute('SELECT MIN(id) FROM compound WHERE iteration=1').fetchone()[0]
+        conn.execute('UPDATE compound SET docking_score=-10 WHERE iteration=1')
+        conn.execute(f'UPDATE compound SET {source}_score=-100 WHERE id=?', (cid,))
+        conn.execute('DELETE FROM crem_compound_pose WHERE compound_id=?', (cid,))
+    with pytest.raises(RuntimeError, match='missing CReM pose'):
+        database.crem_parent_selection(project.db_path, 1, 1)
+
+
+@pytest.mark.parametrize('worker', ['amber_gbsa', 'prime_gbsa', 'md_gbsa', 'fep'])
+def test_crem_fallback_waits_for_active_score_worker(project, worker):
+    generate._run_stage(project, 1)
+    _score_generation(project, 1)
+    with database.stage_lock(project.db_path, worker):
+        assert 'worker is still running' in crem_generate._ready(project, 2)
+
+
+def test_crem_unfinished_plan_keeps_original_parents_after_fep_import(project, monkeypatch):
+    generate._run_stage(project, 1)
+    _score_generation(project, 1)
+    with monkeypatch.context() as patch:
+        def interrupted(*args):
+            raise RuntimeError('interrupted generation')
+        patch.setattr(crem_generate.growth, 'supervise', interrupted)
+        with pytest.raises(RuntimeError, match='interrupted generation'):
+            generate._run_stage(project, 2)
+    before = database.crem_generation(project.db_path, 2)['plan']
+    with database.connect(project.db_path) as conn:
+        conn.execute('UPDATE compound SET fep_score=-100 WHERE iteration=1')
+    assert database.crem_parent_selection(project.db_path, 1, 2)[0] == 'fep'
+    generate._run_stage(project, 2)
+    after = database.crem_generation(project.db_path, 2)
+    assert after['state'] == Growth.DONE
+    assert after['plan'] == before
+    assert after['plan']['score_source'] == 'md_gbsa'
+
+
+@pytest.mark.parametrize('state', [State.MD_GBSA_RUNNING, State.FEP_RUNNING])
+def test_crem_orphan_claims_block_lower_score_fallback(project, state):
+    generate._run_stage(project, 1)
+    with database.connect(project.db_path) as conn:
+        conn.execute('UPDATE compound SET docking_score=-10,state=? WHERE iteration=1', (state,))
+    project.md_gbsa_enabled = project.prime_gbsa_enabled = False
+    assert database.generation_completion_reason(project, 1, 0) is not None
+    assert crem_generate._ready(project, 2) is not None
+
+
+def test_crem_fep_export_without_imported_scores_uses_md(project):
+    from graft.stages import fep
+    generate._run_stage(project, 1)
+    druglike._run_stage(project, 1)
+    _score_generation(project, 1)
+    project.fep_enabled = True
+    fep.export_candidates(project, 1)
+    assert crem_generate._ready(project, 2) is None
+    generate._run_stage(project, 2)
+    assert database.crem_generation(project.db_path, 2)['plan']['score_source'] == 'md_gbsa'
+
+
+@pytest.mark.parametrize('amber', [True, False])
+def test_crem_continues_from_md_without_standalone_prime_stage(project, amber):
+    path = Path(project.toml_file)
+    text = path.read_text().replace('amber_gbsa = true', f'amber-gbsa = {str(amber).lower()}')
+    path.write_text('prime-gbsa = false\n' + text)
+    args = SimpleNamespace(**_core.load_project_toml(path), schrodinger=Path('/unused'))
+    stages = [s for s, _ in driver.iteration_stages(args, 1)]
+    assert stages[-1] == 'md-gbsa'
+    assert 'prime_gbsa' not in stages
+    generate._run_stage(args, 1)
+    druglike._run_stage(args, 1)
+    with database.connect(args.db_path) as conn:
+        conn.execute('UPDATE compound SET state=?,docking_score=-10 WHERE iteration=1', (State.DOCKED,))
+        if amber:
+            conn.execute('UPDATE compound SET amber_gbsa_score=-40 WHERE iteration=1')
+    ranking = database.md_gbsa_candidates(args.db_path, 1, count=2, prime_enabled=False)
+    assert ranking['ranking_source'] == ('amber_gbsa' if amber else 'docking')
+    selection = database.freeze_md_gbsa_selection(args.db_path, 1,
+        dict(protocol=dict(snapshots=1), replicates=1, ranking_source=ranking['ranking_source'],
+             ranking_ids=ranking['ids']), count=2, target_count=args.target_count, prime_enabled=False,
+        amber_keep_count=database.amber_keep_count(args))
+    for index, cid in enumerate(selection['ids']):
+        score = -70-index
+        database.store_md_gbsa_result(args.db_path, 1, cid,
+            dict(id=cid, mean=score, std=0., snapshots=[dict(frame=0, score=score)]))
+    generate._run_stage(args, 2)
+    plan = database.crem_generation(args.db_path, 2)['plan']
+    assert plan['score_source'] == 'md_gbsa'
+    assert [p['compound_id'] for p in plan['parents']] == list(reversed(selection['ids']))
+    with database.connect(args.db_path) as conn:
+        assert not conn.execute('SELECT 1 FROM compound WHERE iteration=1 AND prime_gbsa_score IS NOT NULL').fetchone()

@@ -42,11 +42,10 @@ def test_switches_are_strict_booleans(key,value,tmp_path):
         amber_settings({key:value},tmp_path)
 
 
-def test_conflicting_aliases_and_md_without_prime_are_rejected(tmp_path):
+def test_conflicting_aliases_are_rejected_and_md_without_prime_is_allowed(tmp_path):
     with pytest.raises(ValueError,match='must agree'):
         amber_settings({'amber-gbsa':False,'amber_gbsa':True},tmp_path)
-    with pytest.raises(ValueError,match='requires prime-gbsa'):
-        md_gbsa_settings({'prime-gbsa':False,'md-gbsa':True})
+    assert md_gbsa_settings({'prime-gbsa':False,'md-gbsa':True})['md_gbsa_enabled']
 
 
 def test_glide_elites_use_finite_scores_ties_and_exact_previous_iteration(project):

@@ -21,13 +21,17 @@ def choose_iteration(args, requested):
 
 
 def export_candidates(args, iteration):
+    if not database.attraction_stage_started(args.db_path, iteration, 'fep'):
+        from graft.attraction_point import prepare
+        prepare(args, iteration, 'fep')
     rows = database.fep_candidates(
         args.db_path, iteration, args.fep_input_count,
         target_count=getattr(args, 'target_count', 1),
         prime_count=(getattr(args, 'prime_gbsa_input_count', None)
                      if getattr(args, 'prime_gbsa_enabled', True) else None),
         amber_keep_count=database.amber_keep_count(args),
-        docking_only=not getattr(args, 'prime_gbsa_enabled', True))
+        docking_only=(not getattr(args, 'prime_gbsa_enabled', True)
+                      and database.md_gbsa_selection(args.db_path, iteration) is None))
     outdir = stage_directory(args.output, iteration, 'fep')
     outdir.mkdir(parents=True, exist_ok=True)
     outfile = outdir / 'fep_candidates.tsv'

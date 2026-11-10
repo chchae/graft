@@ -566,3 +566,39 @@ def test_saved_amber_poll_suppresses_routine_worker_messages_only_under_supervis
     assert ('remote work pending' in output)==(not supervised)
     if supervised:assert WORK_STARTED in output
     assert len(polls)==1
+
+
+@pytest.mark.parametrize('slurm', [False, True])
+def test_amber_commits_partial_results_while_other_tasks_are_running(project, monkeypatch, capsys, slurm):
+    from graft import amber_slurm
+    directory, record = make_record(project)
+    if slurm:
+        record.update(mode=amber_slurm.ARRAY,slurm_job_id='123',cpus=project.amber_cpus)
+        monkeypatch.setattr(amber_slurm,'job_state',lambda *a:dict(active=True,state='RUNNING'))
+    snapshot = dict(status='running',active=True,results=[dict(id=1,score=-50.)])
+    monkeypatch.setattr(amber_gbsa,'ssh',lambda *a,**kw:SimpleNamespace(stdout=json.dumps(snapshot)))
+    assert not amber_gbsa.poll(project,1,directory,record)
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT amber_gbsa_score,state FROM compound WHERE id=1').fetchone() == (-50.,'docked')
+        assert conn.execute('SELECT count(*) FROM compound WHERE state=?',(State.AMBER_RUNNING,)).fetchone() == (3,)
+    assert 'DB updated=1' in capsys.readouterr().out
+    assert not amber_gbsa.poll(project,1,directory,record)
+    assert 'DB updated=' not in capsys.readouterr().out
+    assert (directory/'amber_job.json').exists()
+
+
+def test_amber_commits_verified_results_before_unavailable_slurm_status(project, monkeypatch):
+    from graft import amber_slurm
+    directory, record = make_record(project)
+    record.update(mode=amber_slurm.ARRAY,slurm_job_id='123',cpus=project.amber_cpus)
+    snapshot = dict(status='running',active=True,results=[dict(id=1,score=-50.)])
+    monkeypatch.setattr(amber_gbsa,'ssh',lambda *a,**kw:SimpleNamespace(stdout=json.dumps(snapshot)))
+    def status(*a):
+        with database.connect(project.db_path) as conn:
+            assert conn.execute('SELECT amber_gbsa_score FROM compound WHERE id=1').fetchone() == (-50.,)
+        raise RuntimeError('scheduler temporarily unavailable')
+    monkeypatch.setattr(amber_slurm,'job_state',status)
+    with pytest.raises(RuntimeError,match='scheduler temporarily unavailable'):
+        amber_gbsa.poll(project,1,directory,record)
+    assert (directory/'amber_job.json').exists()
+    assert not (directory/(record['run_id']+'.completed.json')).exists()

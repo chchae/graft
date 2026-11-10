@@ -5,22 +5,70 @@ import pytest
 
 from graft import _core
 from graft.config import prime_gbsa_job_options, schrodinger_cpu_settings, schrodinger_job_options
-from graft.config import glide_job_options
+from graft.config import glide_job_options, ligprep_job_options
+
+
+@pytest.mark.parametrize('count', [1, 99, 100, 101, 799, 800, 801, 5000, 10001])
+@pytest.mark.parametrize('host', ['slurm-cpu:1', 'slurm-cpu:8', 'slurm-cpu:384', 'a:4 b:8', 'slurm-cpu'])
+def test_ligprep_subjobs_cap_original_compounds_preserving_host_budget(count, host):
+    options = ligprep_job_options(host, count)
+    assert options[options.index('-HOST') + 1] == host
+    njobs = int(options[options.index('-NJOBS') + 1])
+    assert 1 <= njobs <= count
+    assert (count + njobs - 1) // njobs <= 100
+    if ':' in host:
+        slots = sum(int(entry.rsplit(':', 1)[1]) for entry in host.split())
+        assert njobs >= min(slots, count)
+    else:
+        assert njobs == (count + 99) // 100
+    assert '-NSTRUCTS' not in options  # Native LigPrep rejects NJOBS + NSTRUCTS together.
+
+
+@pytest.mark.parametrize('count', [0, -1, True, 1.5, '100'])
+def test_ligprep_rejects_invalid_compound_counts(count):
+    with pytest.raises(ValueError, match='compound_count'):
+        ligprep_job_options('slurm-cpu:8', count)
+
+
+@pytest.mark.parametrize('durable', [True, False])
+@pytest.mark.parametrize('host,cpus,expected_host,njobs', [
+    ('slurm-cpu:8', None, 'slurm-cpu:8', 50),
+    ('slurm-cpu', None, 'slurm-cpu', 50),
+    ('slurm-cpu', 128, 'slurm-cpu:128', 128),
+])
+def test_actual_ligprep_command_caps_subjobs_for_all_submission_paths(
+        tmp_path, monkeypatch, durable, host, cpus, expected_host, njobs):
+    from graft import ligprep_recovery
+    input_file = tmp_path/'input.smi'
+    ids = list(range(1, 5001))
+    input_file.write_text(''.join(f'C\tCMPID_{cid}\n' for cid in ids) + '\n')
+    calls = []
+    def execute(command, cwd):
+        calls.append(command)
+        (cwd/'ligprep.maegz').write_text('prepared')
+    def recover(command, folder, compound_ids, output):
+        assert compound_ids == ids
+        execute(command, folder)
+        return True
+    monkeypatch.setattr(_core, 'run_command', execute)
+    monkeypatch.setattr(ligprep_recovery, 'run_or_recover', recover)
+    assert _core.run_ligprep_once(Path('/suite'), input_file, tmp_path, host, cpus=cpus,
+        compound_ids=ids if durable else None) == tmp_path/'ligprep.maegz'
+    assert calls[0][-5:] == ['-HOST', expected_host, '-NJOBS', str(njobs), '-WAIT']
+    assert '-We,-ph,7.4,-pht,1.0,-ms,2' in calls[0]
+    assert calls[0][calls[0].index('-s') + 1] == '1'
+    assert '-r' not in calls[0]
 
 
 @pytest.mark.parametrize('count',[1,49,50,51,99,100,101,5000,10001])
 @pytest.mark.parametrize('host',['slurm-cpu:1','slurm-cpu:8','slurm-cpu:128','a:4 b:8','slurm-cpu'])
-def test_glide_subjobs_cap_prepared_structures_without_increasing_host_budget(count,host):
+def test_glide_subjobs_target_50_structures_independent_of_host_slots(count,host):
     options=glide_job_options(host,count)
     assert options[options.index('-HOST')+1]==host
     njobs=int(options[options.index('-NJOBS')+1])
     assert 1 <= njobs <= count
-    assert (count+njobs-1)//njobs <= 100
-    if host=='slurm-cpu:1' or host=='slurm-cpu':
-        assert njobs == (count+99)//100
-    if ':' in host:
-        slots=sum(int(entry.rsplit(':',1)[1]) for entry in host.split())
-        assert njobs >= min(slots,count)
+    assert (count+njobs-1)//njobs <= 50
+    assert njobs == (count+49)//50
 
 
 @pytest.mark.parametrize('count',[0,-1,True,1.5,'50'])
@@ -29,13 +77,24 @@ def test_invalid_glide_structure_counts(count):
         glide_job_options('slurm-cpu:8',count)
 
 
+@pytest.mark.parametrize('count,njobs', [(293,6), (387,8), (254,6), (17,1)])
+def test_glide_large_slot_allocation_does_not_create_tiny_subjobs(count, njobs):
+    assert glide_job_options('slurm-cpu:128', count) == [
+        '-HOST', 'slurm-cpu:128', '-NJOBS', str(njobs)]
+
+
+def test_glide_cpu_override_changes_concurrency_without_changing_batch_size():
+    assert glide_job_options('slurm-cpu:384', 293, cpus=8) == [
+        '-HOST', 'slurm-cpu:8', '-NJOBS', '6']
+
+
 def test_glide_submission_splits_large_group_into_more_jobs_than_cpu_slots(tmp_path,monkeypatch):
     from graft import glide_recovery
     calls=[]
     monkeypatch.setattr(glide_recovery,'submit',lambda suite,cmd,folder:calls.append(cmd) or 'job')
     _core.submit_glide(Path('/suite'),tmp_path/'glide.in',tmp_path,'slurm-cpu:8',ligand_count=5000)
     command=calls[0]
-    assert command[-5:]==['-HOST','slurm-cpu:8','-NJOBS','50','-OVERWRITE']
+    assert command[-5:]==['-HOST','slurm-cpu:8','-NJOBS','100','-OVERWRITE']
     assert '-WAIT' not in command
 
 
@@ -80,6 +139,7 @@ def test_host_defaults_and_multiple_hosts():
 @pytest.mark.parametrize("cpus,host,njobs", [(None, "compute:128", "128"), (8, "compute:8", "8")])
 def test_ligprep_splits_jobs_preserving_scientific_options(monkeypatch, tmp_path, cpus, host, njobs):
     calls = []
+    (tmp_path / 'input.smi').write_text(''.join(f'C\tCMPID_{i}\n' for i in range(500)))
 
     def run(command, cwd):
         calls.append(command)
@@ -127,6 +187,7 @@ def test_glide_splits_reference_groups_and_remains_asynchronous(monkeypatch, tmp
 
 def test_ligprep_native_slurm_command_keeps_scientific_defaults(monkeypatch,tmp_path):
     calls=[]
+    (tmp_path/'input.smi').write_text(''.join(f'C\tCMPID_{i}\n' for i in range(500)))
     def run(command,cwd):
         calls.append(command)
         (cwd/'ligprep.maegz').write_text('prepared')
@@ -159,8 +220,9 @@ def test_ligprep_recovers_original_host_after_enabling_slurm(tmp_path,monkeypatc
         return SimpleNamespace(stdout='')
     monkeypatch.setattr(ligprep_recovery.subprocess,'run',run)
     monkeypatch.setattr(ligprep_recovery.subprocess,'Popen',lambda *a,**k:pytest.fail('resubmitted pinned LigPrep'))
-    result=ligprep_recovery.run_or_recover(['/new-suite/ligprep','-HOST','slurm-cpu:124'],tmp_path,[1],output)
-    assert result==(child_status=='DONE')
+    result=_core.run_ligprep_once(Path('/new-suite'),tmp_path/'missing-original-input.smi',tmp_path,
+                                  'slurm-cpu',cpus=124,compound_ids=[1])
+    assert result==(output if child_status=='DONE' else None)
     assert ligprep_recovery.load_job(tmp_path)==saved
     assert len(calls)==(2 if child_status=='DONE' else 1)
 

@@ -33,6 +33,48 @@ def test_summary_counts_original_compounds_and_attributes_failures(project, stag
     n = len(successes) + len(failures)
     assert f'compounds={n} (ok={len(successes)}, failed={len(failures)})' in summary
     assert f'wall/compound={120/n:.2f}s' in summary
+    assert ('timeout_failed=0' in summary) == (stage == 'glide')
+
+
+@pytest.mark.parametrize('reason', [
+    'Glide job exceeded 1800s; parent and children terminated',
+    'Glide job exceeded 1800s; no valid score/pose recovered',
+    'Glide job exceeded 60s; no valid score/pose recovered',
+])
+def test_glide_summary_attributes_timeout_failures_to_original_compounds(project, reason):
+    with database.connect(project.db_path) as conn:
+        conn.execute('UPDATE compound SET failure_message=? WHERE id=2', (reason,))
+        # An unrelated stage and another iteration must not inflate the count.
+        conn.execute('UPDATE compound SET failure_message=? WHERE id=5', (reason,))
+        conn.execute("INSERT INTO compound(name,smiles,iteration,state,failed_stage,failure_message) "
+                     "VALUES ('previous','C',0,'failed','glide',?)", (reason,))
+        before = conn.execute('SELECT * FROM compound ORDER BY id').fetchall()
+    assert database.glide_timeout_failed_ids(project.db_path, 1) == {2}
+    summary = completion_summary(project, 1, 'glide', 120)
+    assert 'compounds=3 (ok=2, failed=1); timeout_failed=1;' in summary
+    assert completion_summary(project, 1, 'glide', 120) == summary
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT * FROM compound ORDER BY id').fetchall() == before
+
+
+@pytest.mark.parametrize('score', [None, float('inf'), -9.0])
+def test_glide_timeout_summary_excludes_recovered_finite_scores(project, score):
+    with database.connect(project.db_path) as conn:
+        conn.execute('UPDATE compound SET docking_score=?,failure_message=? WHERE id=2',
+                     (score, 'Glide job exceeded 1800s; no valid score/pose recovered'))
+    expected = 0 if score == -9.0 else 1
+    assert f'timeout_failed={expected};' in completion_summary(project, 1, 'glide', 120)
+
+
+@pytest.mark.parametrize('state,reason', [
+    ('failed', 'Glide job ended with FAILED'),
+    ('failed', 'Tail timeout reached; leaving jobs running'),
+    ('glide_running', 'Glide job exceeded 1800s; parent and children terminated'),
+])
+def test_glide_summary_does_not_classify_other_failures_or_live_work_as_timeout(project, state, reason):
+    with database.connect(project.db_path) as conn:
+        conn.execute('UPDATE compound SET state=?,failure_message=? WHERE id=2', (state, reason))
+    assert 'timeout_failed=0;' in completion_summary(project, 1, 'glide', 120)
 
 
 def test_native_prime_times_use_only_completed_scored_ids_and_do_not_double_count(project):

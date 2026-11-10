@@ -1,5 +1,331 @@
 # Graft specification
 
+## Optional attraction_point selection preference (2026-11-10)
+
+**Confirmed user requirement:** use the option name `attraction_point` and
+prioritize inputs to Amber, Prime, MD/GBSA and FEP when a non-H ligand atom in
+the saved Glide pose is within 2 Angstroms of the specified point. TOML syntax:
+`attraction_point = [-52.102367, 2.138612, -28.106731]`.
+
+**Implementation choice:** make this an optional soft two-tier preference, with
+existing energy/ID ranking within each tier and noncontacting compounds filling
+remaining positions. Preserve the chosen lowest-score Glide state and its pose,
+upstream eligible pools, score-source precedence, counts and original energies.
+Do not add a docking restraint, change elite/generation ranking, or use receptor
+or H coordinates. For iteration zero, use the original reference ligand poses.
+A worker reads published structures through the installed Schrodinger Python,
+checks exact compound coverage, finite heavy-atom coordinates and matching Glide
+scores, then atomically freezes per-stage point/distances/source checksum in
+SQLite before candidate claims. Driver readiness/ranking uses only SQLite.
+
+Keep frozen selections immutable across restart and configuration edits. If a
+stage already has claims/results or a saved MD/FEP selection, preserve that
+stage's existing ranking; later unstarted stages may adopt the option. Preserve
+existing scores in their ranked positions without refilling failures. Unset
+options retain existing behavior without geometry processing. Missing/mismatched
+poses or changed source data block a new preference instead of silently ranking
+incomplete geometry. No production configuration, DB or submitted job is reset.
+
+**Verification:** 32 focused configuration, synthetic-pose, exact-2-A-boundary,
+score-source, atomic selection, restart and FEP-export regressions passed; 244
+existing selection/configuration/recovery regressions passed. Full suite: 2,384
+passed, seven skipped and the same three previously reproduced baseline failures
+(real-fragment clash and two MD pending-log expectations). Compileall, package/CLI
+imports and diff checks passed. A read-only check with installed Schrodinger
+2026-4 parsed all 1,145 saved iteration-1 best poses, matched their DB identities
+and scores, and found 19 within 2 A of the requested point; only temporary JSON
+files were written. These checks do not validate GBSA/MD/FEP accuracy or affinity.
+
+
+## Persist Amber, Prime and MD results as completed units arrive (2026-11-10)
+
+**Confirmed user requirement:** review Amber/Prime/MD result processing and
+commit each completed group without waiting for every unrelated group to finish.
+
+**Observed implementation:** Amber already imported the completed subset of
+remote results during an active array/batch, and native/shared Prime and legacy
+individual queues already committed each completed child/compound before its
+checkpoint/refill. MD instead polled/extracted all selected molecules before its
+separate ensemble-commit loop; a later slow/failed transfer could postpone or
+prevent committing an earlier completed molecule.
+
+**Implementation:** retain Amber's full snapshot identity/finite-score/conflict
+validation and atomic partial-result transaction. For an existing acknowledged
+Slurm job, collect/commit its atomic completed result files before querying
+scheduler status, so an unavailable status service does not lose verified results.
+New/unacknowledged arrays still submit/recover their durable native identity first.
+Show a normal-verbosity DB update message only for newly committed finite scores.
+Final array/task/lock/cleanup checks remain required for retirement and progression.
+
+Preserve Prime's per-child streaming and legacy per-compound persistence. When a
+native parent says DONE but another child is still live, stream verified DONE
+children instead of postponing their import; the parent-only status is insufficient
+for final completion. Once the complete tree is terminal and the parent is DONE,
+retain the authoritative final-output path. Keep per-child checksums/identity,
+DB-before-import-checkpoint order, exact native commands, seven-job limits,
+cross-project submission exclusion and final coordinate/cleanup requirements.
+
+For MD, preserve GPU admission/reconciliation first. Then prioritize previously
+completed snapshots for native/transport revalidation, and commit a molecule as
+soon as every requested replica has been rechecked and its complete GBSA ensemble
+is available, before inspecting unrelated peers. Never commit from a cached
+progress snapshot alone. Retain frozen ID/protocol/seed checks, full unique frame
+counts, finite scores, mean/std calculations, QC and collected coordinates. Archive
+the full result before its SQLite transaction and print the committed CMPID.
+Resolve permanent failures only after all that molecule's replicas have retired;
+retain retries, manifests and verified postcommit cleanup. MD-only completion or
+partial frames/replicas never become a final ensemble score. A later peer failure
+cannot roll back an earlier committed molecule; restart skips its scored tasks.
+
+No frozen scientific helpers/protocols or live jobs are rewritten, canceled,
+reset or resubmitted to apply these worker-owned collection changes. Stage/global
+completion gates, scientific ranking and the sequential supervisor remain intact.
+Polling/admission/query and file-transfer time still prevent zero-latency updates.
+
+**Verification:** 515 focused Amber direct/Slurm/array, Prime native/shared/
+legacy-queue and MD transport/pooling/replica/retry tests passed. Regressions observe
+an earlier result through a separate SQLite connection before a later group's
+status query or failed transfer; restart preserves that committed result and its
+native identity without duplicate import. Coverage includes cached MD revalidation,
+one/two replicas, local/remote GBSA, live-child Prime parents, unavailable Slurm
+status, checksum failures, GPU admission priority and postcommit cleanup gates.
+Full suite: 2,352 passed, seven skipped and the same three known failures
+(real-fragment clash and two MD pending-log expectations), previously reproduced
+against unmodified HEAD. Compileall, package/CLI imports and diff checks passed.
+These mocked/synthetic checks validate processing and recovery, not scientific
+MD/GBSA accuracy or production throughput. No production database/job was reset
+or scientific calculation submitted for verification.
+
+## Collect completed Glide groups between submissions (2026-11-10)
+
+**Confirmed user requirement:** persist a finished Glide reference group's
+results immediately instead of waiting for every group/subjob to finish.
+
+**Observed implementation:** the existing collector already committed each
+verified terminal group, but the initial submission loop did not collect newly
+completed groups until all new groups were submitted. Its per-group DB commit
+message was detail-only, hiding incremental saves at normal verbosity.
+
+**Implementation:** collect finished groups after each new group submission as
+well as during normal polling. During these interleaved checks, cheaply skip
+known active native trees from a fresh active-job snapshot; absence from the
+snapshot never proves completion. Retain full JobId/parent/child reconciliation,
+verified download and timeout-result recovery before extraction/import. Normal
+polling still enforces runtime limits. Preserve the preexisting total/terminal
+counts across interleaved collection so the tail-completion policy is unchanged.
+A long preparation/submission or polling interval can still delay detection;
+this is not a claim of zero-latency native completion notification.
+
+Publish each group's matching best poses before committing its original-compound
+scores, retaining constrained SP/state reduction and immediate per-group SQLite
+transactions. Show the committed group ID, updated compounds and no-pose count
+at normal verbosity. Already committed groups remain excluded on restart; saved
+native jobs, commands and uncertain claims are never reset or resubmitted. Keep
+parallel reference groups and sequential driver/stage supervision unchanged.
+
+## Count runtime-timeout failures in the Glide completion summary (2026-11-10)
+
+**Confirmed user requirement:** show the number of compounds excluded by the
+30-minute Glide runtime limit in the summary.
+
+**Implementation:** append `timeout_failed=N` to the Glide completion summary,
+including zero. This is a subset of `failed`, counted per original SQLite compound
+ID from current failed-stage=glide rows with the durable `Glide job exceeded ...s;`
+failure label. Support the historical terminated-tree and current no-recovered-pose
+messages. Exclude finite recovered docking scores, other failure stages/iterations,
+normal no-pose/native errors, live work and recoverable tail-polling timeouts.
+Use the actual recorded runtime limit (default 1,800 seconds); do not falsely label
+an explicitly overridden limit as 30 minutes. This read-only diagnostic does not
+change scientific results, states, timeout enforcement or collection gates.
+
+**Verification:** 263 focused Glide resource/recovery, timeout collection,
+completion-summary, stage-timing, parallel-command and stage-barrier tests passed.
+A regression observes the first group's committed score from a separate SQLite
+connection before submitting the next group, while peers remain running; restart
+neither resubmits native jobs nor imports the committed group again. Tests retain
+pose-before-score publication, active-tree skipping, normal timeout checks,
+finite timeout-score exclusions and stable repeated summary counts. Full suite:
+2,337 passed, seven skipped and the same three known failures (real-fragment clash
+and two MD pending-log expectations), previously reproduced against unmodified
+HEAD. Compileall, package/CLI imports and diff checks passed. These synthetic
+checks do not validate docking accuracy or native throughput. No production
+scientific job/database was reset or a new calculation submitted for validation.
+
+## Glide subjobs target 50 prepared structures (2026-11-10)
+
+**Confirmed user requirement:** after observing only two to four prepared
+structures in each Glide subjob, target approximately 50 structures per subjob.
+This supersedes the previous max(host_slots, ceil(count/100)) subdivision policy
+for new counted Glide submissions; LigPrep retains its independent 100-input cap.
+
+**Implementation:** for each reference group set NJOBS=ceil(prepared_count/50),
+independently of its HOST slot allocation. Keep HOST/CPU overrides, weighted
+parallel reference-group allocation and saved-job reservations unchanged. There
+can be fewer runnable jobs than allocated CPU slots. Count actual LigPrep output
+structures, including states, before selecting the final minimum-score pose for
+each original CMPID. Ordinary native balanced splitting produces at most 50
+structures per subjob, with smaller groups/remainders as needed. For example,
+293 -> 6 jobs, 387 -> 8 jobs, 254 -> 6 jobs and 17 -> 1 job. Stage logs describe
+the new target. Preserve constrained SP inputs and immediate group persistence.
+
+Apply this to new submissions only. Existing native job commands, JobIds,
+scientific inputs/results and recovery remain frozen; do not cancel or resubmit
+a current job to apply the new subdivision. The uncounted compatibility API
+retains its previous behavior; the independent Glide stage always passes the
+actual prepared count.
+
+**Verification:** 209 focused parallel-resource, Glide resource/recovery and
+timeout-result tests passed, covering 49/50/51 boundaries, small groups with large
+HOST allocations, bare/multiple hosts, CPU overrides, actual submission commands,
+legacy recovery and the retained LigPrep 100-compound cap. Read-only extraction
+of the installed 2026-3/2026-4 native computeLigsPerJob function passed 24 checks
+of total counts and maximum subjob size. Compileall, package/CLI imports and
+diff checks passed. The full suite was not rerun for this narrow Glide change.
+These checks validate subdivision/recovery, not docking accuracy or throughput.
+No scientific calculation was submitted or production job/database reset.
+
+## LigPrep subjobs contain at most 100 original compounds (2026-11-10)
+
+**Confirmed user requirement:** cap each new LigPrep subjob at 100 input
+compounds. Count original molecule rows before LigPrep state expansion; generated
+Epik/stereochemical states do not redefine this input cap.
+
+**Implementation:** new submissions use NJOBS >= ceil(input_count/100) and at
+least the configured HOST slot count, capped by the number of inputs. Retain
+HOST/CPU concurrency budgets, including bare and multiple hosts; total queued
+subjobs may exceed concurrent slots. The independent stage uses its original
+compound IDs for the count; the legacy standalone path counts nonempty generated
+SMILES rows. Share the existing tested bounded splitting calculation with Glide
+without changing Glide behavior. Preserve LigPrep pH 7.4, tolerance 1.0, Epik
+states 2, stereoisomers 1, CMPIDs and the prohibition on `-r 1`.
+
+**Observed vendor evidence:** inspected the installed LigPrep 2026-4 and 2026-3
+`ligprep3/driver.py` partition calculation. With NJOBS, the maximum native chunk
+size is ceil(input_count/NJOBS), so the new calculation bounds it by 100. The
+native parser prohibits combining NJOBS and NSTRUCTS; no unsupported combination
+is emitted. Extracted only the pure partition function for 45 boundary/resource
+checks per installed version; no native calculation was launched.
+
+Saved LigPrep JobIds, input identity and native commands retain their original
+recovery path, including live children and missing local inputs. Never cancel,
+reset or resubmit a saved job to apply the cap. The change applies to new native
+submissions and leaves scientific preparation/driver scheduling unchanged.
+
+**Evidence limits:** synthetic command/recovery tests and native partition
+function checks validate splitting, not real LigPrep chemistry or throughput.
+Production databases, project settings and submitted jobs are not modified.
+
+**Verification:** 220 focused parallel-resource, LigPrep fresh-submission/
+recovery, host-preflight, stage-barrier and Glide-resource tests passed. Installed
+2026-3 and 2026-4 pure native partition functions passed 90 additional checks.
+Full suite: 2,321 passed, seven skipped, and the same three known failures
+(real-fragment clash and two MD pending-log expectations), previously reproduced
+against unmodified HEAD. Compileall, package/CLI imports and diff checks passed.
+No scientific job was submitted, canceled or reset for verification.
+
+## MD selection without the standalone Prime stage (2026-11-10)
+
+**Confirmed user requirement:** permit MD target selection by Amber GBSA,
+otherwise docking score, so the standalone Prime GBSA stage can be disabled.
+This supersedes the mandatory `md-gbsa=true requires prime-gbsa=true` rule.
+
+**Implementation choices:** with Prime enabled, retain its completed finite
+ranking first; after required Prime work finishes with no usable results, permit
+Amber/docking fallback. With `prime-gbsa=false`, ignore retained Prime scores
+for new MD selection and use the first nonempty finite Amber or docking source.
+Use one score source, ascending score and compound ID, with the existing
+`md-gbsa-input-count` or ratio; never combine different energies. Required
+upstream processing, enabled Amber/Prime work, retry requests, active claims,
+workers and saved/uncertain native submissions must retire before new selection.
+Disabled Prime no longer constrains the Amber screening count.
+
+The MD worker previews the selected IDs, prepares inputs, then atomically
+rechecks readiness, source and ordered IDs while claiming in SQLite. A ranking
+change during preparation refuses claims. New worker settings freeze ranking
+source/IDs alongside checksummed input, helper and native settings. Existing
+selections return unchanged, even after switches/scores change; retain legacy
+native recovery and per-cycle retry handling. No live job is reset or resubmitted.
+
+For Amber/docking ranking, pair existing final Glide poses (iteration 0: supplied
+reference poses mapped through their original names) with the configured receptor,
+or extract the receptor from the docking grid using the existing helper when
+only the absent default receptor was specified. Explicit missing receptor/pose
+files stop. Use a new MD-owned input directory; preserve coordinates and CMPIDs.
+Validate every selected receptor/ligand pair and reject missing/duplicate IDs
+locally before remote work or SQLite claims. This does not reconstruct Amber
+minimized coordinates. References still need a finite eligible score; no score
+or reference pose is invented. Prime-ranked input continues using the exact
+published optimized Prime complexes and does not fall back when that file is
+missing. Scientific preparation, MD, frame sampling and ensemble GBSA protocols
+are unchanged. MD frame GBSA still uses Prime software.
+
+FEP exports after completed MD now retain MD ranking even when the separate
+Prime stage is disabled. CReM's FEP -> MD -> Prime -> Amber -> docking parent
+priority is unchanged. Other generation backends keep their existing elite
+selection policy.
+
+**Evidence limits:** synthetic/mocked selection, structure-pairing and recovery
+tests do not validate native MD/GBSA calculations or scientific affinity.
+No production settings, databases or submitted jobs are modified for validation.
+
+**Verification:** 300 focused selection, input-pairing, CReM, MD, retry and
+recovery regressions passed, including Prime-disabled worker startup/restart,
+reference name mapping, exact preserved coordinates, missing/duplicate poses,
+ranking drift before claims and concurrent fallback claims. Full suite: 2,262
+passed, seven skipped, and the same three existing failures previously reproduced
+against unmodified HEAD (real-fragment clash and two MD pending-log expectations).
+The three subsequently added startup/restart and concurrency cases are included
+in the 300 focused passes. Editable installation, compileall, package/CLI imports
+and diff checks passed. Scientific/native calculation accuracy is unvalidated.
+
+## Optional CReM scoring and parent priority (2026-11-10)
+
+**Confirmed user requirement:** select CReM parents from the immediately preceding
+iteration using FEP, otherwise MD-GBSA, otherwise Prime GBSA, otherwise Amber GBSA,
+otherwise docking scores. This supersedes the November 5 mandatory
+Amber/Prime/MD configuration and MD-only parent ranking for the integrated backend.
+
+**Implementation choices:** allow the existing independent Amber/Prime/MD switches
+in CReM projects. Retain the existing MD requirement for Prime to be enabled for
+new MD submissions; its native input/selection protocol is unchanged. After all
+required preceding work and saved/uncertain jobs retire, choose the first source
+with finite persisted results, including retained scores from disabled stages.
+Use one source per new iteration, ascending score and compound ID, with up to
+`elite-count` parents; fewer scored parents are allowed and zero across all
+sources stops. Never mix unlike scores or refill from a lower source when a
+selected parent's CReM pose/history is missing. MD ranking stays restricted to
+its durable selection. Preserve the original fixed-frame coordinates and UID
+history. No scores are copied between scientific columns.
+
+Freeze the chosen source and parents in the CReM plan. Restarts keep that plan
+even if later FEP results arrive or switches change. Existing implementation
+fingerprint checks still reject incompatible unfinished generation; no automatic
+reset or migration of a frozen scientific run is authorized. The initial
+reference frame and reference calculation policy remain unchanged. Terminal,
+fully reconciled generated-iteration MD failures with zero finite MD results
+allow a lower-score source; pending jobs, retry requests and cleanup still block.
+Other generation backends retain their existing MD score gate.
+
+FEP remains optional and export/import only: an export or enabled flag alone is
+not a FEP score and does not delay generation waiting for an unspecified FEP
+protocol. Existing imported finite FEP scores take priority for a new plan.
+Sequential independent workers, constrained docking, native recovery and
+scientific calculation protocols remain unchanged.
+
+**Evidence limits:** synthetic CReM integration and database/recovery tests
+validate selection and workflow behavior, not scientific affinity or real native
+calculations. Production databases, jobs and project settings are not modified
+for verification.
+
+**Verification:** 232 focused CReM, optional-scoring, MD, retry and deletion/
+recovery regressions passed. The full suite reported 2,241 passed, seven skipped
+and three failures: the existing real-fragment clash assertion and two MD
+pending-log expectations. All three failures were reproduced against unmodified
+HEAD in an isolated temporary source tree. The subsequently added export-only
+FEP regression is included in the 232 focused passes. Editable installation,
+compileall, package/CLI imports and diff checks passed. No native calculation
+was submitted or production database/job reset for validation.
+
 ## Submit ready MD frames without an all-frame preparation barrier (2026-11-09)
 
 **Confirmed user request:** reduce the gap between a molecule's completed MD

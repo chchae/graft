@@ -97,6 +97,8 @@ def _run_stage(args, requested_iteration):
                 or database.stage_is_running(args.db_path, 'amber_gbsa')):
             print(f'Iteration {iteration}: Prime waiting for Amber remote work to retire.')
             return
+        from graft.attraction_point import prepare
+        prepare(args, iteration, 'prime_gbsa')
         pending = database.claim_prime_gbsa_candidates(
             args.db_path, iteration, args.prime_gbsa_input_count, target_count, database.amber_keep_count(args),
         )

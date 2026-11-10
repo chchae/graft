@@ -28,7 +28,8 @@ def _fetch_output(jsc, directory, record, child, output):
 def collect_completed_subjobs(args, iteration, directory, record, jobs):
     """Commit scores before recording imported children, making restarts safe."""
     parent = next(job for job in jobs if job['jobId'] == record['job_id'])
-    if parent['status'] == 'DONE':
+    if parent['status'] == 'DONE' and all(
+            job.get('status') in {'DONE', 'FAILED', 'CANCELED', 'STOPPED'} for job in jobs):
         return  # The final parent output is authoritative and now available.
     directory = Path(directory)
     jsc = Path(record['command'][0]).parent / 'jsc'

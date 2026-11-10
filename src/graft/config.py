@@ -332,8 +332,6 @@ def md_gbsa_settings(config: dict[str, Any], base: Path | None = None) -> dict[s
     enabled = config.get('md-gbsa', False)
     if not isinstance(enabled, bool):
         raise ValueError('md-gbsa must be a boolean')
-    if enabled and config.get('prime-gbsa', True) is False:
-        raise ValueError('md-gbsa=true requires prime-gbsa=true')
     local = config.get('md-gbsa-local-compute', False)
     if not isinstance(local, bool):
         raise ValueError('md-gbsa-local-compute must be a boolean')
@@ -452,8 +450,6 @@ def generation_settings(config: dict[str, Any], base: Path) -> dict[str, Any]:
             raise ValueError('CReM generation does not use sidechain-library')
         if not config.get('reference-mcs'):
             raise ValueError('CReM generation requires reference-mcs with attachment points')
-        if not config.get('md-gbsa', False) or config.get('prime-gbsa', True) is False or not config.get('amber_gbsa', config.get('amber-gbsa-enabled', False)):
-            raise ValueError('CReM pipeline requires Amber, Prime and md-gbsa enabled')
         count = config.get('elite-count', 30)
         if isinstance(count, bool) or not isinstance(count, int) or count < 1:
             raise ValueError('CReM elite-count must be a positive integer')
@@ -527,7 +523,7 @@ def amber_settings(config: dict[str, Any], base: Path) -> dict[str, Any]:
         raise ValueError('amber-input-count and legacy amber-keep-count must agree')
     # Retain the internal attribute for existing workers and API callers.
     settings['amber_keep_count'] = config.get('amber-input-count', config.get('amber-keep-count', 500))
-    if enabled and settings['amber_keep_count'] < prime_count:
+    if enabled and settings['prime_gbsa_enabled'] and settings['amber_keep_count'] < prime_count:
         raise ValueError('amber-input-count must be >= prime-gbsa-input-count')
     host = str(config.get('amber-ssh-host', 'tensor'))
     if not host or host.startswith('-') or any(c.isspace() for c in host):
@@ -602,6 +598,16 @@ def debug_settings(config: dict[str, Any], settings: dict[str, Any]) -> dict[str
     return settings
 
 
+def attraction_point_settings(config: dict[str, Any]) -> dict[str, tuple[float, float, float] | None]:
+    value = config.get('attraction_point')
+    if value is None:
+        return {'attraction_point': None}
+    if (not isinstance(value, (list, tuple)) or len(value) != 3
+            or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in value)):
+        raise ValueError('attraction_point must contain three finite coordinates: [x, y, z] in Angstroms')
+    return {'attraction_point': tuple(float(x) for x in value)}
+
+
 def glide_job_timeout(config: dict[str, Any]) -> int:
     value = config.get('glide-job-timeout', 1800)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -665,18 +671,29 @@ def schrodinger_job_options(host: str, cpus: int | None = None,
     return options
 
 
-def glide_job_options(host: str, ligand_count: int, cpus: int | None = None) -> list[str]:
-    """Keep the host budget, splitting prepared structures into batches <=100."""
-    if isinstance(ligand_count, bool) or not isinstance(ligand_count, int) or ligand_count < 1:
-        raise ValueError('Glide ligand_count must be a positive integer')
+def _capped_structure_job_options(host: str, count: int, cpus: int | None) -> list[str]:
     options = schrodinger_job_options(host, cpus, split_jobs=True)
-    minimum = (ligand_count + 99) // 100
+    minimum = (count + 99) // 100
     if '-NJOBS' in options:
         index = options.index('-NJOBS') + 1
-        options[index] = str(min(ligand_count, max(minimum, int(options[index]))))
+        options[index] = str(min(count, max(minimum, int(options[index]))))
     else:
         options += ['-NJOBS', str(minimum)]
     return options
+
+
+def glide_job_options(host: str, ligand_count: int, cpus: int | None = None) -> list[str]:
+    """Target 50 prepared structures per subjob, independent of HOST slots."""
+    if isinstance(ligand_count, bool) or not isinstance(ligand_count, int) or ligand_count < 1:
+        raise ValueError('Glide ligand_count must be a positive integer')
+    return [*schrodinger_job_options(host, cpus), '-NJOBS', str((ligand_count + 49) // 50)]
+
+
+def ligprep_job_options(host: str, compound_count: int, cpus: int | None = None) -> list[str]:
+    """Keep concurrency slots, with at most 100 original inputs per subjob."""
+    if isinstance(compound_count, bool) or not isinstance(compound_count, int) or compound_count < 1:
+        raise ValueError('LigPrep compound_count must be a positive integer')
+    return _capped_structure_job_options(host, compound_count, cpus)
 
 
 def prime_gbsa_job_options(host: str, ligand_count: int) -> list[str]:

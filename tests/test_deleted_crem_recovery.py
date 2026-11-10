@@ -37,11 +37,13 @@ def deleted(project, monkeypatch):
 
 
 def test_deleted_population_and_directory_select_generate_then_back_up_and_reset(deleted):
+    database.freeze_attraction_policy(deleted.db_path, 1, 'amber_gbsa', None, {})
     assert driver.choose_iteration(deleted) == 1
     assert database.iteration_was_deleted(deleted.db_path, 1)
     assert database.generation_readiness_reason(deleted.db_path, 1, 2) is not None
     archive = prepare_iteration_directory(deleted, 1)
     assert database.crem_generation(deleted.db_path, 1) is None
+    assert database.attraction_policy(deleted.db_path, 1, 'amber_gbsa') is None
     assert not database.iteration_was_deleted(deleted.db_path, 1)
     proof = json.loads((archive/'deleted_crem_reconciliation.json').read_text())
     assert len(proof['native']) == 2
@@ -49,6 +51,7 @@ def test_deleted_population_and_directory_select_generate_then_back_up_and_reset
     with sqlite3.connect(backup) as conn:
         assert conn.execute('SELECT population_count FROM iteration_crem WHERE iteration=1').fetchone()[0] == 2
         assert conn.execute('SELECT count(*) FROM crem_compound_pose WHERE iteration=1').fetchone()[0] == 2
+        assert conn.execute('SELECT count(*) FROM iteration_attraction_point WHERE iteration=1').fetchone()[0] == 1
     with database.connect(deleted.db_path) as conn:
         assert conn.execute('SELECT count(*) FROM compound WHERE iteration=0').fetchone()[0] > 0
         assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
