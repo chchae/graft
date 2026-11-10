@@ -28,8 +28,8 @@ def deleted(project, monkeypatch):
     with sqlite3.connect(project.db_path) as conn:
         conn.execute('DELETE FROM compound WHERE iteration=1')
     monkeypatch.setattr(guard, 'active_jobs', lambda *a: [])
-    monkeypatch.setattr(_deleted_crem.subprocess, 'run', lambda cmd, **kw:
-                        subprocess.CompletedProcess(cmd, 0, 'parent\n', ''))
+    monkeypatch.setattr(_deleted_crem, 'native_history', lambda *a:
+                        dict(servers=['native:8030'], history_ids=['parent'], active_ids=[], checked_at=1))
     monkeypatch.setattr(guard, 'job_details', lambda *a: [
         dict(jobId='parent', status='DONE', spec=dict(launchParams=dict(launchDirectory=str(root/'05-ligprep')))),
         dict(jobId='child', status='DONE', parentJobId='parent')])
@@ -73,20 +73,26 @@ def test_live_or_uncertain_child_defers_reset(deleted, monkeypatch, status):
     assert not (Path(deleted.output)/'.previous').exists()
 
 
-def test_remaining_directory_is_retained_for_explicit_recovery(deleted):
+def test_remaining_directory_is_cleared_and_archived_before_regeneration(deleted):
     root = iteration_directory(deleted.output, 1)
     root.mkdir()
     (root/'evidence').write_text('retain')
-    with pytest.raises(WorkspaceReconciliationPending, match='directory too'):
-        prepare_iteration_directory(deleted, 1)
-    assert (root/'evidence').read_text() == 'retain'
+    archive = prepare_iteration_directory(deleted, 1)
+    assert list(root.iterdir()) == []
+    assert (archive/'evidence').read_text() == 'retain'
+    assert database.crem_generation(deleted.db_path, 1) is None
 
 
-def test_missing_native_history_is_not_treated_as_completion(deleted, monkeypatch):
-    monkeypatch.setattr(_deleted_crem.subprocess, 'run', lambda cmd, **kw:
-                        subprocess.CompletedProcess(cmd, 1, '', 'No jobs matching your search criteria were found.'))
-    with pytest.raises(WorkspaceReconciliationPending, match='No native history'):
-        prepare_iteration_directory(deleted, 1)
+def test_missing_native_history_uses_complete_active_snapshot_and_backs_up(deleted, monkeypatch):
+    monkeypatch.setattr(_deleted_crem, 'native_history', lambda *a:
+                        dict(servers=['native:8030'], history_ids=[], active_ids=[], checked_at=1))
+    archive = prepare_iteration_directory(deleted, 1)
+    proof = json.loads((archive/'deleted_crem_reconciliation.json').read_text())
+    assert proof['native_history_missing'] is True
+    assert proof['native'] == []
+    assert proof['native_query']['servers'] == ['native:8030']
+    assert next(archive.glob('database-before-reset-*.sqlite')).exists()
+    assert database.crem_generation(deleted.db_path, 1) is None
 
 
 def test_native_lookup_failure_is_pending_without_reset(deleted, monkeypatch):
@@ -217,3 +223,110 @@ def test_retired_amber_receipt_requires_complete_results_and_native_retirement(t
         with pytest.raises(RuntimeError,match='incomplete or foreign'):
             exec(_deleted_crem.AMBER_PROBE,{})
     assert json.loads(receipt.read_text())==saved
+
+
+def test_history_queries_every_registered_server_and_all_active_ages(monkeypatch):
+    calls=[]
+    empty='No jobs matching your search criteria were found.\n'
+    def run(command,**kw):
+        calls.append(command)
+        if command[1:]==['cert','list']:
+            return subprocess.CompletedProcess(command,0,
+                'User certificates exist for the following server addresses:\n'
+                '  local:8030 (user: test)\n  slurm:8030 (user: test)\n','')
+        assert '--server' in command, 'Aggregate queries can hide an inaccessible server'
+        if '--any-status' in command:
+            assert '--with-deleted-jobs' in command and '--created-after' in command
+            return subprocess.CompletedProcess(command,1,'',empty)
+        assert '--created-after' not in command and '--without-subjobs' not in command
+        value='orphan\n' if command[command.index('--server')+1]=='slurm:8030' else ''
+        return subprocess.CompletedProcess(command,0,value,'')
+    monkeypatch.setattr(_deleted_crem.subprocess,'run',run)
+    proof=_deleted_crem.native_history('/suite',100000)
+    assert proof['servers']==['local:8030','slurm:8030']
+    assert proof['history_ids']==[] and proof['active_ids']==['orphan']
+    assert len(calls)==5
+
+
+@pytest.mark.parametrize('code,stdout,stderr',[
+    (1,'','All existing job servers are inaccessible.'),
+    (0,'parent\n','rpc error: TLS authentication failed'),
+    (0,'rpc error: certificate signed by unknown authority',''),
+])
+def test_partial_or_failed_server_query_never_becomes_empty_history(monkeypatch,code,stdout,stderr):
+    def run(command,**kw):
+        if command[1:]==['cert','list']:
+            return subprocess.CompletedProcess(command,0,
+                'User certificates exist for the following server addresses:\n  slurm:8030 (user: test)\n','')
+        return subprocess.CompletedProcess(command,code,stdout,stderr)
+    monkeypatch.setattr(_deleted_crem.subprocess,'run',run)
+    with pytest.raises(RuntimeError,match='failed|invalid'):
+        _deleted_crem.native_history('/suite',None)
+
+
+def test_missing_certificate_inventory_blocks_recovery(monkeypatch):
+    monkeypatch.setattr(_deleted_crem.subprocess,'run',lambda cmd,**kw:
+                        subprocess.CompletedProcess(cmd,0,'No certificates found.\n',''))
+    with pytest.raises(RuntimeError,match='enumerate'):
+        _deleted_crem.native_history('/suite',None)
+
+
+@pytest.mark.parametrize('status',['RUNNING','UNKNOWN'])
+def test_no_history_with_owned_orphaned_child_still_blocks_reset(deleted,monkeypatch,status):
+    root=iteration_directory(deleted.output,1)
+    monkeypatch.setattr(_deleted_crem,'native_history',lambda *a:
+        dict(servers=['native:8030'],history_ids=[],active_ids=['orphan'],checked_at=1))
+    orphan = dict(jobId='orphan', status=status, parentJobId='lost-parent',
+                  spec={'taskSpec': {'input': {'inputFiles': [
+                      {'contentUri': 'file://cpu1'+str(root/'06-glide/ref_1/_reference.maegz')}
+                  ]}}})
+    monkeypatch.setattr(guard,'job_details',lambda *a:[orphan])
+    with pytest.raises(WorkspaceReconciliationPending,match='live/uncertain'):
+        prepare_iteration_directory(deleted,1)
+    assert database.crem_generation(deleted.db_path,1) is not None
+    assert not root.exists()
+
+
+def test_no_history_can_reset_without_touching_another_projects_live_job(deleted,monkeypatch):
+    monkeypatch.setattr(_deleted_crem,'native_history',lambda *a:
+        dict(servers=['native:8030'],history_ids=[],active_ids=['other'],checked_at=1))
+    monkeypatch.setattr(guard,'job_details',lambda *a:[dict(jobId='other',status='RUNNING',
+        spec=dict(launchParams=dict(launchDirectory='/another-project/iter01/06-glide/ref_1')))])
+    archive=prepare_iteration_directory(deleted,1)
+    assert archive.exists() and database.crem_generation(deleted.db_path,1) is None
+
+
+def test_deleted_iteration_clears_nested_caches_but_retains_uncertain_launch(deleted):
+    root=iteration_directory(deleted.output,1)
+    folder=root/'06-glide/ref_1';folder.mkdir(parents=True)
+    (folder/'glide_job.json').write_text('{"job_id":null}')
+    (folder/'cached.maegz').write_text('uncertain scientific output')
+    with pytest.raises(WorkspaceReconciliationPending,match='uncertain submission'):
+        prepare_iteration_directory(deleted,1)
+    assert (folder/'cached.maegz').read_text()=='uncertain scientific output'
+    assert database.crem_generation(deleted.db_path,1) is not None
+
+
+@pytest.mark.parametrize('job_line',['123|glide_03|RUNNING|/var/tmp/native\n',
+                                    '124|custom-job|PENDING|/project/iter01/06-glide\n'])
+def test_history_loss_checks_slurm_tasks_not_only_the_reinstalled_jobserver(monkeypatch,job_line):
+    from types import SimpleNamespace
+    from graft import amber_gbsa
+    args=SimpleNamespace(use_slurm=True,amber_remote=dict(host='slurm'))
+    monkeypatch.setattr(amber_gbsa,'ssh',lambda *a,**kw:subprocess.CompletedProcess([],0,job_line,''))
+    with pytest.raises(RuntimeError,match='remains after native history loss'):
+        _deleted_crem.scheduler_snapshot(args,Path('/project/iter01'))
+
+
+def test_empty_slurm_snapshot_is_archived_as_reinstallation_evidence(monkeypatch):
+    from types import SimpleNamespace
+    from graft import amber_gbsa
+    args=SimpleNamespace(use_slurm=True,amber_remote=dict(host='slurm'))
+    commands=[]
+    def ssh(settings,command,**kw):
+        commands.append(command)
+        return subprocess.CompletedProcess([],0,'','')
+    monkeypatch.setattr(amber_gbsa,'ssh',ssh)
+    proof=_deleted_crem.scheduler_snapshot(args,Path('/project/iter01'))
+    assert proof['host']=='slurm' and proof['tasks']==[]
+    assert 'squeue --me --noheader' in commands[0]

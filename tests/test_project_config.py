@@ -42,9 +42,9 @@ def test_project_submission_client_is_relative_to_toml_and_remote_md_stays_remot
     assert cfg['md_gbsa_schrodinger'] == '/remote/suite'
 
 
-def test_slurm_default_pins_2026_4_but_preserves_explicit_and_local_clients(tmp_path):
+def test_slurm_default_pins_2026_1_but_preserves_explicit_and_local_clients(tmp_path):
     from graft.config import submission_installation
-    assert submission_installation({'use-slurm': True}, tmp_path) == Path('/share/opt/schrodinger/2026-4')
+    assert submission_installation({'use-slurm': True}, tmp_path) == Path('/share/opt/schrodinger/2026-1')
     assert submission_installation({'use-slurm': True, 'schrodinger': 'suite'}, tmp_path) == tmp_path/'suite'
     assert submission_installation({}, tmp_path) is None
 
@@ -88,7 +88,7 @@ def test_md_gbsa_protocol_defaults_are_configurable():
     assert settings['md_gbsa_snapshots']==20
     assert settings['md_gbsa_gpu_host']=='slurm-gpu'
     assert settings['md_gbsa_cpu_host']=='slurm-cpu'
-    assert settings['md_gbsa_schrodinger']=='/share/opt/schrodinger/2026-4'
+    assert settings['md_gbsa_schrodinger']=='/share/opt/schrodinger/2026-1'
 
 
 @pytest.mark.parametrize('suite', ['/share/opt/schrodinger/custom-installation', '/share/opt/schrodinger/default'])

@@ -81,9 +81,6 @@ def _prepare(args, iteration, deleted):
     deleted_crem = deleted and database.crem_generation(args.db_path, iteration) is not None
     deletion_proof = None
     if deleted_crem:
-        if root.exists():
-            raise WorkspaceReconciliationPending(
-                'Deleted CReM population: remove its iteration directory too, or restore its original DB rows')
         from graft.stages._deleted_crem import reconcile
         try:
             deletion_proof = reconcile(args, iteration, root)

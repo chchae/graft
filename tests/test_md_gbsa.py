@@ -50,7 +50,7 @@ def test_versioned_default_does_not_rewrite_existing_native_selection(db):
                suite='/share/opt/schrodinger/saved-installation')
     saved = database.freeze_md_gbsa_selection(db, 1, old, target_count=4, prime_count=4)
     changed = old | {'suite': md_gbsa_settings({})['md_gbsa_schrodinger']}
-    assert changed['suite'] == '/share/opt/schrodinger/2026-4'
+    assert changed['suite'] == '/share/opt/schrodinger/2026-1'
     assert database.freeze_md_gbsa_selection(db, 1, changed, target_count=4, prime_count=4) == saved
     assert database.md_gbsa_selection(db, 1)['settings']['suite'] == old['suite']
 

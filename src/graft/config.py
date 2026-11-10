@@ -368,7 +368,7 @@ def md_gbsa_settings(config: dict[str, Any], base: Path | None = None) -> dict[s
                 or any(c.isspace() for c in value) or ':' in value):
             raise ValueError(f'Invalid md-gbsa-{suffix}')
         result['md_gbsa_' + suffix.replace('-', '_')] = value
-    for suffix, default in [('schrodinger', '/share/opt/schrodinger/2026-4'),
+    for suffix, default in [('schrodinger', '/share/opt/schrodinger/2026-1'),
                             ('remote-work-dir', str(output / 'graft-md-gbsa-runs')),
                             ('local-work-dir', '/home1/prime_share'),
                             ('local-schrodinger', '/home/schrodinger/2025-3-IL')]:
@@ -865,7 +865,7 @@ def submission_installation(config: dict[str, Any], base: Path) -> Path | None:
     """Pin new Slurm clients; explicit and local installations keep precedence."""
     value = config.get('schrodinger')
     if value is None and 'schrodinger' not in config:
-        return Path('/share/opt/schrodinger/2026-4') if config.get('use-slurm', False) else None
+        return Path('/share/opt/schrodinger/2026-1') if config.get('use-slurm', False) else None
     if not isinstance(value, str) or not value.strip():
         raise ValueError('schrodinger must be a nonempty local installation path')
     path = Path(value).expanduser()

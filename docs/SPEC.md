@@ -1,5 +1,58 @@
 # Graft specification
 
+## Restart deleted CReM work after JobServer reinstallation (2026-11-10)
+
+**Confirmed user requirements:** after deleting iteration-5 compound rows and its
+output folder, restarting must clear the deleted iteration's old working data
+and regenerate instead of waiting indefinitely for missing native history.
+The JobServer was reinstalled as 2026-1; use that release for the current project
+and new Slurm submission/remote-MD defaults. This supersedes the previous 2026-4
+pin for defaults/new work. Explicit alternative installations, local/non-Slurm
+fallbacks, separate Prime installations and frozen native selections remain intact.
+
+**Implementation:** retain complete frozen CReM ownership, a fully deleted
+population, stage locks, dependency checks and transactional backup/reset gates.
+For the deleted iteration, archive any remaining working tree and clear its old
+generation/scaffold/selection/timing metadata before generating a fresh population.
+An existing cache directory no longer requires manual removal first. Resume
+nondeleted/saved populations unchanged; keep earlier iterations needed for parents.
+Clear active working paths by moving artifacts to output/.previous, preserving
+SQLite/WAL and retirement evidence rather than destroying scientific backups.
+
+Query every registered certificate server explicitly for full active jobs and
+recent history (including deleted native records); aggregated native list queries
+can return an empty result while another server is inaccessible. Authentication,
+transport, partial responses and ambiguous native identities remain pending with
+the actual diagnostic. Include old/orphaned active children irrespective of the
+history date filter and recognize project ownership through native input URIs.
+Missing history alone no longer blocks an explicitly deleted population after a
+complete successful active snapshot. For Slurm history loss, also query the user's
+scheduler queue: any surviving native task or task under the iteration's working
+path blocks recovery, since a reinstalled native DB may have lost those records.
+Retain independent Amber task/lock, MD selection/ownership and FEP protections;
+uncertain local launch journals and later dependent work still block cleanup.
+Archive queried server coverage, snapshot time, history-loss status and scheduler
+evidence. Never infer an inaccessible service is an empty queue or cancel jobs.
+
+**Operational verification:** reauthenticated the existing launch account with
+the reinstalled Slurm server using the installed 2026-1 native certificate tool.
+Client/server both report API 1.19.4 and slurm-cpu preflight passes. The current
+project TOML explicitly selects /share/opt/schrodinger/2026-1 for new preparation/
+docking and MD work. Verified no active native/registered-remote work or Slurm
+user tasks, then used the same locked recovery path for deleted iteration 5.
+Archived proof and SQLite/WAL at
+examples/egfr-crem-2/output/.previous/iter05-1794296100197327561/.
+All iteration-0..4 compound rows matched a before/after SHA-256 digest, foreign-key
+and SQLite quick checks passed, the iteration-5 workspace is empty and the driver
+selects iteration 5 again. No scientific calculation was submitted or existing
+native command/result rewritten for verification. These checks validate recovery
+and compatibility, not scientific accuracy or native throughput.
+
+**Verification:** 439 focused deletion/workspace/CReM, MD/configuration,
+preflight and stage-barrier tests passed. Full suite: 2,437 passed, seven skipped
+and the same three documented baseline failures (real-fragment clash and two MD
+pending-log expectations). Compileall, package/CLI imports and diff checks passed.
+
 ## Current wall-clock time beside elapsed reports (2026-11-10)
 
 **Confirmed user requirement:** include the current time alongside elapsed times
