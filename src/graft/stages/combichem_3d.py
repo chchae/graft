@@ -92,13 +92,15 @@ def plan_parent(db, job, cfg, library, checker, deadline):
                 sum(r['status']==PoseVerdict.UNRESOLVED for _,r in reports),len(passed),[len(p) for p in pools],plan['total'])
 
 
-def evaluate_batch(db, job, cfg, checker, evaluator, deadline, references=None):
+def evaluate_batch(db, job, cfg, checker, evaluator, deadline, references=None, *, result_writer=None):
     row = database.growth_parent(db,job['parent_pose'])
     parent,history,plan = restore_parent(row),row['history'],row['plan']
     trace('batch start parent_pose=%s iteration=%s cursor=%s stop=%s',job['parent_pose'],history['iteration']+1,job['cursor'],job['stop'])
     from graft.stages.combichem_buffer import ResultBuffer
-    with ResultBuffer(db, job, cfg) as buffer:
+    with ResultBuffer(db, job, cfg, writer=result_writer) as buffer:
         for ordinal in range(int(job['cursor']),int(job['stop'])):
+            if result_writer is not None and result_writer['failed'].is_set():
+                raise RuntimeError('Generation result writer failed; completed calculations retained')
             if database.growth_should_stop(db):
                 return
             choices = plan['operations'][ordinal] if plan.get('kind')=='crem_single_addition' else combination_at(plan['pools'],ordinal)
@@ -111,10 +113,11 @@ def evaluate_batch(db, job, cfg, checker, evaluator, deadline, references=None):
                          job['parent_pose'],ordinal,report['status'],report.get('output_passed',False),report.get('valid_poses'),
                          report.get('attempts'),str(report.get('reason',''))[:400],str(report.get('errors',[]))[:400],
                          report.get('filter_rejections',[]),str(report.get('clashes'))[:600])
-    database.growth_finish_batch(db,job)
+    if result_writer is None:
+        database.growth_finish_batch(db,job)
 
 
-def worker_loop(db, cfg, iteration):
+def worker_loop(db, cfg, iteration, result_writer=None):
     # Independent calculators inspect/claim SQLite; they never invoke each other.
     signal.signal(signal.SIGINT,signal.SIG_IGN)
     signal.signal(signal.SIGTERM,signal.SIG_DFL)
@@ -133,6 +136,8 @@ def worker_loop(db, cfg, iteration):
             references=ReferencePoses(cfg['reference-poses'],cfg['reference-mcs'])
         deadline = database.growth_run_info(db)['deadline']
         while True:
+            if result_writer is not None and result_writer['failed'].is_set():
+                raise RuntimeError('Generation result writer failed; claims retained')
             job = database.growth_claim(db,iteration,cfg['batch-size'],os.getpid())
             if job is None:
                 logger.debug('worker finished iteration=%s: no claimable work',iteration)
@@ -162,7 +167,7 @@ def worker_loop(db, cfg, iteration):
                     library,_ = load_library(cfg['sidechain-library'],cfg)
                 plan_parent(db,job,cfg,library,checker,deadline)
             else:
-                evaluate_batch(db,job,cfg,checker,evaluator,deadline,references)
+                evaluate_batch(db,job,cfg,checker,evaluator,deadline,references,result_writer=result_writer)
     except BaseException:
         logger.exception('worker failed iteration=%s job=%s',iteration,job)
         database.growth_log_event(db,'worker_error',dict(reason=traceback.format_exc(),owner=os.getpid(),job=job))
@@ -373,7 +378,8 @@ def supervise(cfg, db, first_iteration):
     """Only lifecycle supervision here: every scientific calculation is a worker."""
     # Recovery does no scientific calculation. An independent stage process
     # persists orphaned journals before any calculator can reclaim their jobs.
-    if any((Path(db).parent/'result-buffer').glob('*.jsonl')):
+    buffers = Path(db).parent/'result-buffer'
+    if any(buffers.glob('*.jsonl')) or any(buffers.glob('batch-*.ready')):
         from graft.stages.combichem_buffer import recover
         recovery = multiprocessing.get_context('fork').Process(target=recover, args=(db,))
         recovery.start()
@@ -382,11 +388,35 @@ def supervise(cfg, db, first_iteration):
             raise RuntimeError('Result-buffer recovery failed; journals and claims retained')
     database.growth_start_session(db,cfg)
     processes = []
+    writer = None
+    writer_state = None
+    writer_failed = False
     stopped = False
     previous = {}
     def interrupt(signum, frame):
         nonlocal stopped
         stopped = True
+
+    def drain_writer():
+        nonlocal writer, writer_failed
+        if writer is None:
+            return
+        writer_state['stop'].set()
+        writer_state['wake'].set()
+        # Calculators are joined first. Keep the writer alive until every
+        # published batch and orphaned completed prefix has been persisted.
+        next_report = time.monotonic()+5
+        while writer.is_alive():
+            writer.join(timeout=.1)
+            if time.monotonic() >= next_report:
+                logger.info('waiting for generation result writer to persist completed batches')
+                next_report = time.monotonic()+5
+        writer.join()
+        if writer.exitcode != 0 or writer_state['failed'].is_set():
+            writer_failed = True
+            writer_state['failed'].set()
+            database.growth_request_stop(db,'worker_error')
+        writer = None
     for signum in (signal.SIGINT,signal.SIGTERM):
         previous[signum] = signal.signal(signum,interrupt)
     try:
@@ -405,9 +435,18 @@ def supervise(cfg, db, first_iteration):
                 source_iteration=iteration-1
             log_frames(db,source_iteration,iteration,cfg['log-structures'],cfg.get('growth-mode')=='frame-cycles')
             processes = []
+            use_writer = cfg.get('execution-backend') != 'slurm' and not cfg.get('worker-hosts')
+            if use_writer:
+                from graft.stages.combichem_writer import run as write_results
+                writer_state = {name:context.Event() for name in ('stop','wake','failed')}
+                writer = context.Process(target=write_results,args=(db,writer_state,os.getpid()))
+                writer.start()
+                logger.info('iteration %s: one result writer pid=%s; persist after each calculation batch',
+                            iteration,writer.pid)
             for index in range(local_count):
                 worker_cfg = cfg | {'slurm-worker-index':index} if cfg.get('execution-backend')=='slurm' else cfg
-                process = context.Process(target=worker_loop,args=(db,worker_cfg,iteration))
+                worker_args = (db,worker_cfg,iteration,writer_state) if use_writer else (db,worker_cfg,iteration)
+                process = context.Process(target=worker_loop,args=worker_args)
                 process.start()
                 processes.append(process)
             stop_at = None
@@ -415,6 +454,9 @@ def supervise(cfg, db, first_iteration):
             while any(process.is_alive() for process in processes):
                 if stopped:
                     database.growth_request_stop(db,'interrupted')
+                if writer is not None and writer.exitcode is not None:
+                    writer_state['failed'].set()
+                    database.growth_request_stop(db,'worker_error')
                 reason = database.growth_should_stop(db)
                 if any(process.exitcode not in (None,0) for process in processes):
                     database.growth_request_stop(db,'worker_error')
@@ -434,6 +476,9 @@ def supervise(cfg, db, first_iteration):
                     process.join(timeout=.02)
             for process in processes:
                 process.join()
+            drain_writer()
+            if writer_failed:
+                raise RuntimeError('Generation result writer failed; completion withheld; journals retained')
             logger.info('iteration %s workers finished: exit_codes=%s',iteration,[p.exitcode for p in processes])
             if any(process.exitcode != 0 for process in processes):
                 database.growth_request_stop(db,'worker_error')
@@ -446,6 +491,7 @@ def supervise(cfg, db, first_iteration):
             if process.is_alive():
                 process.terminate()
             process.join()
+        drain_writer()
         for signum,handler in previous.items():
             signal.signal(signum,handler)
         database.growth_end_session(db,'interrupted' if stopped else 'worker_error')

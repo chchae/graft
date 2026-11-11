@@ -30,8 +30,10 @@ def _append_journal(path, row):
 
 
 class ResultBuffer:
-    def __init__(self, db, batch, cfg):
+    def __init__(self, db, batch, cfg, *, writer=None):
         self.db, self.batch = db, batch
+        self.writer = writer
+        self.submitted = False
         self.limit = cfg.get('result-buffer-size', 16)
         self.interval = cfg.get('result-buffer-seconds', 2.)
         self.path = Path(db).parent / 'result-buffer' / f"batch-{batch['id']}.jsonl"
@@ -44,15 +46,23 @@ class ResultBuffer:
         return self
 
     def append(self, ordinal, report, payload):
+        if self.submitted:
+            raise RuntimeError('Cannot append to a completed batch buffer')
         # Each journal is owned by one claimed batch. Fsync before exposing the
         # result as buffered, so SIGKILL/failed DB commits retain completed work.
         row = dict(batch=self.batch, ordinal=ordinal, report=report, payload=payload)
         _append_journal(self.path, row)
         self.records.append((ordinal, report, payload))
-        if len(self.records) >= self.limit or time.monotonic() - self.started >= self.interval:
+        if self.writer is None and (len(self.records) >= self.limit or time.monotonic() - self.started >= self.interval):
             self.flush()
 
     def flush(self):
+        if self.writer is not None:
+            if not self.submitted:
+                from graft.stages.combichem_writer import submit
+                submit(self, self.writer)
+                self.submitted = True
+            return
         if not self.records:
             return
         database.growth_save_attempts(self.db, self.batch, self.records)
@@ -107,6 +117,9 @@ class ProbeBuffer:
 def recover(db):
     """Recovery worker runs alone, before session claims can be rearmed."""
     directory = Path(db).parent / 'result-buffer'
+    from graft.stages.combichem_writer import commit_ready
+    for path in sorted(directory.glob('batch-*.ready')):
+        commit_ready(db, path)
     for path in sorted(directory.glob('probe-*.jsonl')):
         rows = []
         with path.open('rb') as stream:

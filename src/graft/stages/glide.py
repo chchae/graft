@@ -477,7 +477,10 @@ def _run_stage(args, ns):
         if ligand_file is None:
             mark_group(args.db_path, compounds, "failed", failed_stage="glide", message="No LigPrep structures for reference group")
             continue
-        refname = c.get_reference_name(refid, args.db_path)
+        # Frozen parent-pose exports use CMPID titles. The legacy name lookup
+        # deliberately accepts only iteration-0 reference ligands.
+        refname = (f'CMPID_{refid}' if args.crem_docking_references
+                   else c.get_reference_name(refid, args.db_path))
         gdir = glide_root / f"ref_{refid}"
         gdir.mkdir(parents=True, exist_ok=True)
         ref_file = gdir / "_reference.maegz"

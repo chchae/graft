@@ -409,23 +409,31 @@ def test_glide_keeps_current_jobs_and_results_after_restart(tmp_path):
     assert log.read_text() == "current job still running"
 
 
-def test_glide_submits_new_job_instead_of_importing_legacy_results(monkeypatch, tmp_path):
+@pytest.mark.parametrize('parent_reference',[False,True])
+def test_glide_submits_new_job_instead_of_importing_legacy_results(monkeypatch, tmp_path,parent_reference):
     from graft import glide_recovery
     monkeypatch.setattr(glide_recovery, 'job_details', lambda *a: [
         {'jobId': 'fresh', 'status': 'DONE'}])
     monkeypatch.setattr(glide, "active_jobs", lambda *a: [])
     db = tmp_path / "project.sqlite"
+    refid=798 if parent_reference else 1
+    iteration=2 if parent_reference else 1
+    cid=refid+1
     with sqlite3.connect(db) as conn:
         _core.create_sqlite_schema(conn)
-        conn.execute("INSERT INTO compound(name,smiles,iteration,state) VALUES ('REF','C',0,'reference')")
-        conn.execute("INSERT INTO compound(name,smiles,iteration,state,similar_to) VALUES ('NEW','C',1,'ligprepped',1)")
+        conn.execute("INSERT INTO compound(id,name,smiles,iteration,state) VALUES (?,'REF','C',?,'reference')",
+                     (refid,iteration-1))
+        conn.execute("INSERT INTO compound(id,name,smiles,iteration,state,similar_to) VALUES (?,'NEW','C',?,'ligprepped',?)",
+                     (cid,iteration,refid))
+    monkeypatch.setattr(database,'crem_glide_references',lambda *a:
+                        {refid:dict(compound_id=refid)} if parent_reference else {})
     args = SimpleNamespace(db_path=db, output=tmp_path, schrodinger=Path('/suite'),
                            reference_poses=Path('ref.maegz'), mcs_smarts=None,
                            grid=Path('grid.zip'), host='compute:8')
-    prepared = tmp_path / 'iter1/ligprep/ligprep.maegz'
+    prepared = tmp_path / f'iter{iteration}/ligprep/ligprep.maegz'
     prepared.parent.mkdir(parents=True)
-    prepared.write_text('CMPID_2')
-    group = tmp_path / 'iter1/glide/ref_1'
+    prepared.write_text(f'CMPID_{cid}')
+    group = tmp_path / f'iter{iteration}/glide/ref_{refid}'
     group.mkdir(parents=True)
     output = group / 'glide_lib.maegz'
     output.write_text('CMPID_OLD')
@@ -434,29 +442,31 @@ def test_glide_submits_new_job_instead_of_importing_legacy_results(monkeypatch, 
     def split(*args):
         assert not output.exists()
         ligand = group / 'ligprep_group.maegz'
-        ligand.write_text('CMPID_2')
-        return {1: ligand}
+        ligand.write_text(f'CMPID_{cid}')
+        return {refid: ligand}
     monkeypatch.setattr(_core, 'split_ligprep_by_reference', split)
-    monkeypatch.setattr(glide, 'prepare_new_inputs', lambda args,entries,root:{
-        job['reference_id']:job['group_dir']/'glide.in' for job,_ in entries})
+    def prepare(args,entries,root):
+        assert entries[0][0]['reference_name']==(f'CMPID_{refid}' if parent_reference else 'REF')
+        return {job['reference_id']:job['group_dir']/'glide.in' for job,_ in entries}
+    monkeypatch.setattr(glide,'prepare_new_inputs',prepare)
     submits = []
     def submit(*a, **kw):
         submits.append(a)
         glide_recovery.save_record(group, {'job_id': 'fresh', 'downloaded': True})
-        output.write_text('CMPID_2 new docking result')
+        output.write_text(f'CMPID_{cid} new docking result')
         return {}
     monkeypatch.setattr(_core, 'submit_glide', submit)
     def extract(*a):
-        assert output.read_text() == 'CMPID_2 new docking result'
+        assert output.read_text() == f'CMPID_{cid} new docking result'
         scores = group / 'docking_scores.tsv'
-        scores.write_text('id\tdocking_score\n2\t-9\n')
+        scores.write_text(f'id\tdocking_score\n{cid}\t-9\n')
         poses = group / 'best_poses.maegz'
-        poses.write_text('CMPID_2 pose')
+        poses.write_text(f'CMPID_{cid} pose')
         return scores, poses
     monkeypatch.setattr(_core, 'extract_scores_and_best_poses', extract)
-    monkeypatch.setattr(_core, 'merge_best_pose_files', lambda sch, script, inputs, out, cwd: out.write_text('CMPID_2 pose'))
-    ns = SimpleNamespace(iteration=1,poll_interval=1,completion_fraction=.95,tail_timeout=10)
+    monkeypatch.setattr(_core, 'merge_best_pose_files', lambda sch, script, inputs, out, cwd: out.write_text(f'CMPID_{cid} pose'))
+    ns = SimpleNamespace(iteration=iteration,poll_interval=1,completion_fraction=.95,tail_timeout=10)
     glide._run_stage(args, ns)
     assert len(submits) == 1
     with sqlite3.connect(db) as conn:
-        assert conn.execute('SELECT state,docking_score FROM compound WHERE id=2').fetchone() == ('docked', -9)
+        assert conn.execute('SELECT state,docking_score FROM compound WHERE id=?',(cid,)).fetchone() == ('docked', -9)

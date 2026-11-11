@@ -1,5 +1,73 @@
 # Independent Graft reconstruction prompt
 
+## Resolve generating-elite Glide reference names (2026-11-11)
+
+**Observed bug:** the new parent-pose protocol correctly assigned iteration-1
+elite 798, but Glide still resolved its name through a helper restricted to
+iteration 0. This raised Reference id=798 not found before submission although
+the parent and frozen docking pose existed.
+
+**Implementation repair:** parent-pose groups use the exact CMPID_<parent id>
+title required by their frozen SDF export. Keep the original iteration-0 lookup
+for legacy groups. Do not reassign parents, alter constraints or reset LigPrep,
+scores, saved commands or native jobs.
+
+**Verification:** 86 relevant docking/reference/resource tests passed, including
+both legacy and real-DB nonzero-iteration parent name resolution through group
+submission/result persistence. Read-only native preparation validated every one
+of the actual iteration-2 population's 70 frozen parent reference groups in a
+temporary directory without manual job submission. The existing driver retried
+and submitted reference 798, then proceeded to 802. Compileall, package/CLI
+imports and diff whitespace checks passed. This verifies input routing/recovery,
+not docking affinity or completion of the newly submitted calculations.
+
+## Single writer for completed local generation batches (2026-11-11)
+
+**Confirmed user requirement:** calculators retain a batch's results in memory
+and hand them to one result writer after the batch finishes, with durable
+journals until SQLite commit. Keep SQLite task claims and restart recovery.
+
+**Implementation choices:** the local Generate/combichem supervisor starts one
+persistence process in addition to the configured calculation slots. Calculators
+still atomically claim SQLite work, prepare input/probe/plans and inspect stop
+conditions. Product-result inserts and batch completion go exclusively through
+the writer. Do not change scientific search, parent docking-MCS constraints,
+candidate order within a batch, validity/novelty admission or target limits.
+
+Each calculator keeps at most its claimed batch in memory, fsyncs every acquired
+result to its existing per-batch journal and publishes a checksummed ready marker
+only after completion or an interrupted prefix. The writer atomically commits
+results, cursor and eligible batch/parent completion, then removes the journal
+and marker to acknowledge. The calculator waits for this acknowledgement before
+claiming another batch. Local product persistence now follows batch-size rather
+than the old result-buffer count/time flush; probe buffering and existing
+SSH/Slurm persistence retain their existing settings and behavior.
+
+Recover published batches before rearming claims. After all calculators exit,
+drain published batches and recover acquired prefixes left by killed calculators.
+A missing journal is acknowledged only with matching durable SQLite cursor/state;
+a stale/corrupt marker, checksum mismatch or writer failure retains evidence and
+withholds generation completion, even if target-count was already reached.
+Monitor killed writers, wake blocked calculators and preserve inherited stage
+locks. An orphaned writer must not read journals still owned by live calculators.
+The driver remains a supervisor; it performs no scientific calculation.
+
+**Evidence limits:** this changes local persistence and backpressure, not the
+scientific protocol. Already running workers retain their loaded implementation;
+do not reset or restart live production work to apply the change. Synthetic
+concurrency/recovery tests do not measure production speedup or scientific
+accuracy.
+
+**Verification:** all 16 dedicated writer tests passed, including concurrent
+producers, memory-until-batch-end, atomic completion, storage/worker/supervisor
+failure, lost acknowledgements, target admission and legacy adapter forwarding.
+The final full suite passed 2,485 tests with seven skips and the same three
+documented baseline failures (real-fragment clash and two MD pending-log
+expectations). The failed/disconnected Slurm recovery cases also passed on focused
+rerun and in the final full suite. Editable install, compileall, package/CLI
+imports and diff whitespace checks passed. No live production job or scientific
+database was reset or submitted for validation.
+
 ## CReM constraints from each generating elite's best docking pose (2026-11-11)
 
 **Confirmed user requirement:** for clash testing and Glide constrained

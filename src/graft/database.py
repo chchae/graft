@@ -3571,7 +3571,7 @@ def growth_save_attempt(path, batch, ordinal, report, payload=None):
 
 
 @_growth_retry_locked
-def growth_save_attempts(path, batch, records):
+def growth_save_attempts(path, batch, records, *, finish=False):
     """Commit a worker's bounded result buffer atomically and idempotently."""
     with growth_connection(path) as conn:
         conn.execute('BEGIN IMMEDIATE')
@@ -3581,8 +3581,11 @@ def growth_save_attempts(path, batch, records):
             raise ValueError('Result buffer does not match its saved batch')
         if any(not int(row[1]) <= ordinal < int(row[2]) for ordinal, _, _ in records):
             raise ValueError('Result buffer ordinal is outside its saved batch')
-        return [_growth_save_attempt(conn, batch, ordinal, report, payload)
-                for ordinal, report, payload in records]
+        result = [_growth_save_attempt(conn, batch, ordinal, report, payload)
+                  for ordinal, report, payload in records]
+        if finish:
+            _growth_finish_batch(conn, batch)
+        return result
 
 
 def _growth_save_attempt(conn, batch, ordinal, report, payload):
@@ -3618,12 +3621,27 @@ def _growth_save_attempt(conn, batch, ordinal, report, payload):
 @_growth_retry_locked
 def growth_finish_batch(path, batch):
     with growth_connection(path) as conn:
-        conn.execute('UPDATE combichem3d_batch SET state=? WHERE id=? AND cursor=stop', (Growth.DONE,batch['id']))
-        row = conn.execute('SELECT allocated,total FROM combichem3d_pose WHERE id=?', (batch['parent_pose'],)).fetchone()
-        if int(row[0]) >= int(row[1]) and not conn.execute(
-                'SELECT 1 FROM combichem3d_batch WHERE parent_pose=? AND state!=? LIMIT 1',
-                (batch['parent_pose'],Growth.DONE)).fetchone():
-            conn.execute('UPDATE combichem3d_pose SET plan_state=? WHERE id=?', (Growth.DONE,batch['parent_pose']))
+        _growth_finish_batch(conn, batch)
+
+
+def _growth_finish_batch(conn, batch):
+    conn.execute('UPDATE combichem3d_batch SET state=? WHERE id=? AND cursor=stop', (Growth.DONE,batch['id']))
+    row = conn.execute('SELECT allocated,total FROM combichem3d_pose WHERE id=?', (batch['parent_pose'],)).fetchone()
+    if int(row[0]) >= int(row[1]) and not conn.execute(
+            'SELECT 1 FROM combichem3d_batch WHERE parent_pose=? AND state!=? LIMIT 1',
+            (batch['parent_pose'],Growth.DONE)).fetchone():
+        conn.execute('UPDATE combichem3d_pose SET plan_state=? WHERE id=?', (Growth.DONE,batch['parent_pose']))
+
+
+def growth_verify_batch_commit(path, batch, next_cursor):
+    """Verify a writer acknowledgement lost after commit and journal removal."""
+    with growth_connection(path) as conn:
+        row = conn.execute('SELECT parent_pose,start,stop,cursor,state FROM combichem3d_batch WHERE id=?',
+                           (batch['id'],)).fetchone()
+        if (row is None or row[0] != batch['parent_pose'] or row[2] != batch['stop']
+                or not int(row[1]) <= next_cursor <= int(row[2]) or int(row[3]) < next_cursor
+                or (next_cursor == int(row[2]) and row[4] != Growth.DONE)):
+            raise RuntimeError('Batch result acknowledgement has no matching committed cursor/state')
 
 
 @_growth_retry_locked

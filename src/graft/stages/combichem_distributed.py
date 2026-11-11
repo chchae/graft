@@ -106,12 +106,14 @@ class RemoteSearch:
             self.process.stdout.close()
 
 
-def worker_loop(db, cfg, iteration):
+def worker_loop(db, cfg, iteration, result_writer=None):
     from graft.stages import combichem_3d as stage
     if cfg.get('execution-backend')=='slurm':
         from graft.stages.combichem_slurm_worker import worker_loop as slurm_worker
         return slurm_worker(db,cfg,iteration)
     if not cfg.get('worker-hosts'):
+        if result_writer is not None:
+            return _ORIGINAL_WORKER(db,cfg,iteration,result_writer=result_writer)
         return _ORIGINAL_WORKER(db,cfg,iteration)
     hosts = [host for host, slots in cfg['worker-hosts'].items() for _ in range(slots)]
     index = multiprocessing.current_process()._identity[-1] - 1
