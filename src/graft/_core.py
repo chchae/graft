@@ -851,6 +851,10 @@ def assign_reference_compounds(iteration, args):
         similarity -> Tanimoto similarity to that reference
     """
 
+    from graft.database import validate_crem_parent_assignments
+    if validate_crem_parent_assignments(args.db_path, iteration):
+        print(f'Iteration {iteration}: using frozen generation-parent elite docking poses/MCS for Glide.', flush=True)
+        return
     references = get_reference_compounds(args.db_path)
 
     # --------------------------------------------------------

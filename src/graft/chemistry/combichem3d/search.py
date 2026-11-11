@@ -13,7 +13,7 @@ from graft.chemistry.combichem3d.assembly import assemble, hydrogen_directions, 
 def core_deviation(mol, history):
     lookup = {a.GetProp('_mn_uid'): a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1}
     differences = [np.linalg.norm(np.array(mol.GetConformer().GetAtomPosition(lookup[r['uid']])) - r['xyz'])
-                   for r in history['core']]
+                   for r in history.get('constraint_core', history['core'])]
     return float(max(differences))
 
 
@@ -21,7 +21,7 @@ def fixed_coordinates(product, history, parent=None):
     if parent is not None:
         return {a.GetProp('_mn_uid'): list(parent.GetConformer().GetAtomPosition(a.GetIdx()))
                 for a in parent.GetAtoms() if a.GetAtomicNum() > 1}
-    return {r['uid']: r['xyz'] for r in history['core']}
+    return {r['uid']: r['xyz'] for r in history.get('constraint_core', history['core'])}
 
 
 def amide_bond(bond):
@@ -148,6 +148,8 @@ def stereo_valid(mol):
 
 def search(product, history, checker, cfg, seed, *, parent_fixed=None, starts=(), deadline=float('inf')):
     fixed = fixed_coordinates(product, history, parent_fixed)
+    scope = ('parent_heavy_atoms' if parent_fixed is not None else
+             'generation_parent_docking_mcs' if 'constraint_core' in history else 'original_reference_core')
     rng = random.Random(seed)
     errors, valid, attempts, last = [], set(), 0, None
     optimization_counts={'converged':0,'iteration_limit':0}
@@ -211,7 +213,7 @@ def search(product, history, checker, cfg, seed, *, parent_fixed=None, starts=()
                                 pose=Chem.Mol(candidate), valid_poses=len(valid), attempts=attempts,
                                 errors=errors[:10], field=kind, ligand_energy=energy,
                                 optimization=optimization,optimization_counts=optimization_counts,
-                                constraint_scope='parent_heavy_atoms' if parent_fixed is not None else 'original_reference_core',
+                                constraint_scope=scope,
                                 core_max_displacement=displacement, clashes=last)
             except (ValueError, RuntimeError) as exc:
                 errors.append(str(exc))
@@ -220,7 +222,7 @@ def search(product, history, checker, cfg, seed, *, parent_fixed=None, starts=()
               if status == PoseVerdict.CLASH_REJECT else 'Insufficient valid poses or embedding/parameter/optimization failure')
     return dict(status=status, reason=reason, pose=None, valid_poses=len(valid), attempts=attempts,
                 errors=errors[:10], clashes=last,last_optimization=optimization,
-                constraint_scope='parent_heavy_atoms' if parent_fixed is not None else 'original_reference_core',
+                constraint_scope=scope,
                 optimization_counts=optimization_counts)
 
 
@@ -229,10 +231,10 @@ def methyl_probe(parent, history, uid, checker, cfg, seed, deadline=float('inf')
     directions = hydrogen_directions(parent, uid)
     starts = [local_methyl_pose(parent, product, uid, direction) for direction in directions]
     if history.get('growth_mode') in ('frame-cycles','fixed-frame'):
-        # Only the original iteration-0 core is fixed. Even atoms retained in
-        # later elite-MCS frames remain movable alongside the new methyl group.
+        # Legacy histories constrain the original core; the parent-pose
+        # protocol supplies its own MCS through constraint_core.
         result=search(product,probe_history,checker,cfg,seed,starts=starts,deadline=deadline)
-        result['phase']='reference_core_'+cfg['core-constraint']
+        result['phase']=('parent_docking_mcs_' if 'constraint_core' in history else 'reference_core_')+cfg['core-constraint']
         return result
     first = search(product, probe_history, checker, cfg, seed, parent_fixed=parent, starts=starts, deadline=deadline)
     if first['status'] == PoseVerdict.PASS:

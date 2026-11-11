@@ -60,10 +60,25 @@ def prepare_new_inputs(args, entries, glide_root):
     request_file = glide_root / 'new_reference_inputs.json'
     result_file = glide_root / 'new_reference_cores.json'
     result_file.unlink(missing_ok=True)
+    groups = []
+    refs = getattr(args, 'crem_docking_references', {})
+    source = str(args.reference_poses.resolve())
+    for job, _ in entries:
+        group = dict(id=job['reference_id'], name=job['reference_name'],
+                     output=str(job['reference_file'].resolve()))
+        if refs:
+            ref = refs[job['reference_id']]
+            path = Path(ref['source'])
+            if hashlib.sha256(path.read_bytes()).hexdigest() != ref['sha256']:
+                raise RuntimeError('Frozen elite docking reference changed; submission withheld')
+            source = str(path)
+            group.update(smarts=ref['mcs_smarts'], core_atoms=ref['reference_atom_indices'])
+        groups.append(group)
+    if refs and len({refs[j['reference_id']]['source'] for j, _ in entries}) != 1:
+        raise RuntimeError('Frozen elite docking references have inconsistent sources')
     request_file.write_text(json.dumps(dict(
-        references=str(args.reference_poses.resolve()), smarts=args.mcs_smarts,
-        groups=[dict(id=job['reference_id'], name=job['reference_name'],
-                     output=str(job['reference_file'].resolve())) for job, _ in entries],
+        references=source, smarts=args.mcs_smarts,
+        groups=groups,
         result=str(result_file.resolve()))))
     helper = Path(__file__).resolve().parents[1] / 'glide_inputs.py'
     c.run_command([args.schrodinger / 'run', helper, request_file.resolve()], cwd=glide_root)
@@ -75,8 +90,9 @@ def prepare_new_inputs(args, entries, glide_root):
         core = cores[str(job['reference_id'])]
         if not job['reference_file'].is_file() or (args.mcs_smarts and not core):
             raise RuntimeError('Batched Glide reference or core atoms missing')
+        smarts = refs[job['reference_id']]['mcs_smarts'] if refs else args.mcs_smarts
         inputs[job['reference_id']] = c.write_constrained_glide_input(
-            job['group_dir'], args.grid, ligand_file, job['reference_file'], args.mcs_smarts, core)
+            job['group_dir'], args.grid, ligand_file, job['reference_file'], smarts, core)
     elapsed = time.monotonic() - started
     record_timing(glide_root, 'prepare_reference_inputs', elapsed)
     print(f'Glide timing: prepare {len(entries)} reference inputs={elapsed:.2f}s.', flush=True)
@@ -408,6 +424,7 @@ def _run_stage(args, ns):
 
     from graft.chemistry.scaffold import prepare_iteration_scaffold
     prepare_iteration_scaffold(args, iteration, include_generation=False)
+    args.crem_docking_references = database.crem_glide_references(args.db_path, iteration)
 
     # Assign nearest reference for any still-undocked compounds.
     c.assign_reference_compounds(iteration, args)

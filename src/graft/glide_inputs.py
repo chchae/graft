@@ -25,11 +25,15 @@ def prepare(request):
     for entry in request['groups']:
         st = references[entry['name']]
         core = None
-        if request['smarts']:
-            matches = adapter.evaluate_smarts(st, request['smarts'], True)
+        smarts = entry.get('smarts', request['smarts'])
+        if smarts:
+            matches = adapter.evaluate_smarts(st, smarts, 'core_atoms' not in entry)
             if not matches:
                 raise RuntimeError(f"SMARTS does not match reference ligand: {entry['name']}")
-            core = ','.join(str(i) for i in matches[0])
+            chosen = entry.get('core_atoms', matches[0])
+            if list(chosen) not in [list(m) for m in matches]:
+                raise RuntimeError('Frozen elite MCS atom mapping does not match native reference')
+            core = ','.join(str(i) for i in chosen)
         result[str(entry['id'])] = core
 
     # Validate every requested reference before publishing any new input.

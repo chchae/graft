@@ -1,4 +1,4 @@
-"""One fixed-frame CReM expansion per scored GRAFT iteration, without internal cycles."""
+"""One CReM expansion per scored iteration, with frozen pose/ancestry constraints."""
 import hashlib
 import json
 from pathlib import Path
@@ -123,8 +123,12 @@ def run_stage(args, requested_iteration):
             raise RuntimeError('No finite scored elites with saved CReM provenance; generation stopped')
         parents=[dict(parent,history=frames.with_crem_depth_limits(parent['history'],cfg['reference-mcs']))
                  for parent in parents]
+        from graft.stages.crem_parent_pose import bind_parents
+        parents = bind_parents(args, iteration, folder, parents)
     fingerprint = _fingerprint(cfg, parents)
-    plan = dict(protocol='crem_pipeline_single_expansion_v1',target_count=args.target_count,
+    protocol = (saved['plan']['protocol'] if saved else
+                'crem_parent_docking_mcs_v1' if iteration > 1 else 'crem_pipeline_single_expansion_v1')
+    plan = dict(protocol=protocol,target_count=args.target_count,
                 elite_count=args.elite_count,score_source=score_source,parents=parents,fingerprint=fingerprint)
     database.freeze_crem_generation(args.db_path, iteration, plan)
     _save_scaffold(args, iteration, cfg, parents)
@@ -157,6 +161,9 @@ def _save_scaffold(args, iteration, cfg, parents):
                     source_ids=[p['compound_id'] for p in parents if 'compound_id' in p],
                     mcs_smarts=core,docking_mcs_smarts=core,
                     scaffold_smiles=provenance.canonical_smiles(frame))
+    if all('docking_reference' in p for p in parents):
+        snapshot.update(source='generation_parent_docking_mcs',
+                        docking_references={str(p['compound_id']):p['docking_reference'] for p in parents})
     initial = database.iteration_scaffold(args.db_path,0,dict(snapshot,source='user_initial_mcs',source_ids=[]))
     saved = database.iteration_scaffold(args.db_path,iteration,snapshot)
     if initial['mcs_smarts'] != core or saved != snapshot:

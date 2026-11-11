@@ -40,6 +40,25 @@ sa-accepted-ratio = 1.0
                      'VALUES (?,?,0,?,-10,-40,-50)',('reference',provenance.canonical_smiles(ref),State.PRIME_GBSA_DONE))
     monkeypatch.setattr(driver,'reference_work_pending',lambda args:False)
     monkeypatch.setattr(driver,'external_completion_reason',lambda *args:None)
+    # Synthetic docking poses exercise the parent-MCS protocol without a native
+    # installation. Native pose identity/score export has separate tests.
+    from graft.stages import crem_parent_pose
+    from graft.chemistry.combichem3d.parent_pose import constrain_parent
+    def bind(args, iteration, folder, parents):
+        import hashlib
+        output = folder/'parent_docking_poses.sdf'
+        result = []
+        with Chem.SDWriter(str(output)) as writer:
+            for parent in parents:
+                mol = Chem.MolFromMolBlock(parent['molblock'], removeHs=False)
+                mol.SetProp('_Name', f"CMPID_{parent['compound_id']}")
+                writer.write(mol)
+                result.append(constrain_parent(parent, mol, timeout=5))
+        for row in result:
+            row['docking_reference'].update(source=str(output), sha256=hashlib.sha256(output.read_bytes()).hexdigest())
+            row['history']['constraint_reference'] = dict(row['docking_reference'])
+        return result
+    monkeypatch.setattr(crem_parent_pose, 'bind_parents', bind)
     return args
 
 
@@ -88,7 +107,7 @@ def _score_generation(args, iteration):
     return selected['ids']
 
 
-def test_next_iteration_uses_md_ranked_elites_and_only_one_addition(project):
+def test_next_iteration_uses_md_ranked_elites_and_only_one_addition(project, monkeypatch):
     args=project
     generate._run_stage(args,1)
     druglike._run_stage(args,1)
@@ -99,6 +118,7 @@ def test_next_iteration_uses_md_ranked_elites_and_only_one_addition(project):
     generate._run_stage(args,2)
     saved=database.crem_generation(args.db_path,2)
     assert saved['state']==Growth.DONE
+    assert saved['plan']['protocol']=='crem_parent_docking_mcs_v1'
     assert [r['compound_id'] for r in saved['plan']['parents']]==expected
     scratch=Path(args.output)/'iter02/02-generate/crem/combichem3d.sqlite'
     poses=database.growth_rows(scratch,'combichem3d_pose')
@@ -111,6 +131,18 @@ def test_next_iteration_uses_md_ranked_elites_and_only_one_addition(project):
             assert sum(h['growth_counts'].values())==sum(before['growth_counts'].values())+1
     with database.connect(args.db_path) as conn:
         assert conn.execute('SELECT count(*)-count(DISTINCT smiles) FROM compound').fetchone()[0]==0
+        for parent, history in conn.execute('SELECT c.similar_to,p.history FROM compound c '
+                'JOIN crem_compound_pose p ON p.compound_id=c.id WHERE c.iteration=2'):
+            assert parent in expected and parent==json.loads(history)['generation_parent_id']
+    monkeypatch.setattr(_core,'get_reference_compounds',lambda *a:pytest.fail('iter0 fallback'))
+    _core.assign_reference_compounds(2,args)
+    assert set(database.crem_glide_references(args.db_path,2))==set(expected)
+    assert database.crem_glide_references(args.db_path,1)=={}
+    # A completed retry cannot rebind poses or alter parent/group ownership.
+    from graft.stages import crem_parent_pose
+    monkeypatch.setattr(crem_parent_pose,'bind_parents',lambda *a:pytest.fail('rebound frozen references'))
+    generate._run_stage(args,2)
+    assert database.crem_generation(args.db_path,2)==saved
 
 
 def test_new_iteration_applies_current_depth_limits_without_rewriting_elites(project):
@@ -127,6 +159,33 @@ def test_new_iteration_applies_current_depth_limits_without_rewriting_elites(pro
     parents=database.crem_generation(args.db_path,2)['plan']['parents']
     assert all(p['history']['initial_attachment_max_cycles']['1']==3 for p in parents)
     assert database.crem_parent_poses(args.db_path,1,args.elite_count)==before
+
+
+def test_parent_reference_assignment_mismatch_stops_instead_of_using_iter0(project):
+    generate._run_stage(project,1)
+    _score_generation(project,1)
+    generate._run_stage(project,2)
+    assert database.validate_crem_parent_assignments(project.db_path,2)
+    with database.connect(project.db_path) as conn:
+        conn.execute('UPDATE compound SET similar_to=1 WHERE iteration=2')
+    with pytest.raises(RuntimeError,match='ancestry mismatch'):
+        _core.assign_reference_compounds(2,project)
+
+
+def test_parent_reference_import_rolls_back_on_unknown_parent(project):
+    generate._run_stage(project,1)
+    with database.connect(project.db_path) as conn:
+        cid=conn.execute('SELECT MIN(id) FROM compound WHERE iteration=1').fetchone()[0]
+    database.freeze_crem_generation(project.db_path,2,dict(protocol='crem_parent_docking_mcs_v1',
+        target_count=100,parents=[dict(compound_id=cid)]))
+    records=[dict(smiles=smiles,molblock='unused',history=dict(iteration=2,generation_parent_id=parent),
+                  properties={}) for smiles,parent in [('COC',cid),('CCOC',999999)]]
+    with pytest.raises(ValueError,match='generation parent'):
+        database.import_crem_results(project.db_path,2,records,'exhausted')
+    assert database.crem_generation(project.db_path,2)['state']==Growth.RUNNING
+    with database.connect(project.db_path) as conn:
+        assert conn.execute('SELECT count(*) FROM compound WHERE iteration=2').fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM crem_compound_pose WHERE iteration=2').fetchone()[0]==0
 
 
 def test_target_caps_raw_candidates_and_keeps_downstream_gates(project):

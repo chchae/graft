@@ -1,5 +1,51 @@
 # Graft specification
 
+## CReM constraints from each generating elite's best docking pose (2026-11-11)
+
+**Confirmed user requirement:** for clash testing and Glide constrained
+optimization, use the MCS with the docking pose of the elite that actually
+generated each compound instead of an iteration-0 ligand.
+
+**Implementation choices:** new CReM plans after iteration 1 use
+`crem_parent_docking_mcs_v1`. Keep the existing score-source ranking and growth
+site/depth policy. Export exactly the selected N-1 parents from their published
+best Glide poses, verifying CMPIDs, unique coverage and finite scores matching
+SQLite. Freeze the exported SDF checksum, original Glide source checksum, each
+parent's MCS, explicit query/UID/native atom mapping and coordinates in the plan.
+An exact full-parent match is already a maximum common graph; otherwise use
+bounded element/exact-bond, chiral, complete-ring MCS search. Require the original
+declared core to remain covered. Resolve symmetry by minimum displacement in the
+shared receptor coordinate frame, with deterministic atom-index ties and bounded
+match enumeration. This symmetry rule is an implementation choice.
+
+Preserve branch/fragment UIDs, original core identities and depth limits separately
+from the optimization MCS. New methyl probes and product clash searches constrain
+the mapped parent MCS coordinates; each child inherits its actual parent ID.
+Persist that ID as its Glide reference assignment. New Glide groups use the
+frozen parent pose, per-parent MCS and explicit native core atom order. Preserve
+SP docking, no unconstrained fallback, LigPrep settings, lowest-score state/pose
+selection, parallel groups and immediate group-result persistence.
+
+Iteration 1 retains its extracted initial frame because it has no generated
+elite parent. Completed populations, legacy frozen plans and submitted/recovering
+jobs retain their original protocol; do not reset or redock them to apply this
+change. Missing/mismatched poses, scores, ancestry, checksums or MCS mappings stop
+rather than selecting a different elite or falling back to iteration 0.
+
+**Evidence limits:** synthetic chemistry and restart tests validate mapping and
+ownership, not affinity. A read-only native probe on three actual iteration-6
+elites mapped all 57, 57 and 52 parent heavy atoms and prepared matching constrained
+Glide reference inputs in a temporary directory. No calculation was submitted
+and no production scientific row, plan, job or result was reset by validation.
+
+**Verification:** full suite: 2,467 passed, seven skipped and the same three
+documented baseline failures (real-fragment clash and two MD pending-log
+expectations). After the final chiral-H and import-validation changes, 86 focused
+tests plus a transactional unknown-parent rollback test passed. A separate native
+probe also verified the frozen atom order of a chiral parent MCS. Editable install,
+compileall, package/CLI imports and diff whitespace checks passed. These checks
+validate references, ancestry and recovery rather than scientific affinity.
+
 ## Adaptive Glide batch size from iteration RotB (2026-11-11)
 
 **Confirmed user requirement:** for each iteration, derive molecules per CPU from

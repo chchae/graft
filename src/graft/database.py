@@ -683,6 +683,43 @@ def project_smiles(path):
                 conn.execute('SELECT id,smiles FROM compound ORDER BY id')]
 
 
+def crem_parent_docking_scores(path, iteration, ids):
+    """Require exact preceding-iteration parent identities and finite Glide scores."""
+    with connect(path) as conn:
+        rows = conn.execute('SELECT id,docking_score FROM compound WHERE iteration=?', (iteration,)).fetchall()
+    wanted = set(ids)
+    scores = {cid: score for cid, score in rows if cid in wanted}
+    if set(scores) != wanted or any(v is None or not math.isfinite(v) for v in scores.values()):
+        raise RuntimeError('Selected elite lacks a finite preceding-iteration docking score')
+    return scores
+
+
+def crem_glide_references(path, iteration):
+    """Read only the immutable parent-specific protocol; legacy plans keep their inputs."""
+    saved = crem_generation(path, iteration)
+    if not saved or saved['plan']['protocol'] != 'crem_parent_docking_mcs_v1':
+        return {}
+    refs = {p['compound_id']: p['docking_reference'] for p in saved['plan']['parents']}
+    if not refs or any(ref['compound_id'] != cid for cid, ref in refs.items()):
+        raise RuntimeError('Invalid frozen CReM parent docking references')
+    return refs
+
+
+def validate_crem_parent_assignments(path, iteration):
+    import json
+    refs = crem_glide_references(path, iteration)
+    if not refs:
+        return False
+    with connect(path) as conn:
+        rows = conn.execute('SELECT c.id,c.similar_to,p.history FROM compound c '
+                            'LEFT JOIN crem_compound_pose p ON p.compound_id=c.id WHERE c.iteration=?',
+                            (iteration,))
+        for cid, parent, history in rows:
+            if parent not in refs or history is None or json.loads(history).get('generation_parent_id') != parent:
+                raise RuntimeError(f'CReM parent reference/ancestry mismatch for CMPID_{cid}')
+    return True
+
+
 def growth_pipeline_results(path, iteration):
     """Stream a deterministic representative of each passing generated identity."""
     import json
@@ -711,6 +748,12 @@ def import_crem_results(path, iteration, records, stop_reason):
                 raise RuntimeError(reason)
             return saved['population_count']
         existing = {_core.canonicalize_smiles(r[0]) for r in conn.execute('SELECT smiles FROM compound')}
+        parent_ids = None
+        if saved['plan']['protocol'] == 'crem_parent_docking_mcs_v1':
+            parent_ids = {p['compound_id'] for p in saved['plan']['parents']}
+            preceding = {r[0] for r in conn.execute('SELECT id FROM compound WHERE iteration=?', (iteration-1,))}
+            if not parent_ids or not parent_ids <= preceding:
+                raise ValueError('CReM generation parents are missing from the preceding iteration')
         count = 0
         for row in records:
             if row['history']['iteration'] != iteration:
@@ -720,8 +763,13 @@ def import_crem_results(path, iteration, records, stop_reason):
                 continue
             if count >= saved['plan']['target_count']:
                 break
-            cursor = conn.execute('INSERT INTO compound(name,smiles,iteration,state) VALUES (?,?,?,?)',
-                                 (f'CREM_I{iteration:02d}_{count+1:06d}',smiles,iteration,State.GENERATED))
+            parent_id = None
+            if parent_ids is not None:
+                parent_id = row['history'].get('generation_parent_id')
+                if parent_id not in parent_ids:
+                    raise ValueError('CReM child has no valid frozen generation parent')
+            cursor = conn.execute('INSERT INTO compound(name,smiles,iteration,state,similar_to) VALUES (?,?,?,?,?)',
+                                 (f'CREM_I{iteration:02d}_{count+1:06d}',smiles,iteration,State.GENERATED,parent_id))
             cid = cursor.lastrowid
             conn.execute('UPDATE compound SET name=? WHERE id=?', (f'CMPID_{cid}',cid))
             conn.execute('INSERT INTO crem_compound_pose VALUES (?,?,?,?,?)',
