@@ -37,7 +37,10 @@ def bind_parents(args, iteration, folder, parents):
     checksum = hashlib.sha256(output.read_bytes()).hexdigest()
     bound = []
     for parent in parents:
-        row = constrain_parent(parent, poses[parent['compound_id']], timeout=args.mcs_timeout)
+        try:
+            row = constrain_parent(parent, poses[parent['compound_id']], timeout=args.mcs_timeout)
+        except ValueError as exc:
+            raise ValueError(f"Elite CMPID_{parent['compound_id']} docking pose mapping failed: {exc}") from exc
         row['docking_reference'].update(source=str(output.resolve()), sha256=checksum,
             source_glide_sha256=source_hash, docking_score=scores[parent['compound_id']])
         row['history']['constraint_reference'] = dict(row['docking_reference'])

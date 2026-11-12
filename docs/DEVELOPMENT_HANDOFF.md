@@ -1,5 +1,29 @@
 # Graft Development Handoff
 
+## Preserve ring stereochemistry in parent docking queries (2026-11-12)
+
+**Bug fix within confirmed parent-pose requirements:** remove chiral H-count
+restrictions by editing the RDKit atom query while preserving its graph chiral
+tag, then serialize the resulting SMARTS. Removing H tokens from the whole
+SMARTS text before parsing can invert ring-closure stereo interpretation and
+send identical parent/pose graphs into an unnecessary, timed-out MCS search.
+Keep elements, charge/isotope constraints, full-parent matching, finite geometry,
+core retention, symmetry limits and the existing strict MCS fallback gates.
+Never ignore chirality, skip selected elites or fall back to iteration-0 poses.
+Binding errors now include the failing CMPID. Frozen plans/results are unchanged.
+
+**Evidence limits:** the reported iter-4 failure was reproduced for CMPID_28696.
+Using saved iter-3 parent records and exported docking poses, all 100 selected
+parents mapped with the correction in 0.54 seconds without production writes.
+Synthetic regression checks cover reordered atoms, ring stereo, opposite stereo
+rejection and growth replacing a chiral H, including serialized query matching.
+Parent/pipeline tests passed (82 before the additional identity-message test);
+the final focused parent tests passed (12). Full suite: 2522 passed, 7 skipped,
+with the same three known baseline failures (one combichem self-clash expectation
+and two MD progress-log expectations). Compileall and imports passed. These
+checks validate mapping behavior, not scientific energies or native docking.
+
+
 ## Prefer attraction-point contact when selecting one Glide pose (2026-11-12)
 
 **Confirmed user requirement:** among a compound's returned Glide poses and

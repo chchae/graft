@@ -74,6 +74,36 @@ def test_parent_mcs_still_matches_growth_replacing_a_chiral_hydrogen():
     assert child.HasSubstructMatch(query, useChirality=True)
 
 
+@pytest.mark.parametrize('smiles', ['C[C@H]1CC[C@@H](N)CC1', 'C[C@H]1CC[C@@H](N)[C@H](F)C1'])
+def test_ring_stereo_survives_hydrogen_query_relaxation(smiles, monkeypatch):
+    from graft.chemistry.combichem3d import parent_pose
+    mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+    assert AllChem.EmbedMolecule(mol, randomSeed=37) == 0
+    mol = Chem.RemoveHs(mol)
+    for atom in mol.GetAtoms():
+        for key, value in dict(uid=f'a{atom.GetIdx()}', branch='core', fragment='core', added_iteration='0').items():
+            atom.SetProp('_mn_' + key, value)
+    history = provenance.snapshot(mol, dict(iteration=3, lineage_id='ring-stereo',
+        core=[dict(core_index=i, uid=f'a{i}', xyz=list(mol.GetConformer().GetAtomPosition(i)))
+              for i in range(mol.GetNumAtoms())]))
+    row = dict(compound_id=28696, molblock=Chem.MolToMolBlock(mol), history=history)
+    docked = Chem.RenumberAtoms(mol, list(reversed(range(mol.GetNumAtoms()))))
+    monkeypatch.setattr(parent_pose.rdFMCS, 'FindMCS', lambda *a, **k: pytest.fail('Exact parent match must avoid MCS'))
+    bound = constrain_parent(row, docked, timeout=5)
+    query = Chem.MolFromSmarts(bound['docking_reference']['mcs_smarts'])
+    assert mol.HasSubstructMatch(query, useChirality=True)
+    assert docked.HasSubstructMatch(query, useChirality=True)
+    assert len(bound['history']['constraint_core']) == mol.GetNumHeavyAtoms()
+    # A growth substitution at the chiral ring carbon must still match the
+    # serialized docking query; the H-count restriction must actually be gone.
+    original = provenance.restore(Chem.MolFromMolBlock(bound['molblock']), bound['history'])
+    child, _ = assemble(original, bound['history'], ['a1'], ['*CO'], 'ring-growth')
+    assert child.HasSubstructMatch(query, useChirality=True)
+    inverted = Chem.Mol(mol)
+    inverted.GetAtomWithIdx(1).InvertChirality()
+    assert not inverted.HasSubstructMatch(query, useChirality=True)
+
+
 @pytest.mark.parametrize('problem', ['timeout', 'incompatible', 'nonfinite'])
 def test_parent_reference_failure_has_no_iter0_fallback(parent, monkeypatch, problem):
     row, mol = parent
@@ -90,6 +120,27 @@ def test_parent_reference_failure_has_no_iter0_fallback(parent, monkeypatch, pro
         mol.GetConformer().SetAtomPosition(0, [float('nan'),0,0])
     with pytest.raises(ValueError):
         constrain_parent(row, mol, timeout=5)
+
+
+def test_binding_failure_identifies_the_elite(tmp_path, parent, monkeypatch):
+    from graft.stages import crem_parent_pose
+    row, mol = parent
+    source = tmp_path / 'iter03/06-glide/best_poses.maegz'
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b'unchanged native source')
+    folder = tmp_path / 'generation'
+    folder.mkdir()
+    mol.SetProp('_Name', 'CMPID_42')
+    with Chem.SDWriter(str(folder / 'parent_docking_poses.sdf')) as writer:
+        writer.write(mol)
+    monkeypatch.setattr(crem_parent_pose.database, 'crem_parent_docking_scores', lambda *a: {42: -8})
+    monkeypatch.setattr(crem_parent_pose._core, 'run_command', lambda *a, **k: None)
+    def fail(*a, **k):
+        raise ValueError('Elite docking MCS timed out or is empty')
+    monkeypatch.setattr(crem_parent_pose, 'constrain_parent', fail)
+    args = SimpleNamespace(output=tmp_path, db_path=tmp_path / 'db', schrodinger=tmp_path, mcs_timeout=5)
+    with pytest.raises(ValueError, match='CMPID_42.*MCS timed out'):
+        crem_parent_pose.bind_parents(args, 4, folder, [row])
 
 
 @pytest.mark.parametrize('problem', ['missing', 'duplicate', 'score'])

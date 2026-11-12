@@ -29,7 +29,15 @@ def constrain_parent(parent, docked, *, timeout):
     # Avoid exponential MCS search on large, otherwise identical elite graphs.
     # Growth replaces an H, including at a specified tetrahedral centre. Keep
     # its handedness but do not require the old H count in the shared graph.
-    smarts = re.sub(r'(@@?)H\d*', r'\1', Chem.MolToSmarts(original))
+    query = Chem.MolFromSmarts(Chem.MolToSmarts(original))
+    for atom in query.GetAtoms():
+        relaxed = re.sub(r'(@@?)H\d*', r'\1', atom.GetSmarts())
+        if relaxed != atom.GetSmarts():
+            # Edit the atom query without reparsing the graph's @/@@ tokens:
+            # removing H text first can invert ring-closure stereochemistry.
+            atom.SetQuery(Chem.AtomFromSmarts(relaxed))
+            atom.SetNumExplicitHs(0)
+    smarts = Chem.MolToSmarts(query)
     query = Chem.MolFromSmarts(smarts)
     if not docked.HasSubstructMatch(query, useChirality=True):
         result = rdFMCS.FindMCS([original, docked], timeout=timeout,
