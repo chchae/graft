@@ -3131,7 +3131,11 @@ def write_constrained_glide_input(
     reference_file,
     core_smarts=None,
     core_atoms=None,
+    *,
+    poses_per_lig=1,
 ):
+    if type(poses_per_lig) is not int or poses_per_lig < 1:
+        raise ValueError('poses_per_lig must be a positive integer')
     reference = re.fullmatch(r'ref_(\d+)', group_dir.name)
     basename = f'glide_{int(reference[1]):02d}' if reference else 'glide'
     glide_input = group_dir / f'{basename}.in'
@@ -3158,7 +3162,7 @@ LIGANDFILE {ligand_file}
 PRECISION SP
 
 POSE_OUTTYPE ligandlib
-POSES_PER_LIG 1
+POSES_PER_LIG {poses_per_lig}
 
 USE_REF_LIGAND True
 REF_LIGAND_FILE {reference_file}
@@ -3386,78 +3390,12 @@ def write_timed_out_report(timed_out_jobs, output_file):
             ])
 
 
-def create_score_extractor(root_dir):
-    script_file = (
-        root_dir
-        / "_extract_glide_scores.py"
-    )
-
-    script = r'''
-import csv
-import re
-import sys
-from schrodinger import structure
-
-if len(sys.argv) != 4:
-    raise SystemExit(
-        "Usage: _extract_glide_scores.py "
-        "<input.maegz> <scores.tsv> <best_poses.maegz>"
-    )
-
-input_file = sys.argv[1]
-output_file = sys.argv[2]
-best_pose_file = sys.argv[3]
-
-pattern = re.compile(
-    r"CMPID_(\d+)"
-)
-
-best_scores = {}
-best_structures = {}
-
-for st in structure.StructureReader(input_file):
-    if "r_i_docking_score" not in st.property:
-        continue
-
-    title = st.title or ""
-    match = pattern.search(title)
-
-    if match is None:
-        continue
-
-    compound_id = int(match.group(1))
-    score = float(st.property["r_i_docking_score"])
-    previous = best_scores.get(compound_id)
-
-    if previous is None or score < previous:
-        best_scores[compound_id] = score
-        best_structures[compound_id] = st.copy()
-
-with open(output_file, "w", newline="") as f:
-    writer = csv.writer(f, delimiter="\t")
-    writer.writerow(["id", "docking_score"])
-
-    for compound_id in sorted(best_scores):
-        writer.writerow([
-            compound_id,
-            best_scores[compound_id],
-        ])
-
-with structure.StructureWriter(best_pose_file) as writer:
-    for compound_id in sorted(best_structures):
-        st = best_structures[compound_id]
-        st.property["i_user_compound_id"] = compound_id
-        writer.append(st)
-
-print(f"Extracted docking scores: {len(best_scores)}")
-print(f"Best poses written: {len(best_structures)}")
-'''
-
-    script_file.write_text(
-        script.strip() + "\n",
-        encoding="utf-8",
-    )
-
+def create_score_extractor(root_dir, attraction_point=None):
+    from graft.glide_pose_selection import validate_point
+    point = validate_point(attraction_point)
+    script_file = root_dir / "_extract_glide_scores.py"
+    source = Path(__file__).with_name('glide_pose_selection.py').read_text()
+    script_file.write_text('ATTRACTION_POINT = '+repr(point)+'\n'+source, encoding='utf-8')
     return script_file
 
 
@@ -3698,7 +3636,10 @@ def run_reference_guided_docking(iteration, args, glide_root):
     )
 
     reference_extractor = create_reference_extractor(glide_root)
-    score_extractor = create_score_extractor(glide_root)
+    from graft.database import freeze_glide_pose_policy
+    from graft.glide_pose_selection import CONTACT_POSES_PER_LIG
+    pose_point = freeze_glide_pose_policy(args.db_path, iteration, getattr(args, 'attraction_point', None))
+    score_extractor = create_score_extractor(glide_root, attraction_point=pose_point)
     best_pose_merger = create_best_pose_merger(glide_root)
     core_atom_matcher = create_core_atom_matcher(glide_root)
 
@@ -3771,6 +3712,7 @@ def run_reference_guided_docking(iteration, args, glide_root):
             reference_file=reference_file,
             core_smarts=core_smarts,
             core_atoms=core_atoms,
+            poses_per_lig=CONTACT_POSES_PER_LIG if pose_point is not None else 1,
         )
 
         job = submit_glide(

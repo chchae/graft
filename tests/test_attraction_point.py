@@ -14,17 +14,26 @@ from graft.states import CompoundState as State
 
 @pytest.mark.parametrize('value', [False, True, '1,2,3', [1,2], [1,2,3,4], [1,True,3],
                                     [1,float('nan'),3], [1,float('inf'),3], {'x':1,'y':2,'z':3}])
-def test_invalid_point_is_rejected(value):
+@pytest.mark.parametrize('key',['attraction-point','attraction_point'])
+def test_invalid_point_is_rejected(value,key):
     with pytest.raises(ValueError,match='attraction_point'):
-        attraction_point_settings({'attraction_point':value})
+        attraction_point_settings({key:value})
 
 
-def test_point_loads_as_optional_three_angstrom_coordinates(tmp_path):
+@pytest.mark.parametrize('key',['attraction-point','attraction_point'])
+def test_point_loads_as_optional_three_angstrom_coordinates(tmp_path,key):
     from test_project_config import PROJECT_TOML
     assert attraction_point_settings({}) == {'attraction_point':None}
     path = tmp_path/'project.toml'
-    path.write_text(PROJECT_TOML+'\nattraction_point = [-52.102367, 2.138612, -28.106731]\n')
+    path.write_text(PROJECT_TOML+f'\n{key} = [-52.102367, 2.138612, -28.106731]\n')
     assert _core.load_project_toml(path)['attraction_point'] == (-52.102367,2.138612,-28.106731)
+
+
+def test_hyphenated_point_takes_precedence_over_legacy_alias():
+    assert attraction_point_settings({'attraction-point':[1,2,3],'attraction_point':[4,5,6]}) == {
+        'attraction_point':(1.,2.,3.)}
+    with pytest.raises(ValueError,match='attraction-point'):
+        attraction_point_settings({'attraction-point':[1,2],'attraction_point':[4,5,6]})
 
 
 def pose(cid,score,atoms):

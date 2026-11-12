@@ -1,5 +1,104 @@
 # Independent Graft reconstruction prompt
 
+## Prefer attraction-point contact when selecting one Glide pose (2026-11-12)
+
+**Confirmed user requirement:** among a compound's returned Glide poses and
+LigPrep states, first prefer poses with a ligand non-H atom within 2 Angstroms
+of attraction-point, then choose the lowest Glide score within that tier.
+When no pose contacts the point, retain the lowest finite score across all poses.
+Persist that exact pose and its own score together for downstream calculations.
+This supersedes global lowest-score pose reduction when the preference is enabled.
+
+**Implementation choices:** use one shared reducer for ordinary output and
+verified timeout/subjob recovery. Keep the first pose on score ties within the
+same contact tier; do not rank contact poses by closeness. Ignore H/receptor
+records and invalid scores. Unknown/nonfinite ligand heavy-atom geometry blocks
+contact selection rather than silently falling back. Exclude timed-out native
+input ranges before pose reduction. Publish matching selected structures before
+SQLite scores and retain source checksums, JobIds and completion gates.
+
+For new point-enabled inputs, retain up to 10 poses per prepared ligand/state
+(POSES_PER_LIG 10), an implementation choice that makes alternate returned poses
+available for selection. Native output filtering/deduplication can supply fewer.
+Point-disabled inputs retain POSES_PER_LIG 1 and ordinary score reduction.
+SP, core restraints and CORECONS_FALLBACK False remain unchanged. Do not rewrite
+submitted native inputs or rerun jobs to obtain discarded poses; recovered jobs
+select from their available returned structures.
+
+Freeze the selection point before collection in iteration_attraction_point under
+stage=glide_pose. Restarts/configuration edits keep the frozen value, including
+disabled policies. If an iteration already contains docking scores without this
+snapshot, retain score-only reduction for that iteration to avoid mixing protocols.
+Do not reselect already committed results. Existing downstream point-based
+compound prioritization continues to use the published selected pose.
+
+**Evidence limits:** installed 2026-1 native structure I/O verified contact-first
+selection with exact score/pose identity and no-contact fallback in temporary
+files. Its non-submitting Dock input validator accepted POSES_PER_LIG 10.
+No production job/result was manually reset or submitted for validation; these
+checks do not establish affinity or guarantee a contacting pose will be sampled.
+
+**Verification:** full suite: 2519 passed, 7 skipped, with the same three known
+baseline failures (one combichem self-clash expectation and two MD progress-log
+expectations). Focused pose/pipeline tests passed, including score/pose publication,
+LigPrep states, timeout exclusions, boundary contact and restart-policy recovery.
+Editable installation, compileall and package/CLI imports passed.
+
+## Lower CReM radius for sparse sidechain candidate pools (2026-11-12)
+
+**Confirmed user requirement:** when a sidechain site has 100 or fewer
+candidates, reduce its CReM radius by one and try again. The reduction applies
+only to that attachment point; every other point starts at the originally
+configured radius, including points on other parents.
+
+**Implementation choices:** for each methyl-PASS site without a saved candidate
+pool, start at the configured crem-radius and reduce one step at a time until
+the validated unique candidate count exceeds 100 or radius 1 is reached.
+The threshold includes exactly 100 and zero candidates. Keep the existing
+per-site cap, fragment-size/frequency limits, seed, UID protection and exact
+isomeric reassembly. Use the final radius's pool rather than concatenate pools.
+Do not change the configured radius globally or relax pose/clash constraints.
+
+Persist selected crem_radius, crem_radius_attempts (radius and candidate_count)
+and the policy identifier in the existing probe journal/DB record before
+publishing the parent plan. Log each radius reduction. Reuse any previously saved
+candidate pool unchanged, including a sparse legacy pool with no radius metadata.
+Check stop/deadline before each attempt; interrupted searches do not freeze an
+incomplete candidate pool or publish a ready plan. Enumeration/library errors
+remain explicitly UNRESOLVED rather than silently accepting the preceding
+sparse pool. Existing results, frozen plans and live jobs are not reset.
+
+**Evidence limits:** an isolated temporary task DB, using the current EGFR frame
+and its already validated probe, reproduced radius 3 -> 2 with 67 -> 367 unique
+candidates and persisted radius 2. No production DB, TOML or native calculation
+was modified/submitted for that verification. Candidate enumeration is not
+validation of clash admission, docking accuracy or affinity.
+
+**Verification:** 187 focused CReM, pipeline, buffering/writer and attraction-point
+tests passed. The full suite passed 2,505 tests with seven skips and the same
+three documented baseline failures (real-fragment clash and two MD pending-log
+expectations). Tests cover exactly-100/zero thresholds, radius-1 floor, independent
+attachment-point radii, frozen-pool reuse, errors and deadline interruption.
+Editable install, compileall, package/CLI imports and diff whitespace checks passed.
+
+## Read the hyphenated attraction-point setting (2026-11-12)
+
+**Confirmed user requirement:** read `attraction-point` from the project TOML.
+
+**Implementation choices:** use the hyphenated key as primary and retain
+`attraction_point` as a backward-compatible alias. If both are supplied, the
+hyphenated value takes precedence and must pass the existing three-finite-
+coordinates validation; an invalid primary value does not fall back to the alias.
+Keep the internal attribute named `attraction_point`. The existing optional
+2-Angstrom downstream selection preference is unchanged; this is not a new
+generation filter or mandatory Glide contact constraint. Preserve frozen
+selections, scientific results and submitted jobs.
+
+**Verification:** 194 attraction-point and project-configuration tests passed,
+covering both spellings, invalid coordinates, precedence and TOML loading.
+Read-only loading of the current EGFR TOML now yields its configured coordinates.
+No production selection or scientific result was reset for verification.
+
 ## Resolve generating-elite Glide reference names (2026-11-11)
 
 **Observed bug:** the new parent-pose protocol correctly assigned iteration-1

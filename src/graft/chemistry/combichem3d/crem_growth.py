@@ -138,10 +138,25 @@ def plan_parent(db, job, cfg, checker, deadline):
                 return
             if report['status']==PoseVerdict.PASS:
                 if 'crem_candidates' not in report:
+                    attempts=[]
                     try:
-                        report['crem_candidates']=site_candidates(parent,history,uid,cfg)
+                        for radius in range(cfg['crem-radius'],0,-1):
+                            if database.growth_should_stop(db) or time.time()>=deadline:
+                                report.update(budget_interrupted=True,crem_radius_attempts=attempts)
+                                buffer.save(uid,report)
+                                return
+                            candidates=site_candidates(parent,history,uid,cfg | {'crem-radius':radius})
+                            attempts.append(dict(radius=radius,candidate_count=len(candidates)))
+                            if len(candidates)>100 or radius==1:
+                                report.update(crem_candidates=candidates,crem_radius=radius,
+                                              crem_radius_attempts=attempts,
+                                              crem_radius_policy='decrease_until_over_100_v1')
+                                break
+                            logger.info('CReM parent_pose=%s site=%s radius=%s candidates=%s <=100; retrying radius=%s',
+                                        job['parent_pose'],uid,radius,len(candidates),radius-1)
                     except (ValueError,RuntimeError,sqlite3.Error) as exc:
-                        report.update(status=PoseVerdict.UNRESOLVED,reason=str(exc),failed_stage='crem_generation')
+                        report.update(status=PoseVerdict.UNRESOLVED,reason=str(exc),failed_stage='crem_generation',
+                                      crem_radius_attempts=attempts)
                     buffer.save(uid,report)
                 operations.extend(report.get('crem_candidates',[]))
             reports.append((uid,report))

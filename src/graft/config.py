@@ -599,12 +599,12 @@ def debug_settings(config: dict[str, Any], settings: dict[str, Any]) -> dict[str
 
 
 def attraction_point_settings(config: dict[str, Any]) -> dict[str, tuple[float, float, float] | None]:
-    value = config.get('attraction_point')
+    value = config.get('attraction-point', config.get('attraction_point'))
     if value is None:
         return {'attraction_point': None}
     if (not isinstance(value, (list, tuple)) or len(value) != 3
             or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in value)):
-        raise ValueError('attraction_point must contain three finite coordinates: [x, y, z] in Angstroms')
+        raise ValueError('attraction-point (attraction_point) must contain three finite coordinates: [x, y, z] in Angstroms')
     return {'attraction_point': tuple(float(x) for x in value)}
 
 

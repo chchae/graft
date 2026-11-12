@@ -48,8 +48,9 @@ def structures(monkeypatch):
 
 
 @pytest.mark.parametrize('smarts', [None, 'c1ccccc1'])
+@pytest.mark.parametrize('point', [None, [0,0,0]])
 def test_batch_uses_one_process_first_reference_and_native_atom_order(
-        tmp_path, monkeypatch, structures, smarts, capsys):
+        tmp_path, monkeypatch, structures, smarts, capsys, point):
     refs, reads, matches, writes = structures
     entries = []
     # Two groups may share a reference title; retain the old first-pose rule.
@@ -66,7 +67,7 @@ def test_batch_uses_one_process_first_reference_and_native_atom_order(
         runpy.run_path(str(command[1]), run_name='__main__')
     monkeypatch.setattr(_core, 'run_command', run)
     args = SimpleNamespace(schrodinger=Path('/suite'), reference_poses=tmp_path/'refs.maegz',
-                           mcs_smarts=smarts, grid=tmp_path/'grid.zip')
+                           mcs_smarts=smarts, grid=tmp_path/'grid.zip', glide_pose_point=point)
     inputs = glide.prepare_new_inputs(args, entries, tmp_path)
     assert len(calls) == len(reads) == 1
     assert set(inputs) == {1, 2, 3}
@@ -74,6 +75,7 @@ def test_batch_uses_one_process_first_reference_and_native_atom_order(
     for path in inputs.values():
         text = path.read_text()
         assert 'PRECISION SP' in text
+        assert f'POSES_PER_LIG {10 if point is not None else 1}' in text
         if smarts:
             assert 'CORE_ATOMS 9,3,7' in text
             assert 'CORECONS_FALLBACK False' in text

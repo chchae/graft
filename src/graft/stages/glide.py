@@ -26,6 +26,10 @@ from graft.glide_recovery import timeout_pose_files, save_record, output_paths, 
 from graft.schrodinger_guard import active_jobs, belongs_to_directory, SubmissionBlocked, job_details, TERMINAL
 
 
+def pose_selection_point(args, iteration):
+    return database.freeze_glide_pose_policy(args.db_path, iteration, getattr(args, 'attraction_point', None))
+
+
 def iteration_batch_size(db_path, iteration):
     """Use stored Strict RotB; calculate missing legacy descriptors without DB edits."""
     rows = database.glide_input_rotatable_bonds(db_path, iteration)
@@ -91,8 +95,12 @@ def prepare_new_inputs(args, entries, glide_root):
         if not job['reference_file'].is_file() or (args.mcs_smarts and not core):
             raise RuntimeError('Batched Glide reference or core atoms missing')
         smarts = refs[job['reference_id']]['mcs_smarts'] if refs else args.mcs_smarts
+        options = {}
+        if getattr(args, 'glide_pose_point', None) is not None:
+            from graft.glide_pose_selection import CONTACT_POSES_PER_LIG
+            options['poses_per_lig'] = CONTACT_POSES_PER_LIG
         inputs[job['reference_id']] = c.write_constrained_glide_input(
-            job['group_dir'], args.grid, ligand_file, job['reference_file'], smarts, core)
+            job['group_dir'], args.grid, ligand_file, job['reference_file'], smarts, core, **options)
     elapsed = time.monotonic() - started
     record_timing(glide_root, 'prepare_reference_inputs', elapsed)
     print(f'Glide timing: prepare {len(entries)} reference inputs={elapsed:.2f}s.', flush=True)
@@ -289,6 +297,7 @@ def process_timeout_job(iteration, args, job, merger, glide_root):
         report = dict(scored=0, read_errors=[], inputs=[])
         if sources or extra:
             request = dict(inputs=[str(p.resolve()) for p in sources], ids=ids, output=str(folder.resolve()), **extra)
+            request['attraction_point'] = pose_selection_point(args, iteration)
             request_file = folder / 'request.json'
             request_file.write_text(json.dumps(request))
             helper = Path(__file__).resolve().parents[1] / 'glide_timeout_results.py'
@@ -424,6 +433,7 @@ def _run_stage(args, ns):
 
     from graft.chemistry.scaffold import prepare_iteration_scaffold
     prepare_iteration_scaffold(args, iteration, include_generation=False)
+    args.glide_pose_point = pose_selection_point(args, iteration)
     args.crem_docking_references = database.crem_glide_references(args.db_path, iteration)
 
     # Assign nearest reference for any still-undocked compounds.
@@ -452,6 +462,9 @@ def _run_stage(args, ns):
         return
 
     work_started(f"Iteration {iteration}: processing Glide for {len(groups)} reference groups.")
+    if args.glide_pose_point is not None:
+        print(f'Glide pose selection: contact within 2 A of {args.glide_pose_point}, then lowest score; '
+              'no-contact fallback=lowest score; new inputs retain up to 10 poses/state.', flush=True)
     ligprep_file = stage_directory(args.output, iteration, 'ligprep') / "ligprep.maegz"
     if not ligprep_file.exists():
         raise FileNotFoundError(f"LigPrep output not found: {ligprep_file}")
@@ -466,7 +479,7 @@ def _run_stage(args, ns):
     if not group_ligand_files:
         raise RuntimeError('LigPrep output contains no current compound IDs; '
                            'rerun LigPrep for this iteration. Glide claims remain retryable.')
-    score_extractor = c.create_score_extractor(glide_root)
+    score_extractor = c.create_score_extractor(glide_root, attraction_point=args.glide_pose_point)
     merger = c.create_best_pose_merger(glide_root)
 
     jobs = []

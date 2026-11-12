@@ -2,12 +2,16 @@
 import csv
 import json
 import hashlib
-import math
 import os
 from pathlib import Path
 import re
 import sys
 import tarfile
+
+if __package__:
+    from .glide_pose_selection import PoseSelector, PoseGeometryError
+else:
+    from glide_pose_selection import PoseSelector, PoseGeometryError
 
 
 def excluded_inputs(request, structure):
@@ -59,15 +63,15 @@ def excluded_inputs(request, structure):
 
 
 def collect(request, structure):
-    """Select the lowest finite score and its exact pose across input states.
+    """Select a matching finite score/pose across admitted states and sources.
 
     A stopped compressed stream may have an unreadable tail. Fully decoded
     structures preceding it remain usable; report every input read error.
     """
     allowed = set(request['ids'])
     mapping, excluded, boundaries = excluded_inputs(request, structure)
-    scores, poses, errors = {}, {}, []
-    skipped = 0
+    selected = PoseSelector(request.get('attraction_point'))
+    scores, poses, errors = selected.scores, selected.poses, []
     excluded_poses = 0
     for source in request['inputs']:
         try:
@@ -84,17 +88,10 @@ def collect(request, structure):
                     if index in excluded:
                         excluded_poses += 1
                         continue
-                try:
-                    score = float(st.property['r_i_docking_score'])
-                except (KeyError, TypeError, ValueError):
-                    skipped += 1
-                    continue
-                if not math.isfinite(score):
-                    skipped += 1
-                    continue
                 cid = int(match[1])
-                if cid not in scores or score < scores[cid]:
-                    scores[cid], poses[cid] = score, st.copy()
+                selected.add(st, cid)
+        except PoseGeometryError:
+            raise
         except Exception as exc:
             if mapping:
                 raise  # A verified parent output must not silently lose states.
@@ -112,8 +109,10 @@ def collect(request, structure):
         writer.writerow(['id', 'docking_score'])
         writer.writerows(sorted(scores.items()))
     os.replace(folder / 'docking_scores.pending.tsv', folder / 'docking_scores.tsv')
-    report = dict(scored=len(scores), skipped_invalid_scores=skipped, read_errors=errors,
+    report = dict(scored=len(scores), skipped_invalid_scores=selected.skipped, read_errors=errors,
                   inputs=request['inputs'], ids=request['ids'])
+    if selected.point is not None:
+        report['pose_selection'] = dict(policy='contact_then_score_v1', point=selected.point, radius=2.0)
     if 'exclude_subjobs' in request:
         report.update(timeout_ids=sorted({mapping[index] for index in excluded}),
                       excluded_subjobs=boundaries, excluded_poses=excluded_poses)

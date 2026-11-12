@@ -264,6 +264,87 @@ def test_probe_rejection_blocks_crem_and_saved_pass_pools_resume(project,monkeyp
     assert calls==[sites[0]] and database.growth_parent(db,1)['plan']==plan
 
 
+@pytest.mark.parametrize('counts,expected',[
+    ({3:101},[3]),
+    ({3:100,2:101},[3,2]),
+    ({3:67,2:367},[3,2]),
+    ({3:0,2:100,1:12},[3,2,1]),
+    ({3:0,2:0,1:0},[3,2,1]),
+])
+def test_sparse_candidates_lower_radius_per_site_and_freeze_on_resume(project,monkeypatch,counts,expected):
+    db,_=stage.prepare_project(project);database.growth_start_session(db,project)
+    sites=crem_growth.candidate_sites(stage.restore_parent(database.growth_parent(db,1)),
+                                       database.growth_parent(db,1)['history'])
+    calls=[]
+    monkeypatch.setattr(crem_growth,'methyl_probe',lambda *a:dict(status='PASS',reason='synthetic',pose=None))
+    def candidates(parent,history,uid,cfg):
+        radius=cfg['crem-radius'];calls.append((uid,radius))
+        n=counts[radius] if uid==sites[0] else 102
+        return [dict(site=uid,fragment=f'synthetic_{i}',crem_smiles=f'synthetic_product_{i}') for i in range(n)]
+    monkeypatch.setattr(crem_growth,'site_candidates',candidates)
+    cfg=project | {'crem-radius':3}
+    crem_growth.plan_parent(db,dict(parent_pose=1),cfg,None,time.time()+30)
+    saved=database.growth_parent(db,1)
+    assert [r for uid,r in calls if uid==sites[0]]==expected
+    assert [r for uid,r in calls if uid==sites[1]]==[3]
+    probe=saved['probes'][sites[0]]
+    assert probe['crem_radius']==expected[-1]
+    assert probe['crem_radius_attempts']==[dict(radius=r,candidate_count=counts[r]) for r in expected]
+    assert len(probe['crem_candidates'])==counts[expected[-1]]
+    assert saved['plan']['total']==counts[expected[-1]]+102
+    assert cfg['crem-radius']==3  # effective radius is site-specific
+    monkeypatch.setattr(crem_growth,'site_candidates',lambda *a:pytest.fail('Frozen pool re-enumerated'))
+    crem_growth.plan_parent(db,dict(parent_pose=1),cfg,None,time.time()+30)
+    assert database.growth_parent(db,1)['plan']==saved['plan']
+
+
+def test_radius_fallback_error_is_unresolved_without_using_sparse_previous_pool(project,monkeypatch):
+    db,_=stage.prepare_project(project);database.growth_start_session(db,project)
+    monkeypatch.setattr(crem_growth,'methyl_probe',lambda *a:dict(status='PASS',reason='synthetic',pose=None))
+    def candidates(parent,history,uid,cfg):
+        if cfg['crem-radius']==2:raise sqlite3.OperationalError('no such table: radius2')
+        return []
+    monkeypatch.setattr(crem_growth,'site_candidates',candidates)
+    crem_growth.plan_parent(db,dict(parent_pose=1),project | {'crem-radius':3},None,time.time()+30)
+    row=database.growth_parent(db,1)
+    assert row['plan']['total']==0
+    for probe in row['probes'].values():
+        assert probe['status']=='UNRESOLVED' and probe['failed_stage']=='crem_generation'
+        assert 'crem_candidates' not in probe
+        assert probe['crem_radius_attempts']==[dict(radius=3,candidate_count=0)]
+
+
+def test_radius_fallback_stops_at_deadline_without_freezing_incomplete_pool(project,monkeypatch):
+    db,_=stage.prepare_project(project);database.growth_start_session(db,project)
+    clock=[100.];calls=[]
+    monkeypatch.setattr(crem_growth.time,'time',lambda:clock[0])
+    monkeypatch.setattr(crem_growth,'methyl_probe',lambda *a:dict(status='PASS',reason='synthetic',pose=None))
+    def candidates(parent,history,uid,cfg):
+        calls.append(cfg['crem-radius']);clock[0]=111.
+        return []
+    monkeypatch.setattr(crem_growth,'site_candidates',candidates)
+    crem_growth.plan_parent(db,dict(parent_pose=1),project | {'crem-radius':3},None,110.)
+    assert calls==[3]
+    row=database.growth_parent(db,1)
+    assert row['plan'] is None
+    probe=next(iter(row['probes'].values()))
+    assert probe['budget_interrupted'] and 'crem_candidates' not in probe
+
+
+def test_legacy_saved_sparse_pools_are_not_replaced_on_resume(project,monkeypatch):
+    db,_=stage.prepare_project(project);database.growth_start_session(db,project)
+    sites=database.growth_parent(db,1)['history']['attachments']
+    for uid in sites:
+        database.growth_save_probe(db,1,uid,dict(status='PASS',reason='legacy saved pool',
+            crem_candidates=[dict(site=uid,fragment='*C',crem_smiles='Cc1ccccc1')]))
+    monkeypatch.setattr(crem_growth,'methyl_probe',lambda *a:pytest.fail('Legacy probe recalculated'))
+    monkeypatch.setattr(crem_growth,'site_candidates',lambda *a:pytest.fail('Legacy pool expanded'))
+    crem_growth.plan_parent(db,dict(parent_pose=1),project | {'crem-radius':3},None,time.time()+30)
+    row=database.growth_parent(db,1)
+    assert row['plan']['total']==2
+    assert all('crem_radius' not in p for p in row['probes'].values())
+
+
 def test_parent_probes_are_journaled_before_candidates_and_committed_together(project,monkeypatch):
     cfg=project | {'result-buffer-size':64,'result-buffer-seconds':1000}
     db,_=stage.prepare_project(cfg);database.growth_start_session(db,cfg)

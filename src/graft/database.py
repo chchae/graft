@@ -869,6 +869,29 @@ def attraction_policy(path, iteration, stage):
         return _attraction_policy(conn, iteration, stage)
 
 
+def freeze_glide_pose_policy(path, iteration, point):
+    """Freeze pose selection once; already scored iterations retain legacy reduction."""
+    import json
+    from graft.glide_pose_selection import validate_point
+    point = validate_point(point)
+    if iteration < 1:
+        return None
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.execute('CREATE TABLE IF NOT EXISTS iteration_attraction_point ('
+                     'iteration INTEGER NOT NULL,stage TEXT NOT NULL,point TEXT,distances TEXT NOT NULL,'
+                     'source TEXT,source_sha256 TEXT,PRIMARY KEY(iteration,stage))')
+        saved = _attraction_policy(conn, iteration, 'glide_pose')
+        if saved is not None:
+            return saved['point']
+        if conn.execute('SELECT 1 FROM compound WHERE iteration=? AND docking_score IS NOT NULL LIMIT 1',
+                        (iteration,)).fetchone():
+            point = None
+        conn.execute('INSERT INTO iteration_attraction_point VALUES (?,?,?,?,?,?)',
+                     (iteration,'glide_pose',json.dumps(point) if point is not None else None,'{}',None,None))
+        return list(point) if point is not None else None
+
+
 def _attraction_input_rows(conn, iteration):
     rows = conn.execute('SELECT id,name,docking_score FROM compound WHERE iteration=? ORDER BY id',
                         (iteration,)).fetchall()
