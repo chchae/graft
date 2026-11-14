@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/t6-driver-after.xml",
+    "tests/test_driver_logging.py",
+    "tests/test_stage_timing.py",
+    "tests/test_sequential_driver.py",
+    "tests/test_md_progress_summary.py",
+    "tests/test_timeout_warning.py"
+  ],
+  "exit_code": 1,
+  "seconds": 1.9170011719688773
+}

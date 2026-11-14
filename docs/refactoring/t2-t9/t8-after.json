@@ -1,0 +1,22 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/t8-after.xml",
+    "tests/test_refactoring_leaf_imports.py",
+    "tests/test_chemistry_contracts.py",
+    "tests/test_job_record_contracts.py",
+    "tests/test_driver_logging.py",
+    "tests/test_stage_timing.py",
+    "tests/test_sequential_driver.py",
+    "tests/test_md_progress_summary.py",
+    "tests/test_timeout_warning.py"
+  ],
+  "exit_code": 1,
+  "seconds": 2.227893347851932
+}

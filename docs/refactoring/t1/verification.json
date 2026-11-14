@@ -1,0 +1,258 @@
+{
+  "scope": "T1 only; four top-level imports removed; no tests changed",
+  "recorded_at": "2026-11-14T12:36:37.845678+00:00",
+  "head": "392674a481d41951e031f0ea2716db1e9f0271f9",
+  "snapshot": "/tmp/graft-t1-8rv5kjro/project",
+  "python": "/tmp/graft-t1-8rv5kjro/venv/bin/python",
+  "input_file_count": 269,
+  "changes": [
+    {
+      "path": "src/graft/_core.py",
+      "before_sha256": "c5fbe7aea1f04407c71e483bf79ef3babc081a8f29beb59c54a55a483e12cc27",
+      "after_sha256": "7e51e50a027149ec538b614e116229204e591c85ec3ac9343e58e4d793d400f3",
+      "removed_import": "import argparse"
+    },
+    {
+      "path": "src/graft/stages/_deleted_md.py",
+      "before_sha256": "eaed5909d8aa3c9b2e1f31bf034c84df1ae17635bdb68b9dff7ccc3f0b3cfec8",
+      "after_sha256": "bfb998506d1e60a3dd5dc26ad4468ae402966e235ca2e3e3ebe78e9f12605bfe",
+      "removed_import": "from pathlib import Path"
+    },
+    {
+      "path": "src/graft/stages/generate.py",
+      "before_sha256": "3b9410b97b83c30f7ee1d714f9bdd5e708abda65a4413adb79a95f0ad5b9d1e8",
+      "after_sha256": "8dfb484bad9520c8c1f54ca415b89525c050380cd84640fec375d30bbfd858ca",
+      "removed_import": "import sqlite3"
+    },
+    {
+      "path": "src/graft/stages/glide.py",
+      "before_sha256": "beb07bde025701c09584288b378a437ec1d399536d1f36049e620d427e4e0c44",
+      "after_sha256": "5b773211d0fa98967bf851e254a05e537198b43af3e4e81dfafddf50b7dcd2f0",
+      "removed_import": "import sqlite3"
+    }
+  ],
+  "preservation": {
+    "other_original_files_unchanged": 265,
+    "edited_files_equal_original_except_one_removed_line": true,
+    "all_source_and_tests_byte_identical_to_tested_snapshot": true,
+    "no_test_expectations_or_skip_markers_changed": true
+  },
+  "results": {
+    "before": {
+      "related": {
+        "command": [
+          "/tmp/graft-t1-8rv5kjro/venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-ra",
+          "tests/test_generation.py",
+          "tests/test_generation_sa.py",
+          "tests/test_crem_pipeline.py",
+          "tests/test_project_config.py",
+          "tests/test_refactoring_contracts.py",
+          "tests/test_glide_pipeline.py",
+          "tests/test_glide_recovery.py",
+          "tests/test_glide_status_unavailable.py",
+          "tests/test_stage_barriers.py",
+          "tests/test_database.py",
+          "tests/test_deleted_md_recovery.py",
+          "tests/test_workspace_remote_recovery.py",
+          "tests/test_reference_prime_gbsa.py",
+          "--junitxml=/tmp/graft-t1-8rv5kjro/before-related.xml"
+        ],
+        "cwd": "/tmp/graft-t1-8rv5kjro/project",
+        "elapsed_seconds": 25.831013679504395,
+        "exit_code": 0,
+        "counts": {
+          "passed": 361,
+          "failed": 0,
+          "skipped": 0,
+          "errors": 0
+        },
+        "pytest_summary": "361 passed, 216 warnings in 25.59s"
+      },
+      "full": {
+        "command": [
+          "/tmp/graft-t1-8rv5kjro/venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-ra",
+          "--junitxml=/tmp/graft-t1-8rv5kjro/before-full.xml"
+        ],
+        "cwd": "/tmp/graft-t1-8rv5kjro/project",
+        "elapsed_seconds": 86.10565948486328,
+        "exit_code": 1,
+        "counts": {
+          "passed": 2646,
+          "failed": 3,
+          "skipped": 7,
+          "errors": 0
+        },
+        "pytest_summary": "3 failed, 2646 passed, 7 skipped, 330 warnings in 85.49s (0:01:25)"
+      }
+    },
+    "after": {
+      "related": {
+        "command": [
+          "/tmp/graft-t1-8rv5kjro/venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-ra",
+          "tests/test_generation.py",
+          "tests/test_generation_sa.py",
+          "tests/test_crem_pipeline.py",
+          "tests/test_project_config.py",
+          "tests/test_refactoring_contracts.py",
+          "tests/test_glide_pipeline.py",
+          "tests/test_glide_recovery.py",
+          "tests/test_glide_status_unavailable.py",
+          "tests/test_stage_barriers.py",
+          "tests/test_database.py",
+          "tests/test_deleted_md_recovery.py",
+          "tests/test_workspace_remote_recovery.py",
+          "tests/test_reference_prime_gbsa.py",
+          "--junitxml=/tmp/graft-t1-8rv5kjro/after-related.xml"
+        ],
+        "cwd": "/tmp/graft-t1-8rv5kjro/project",
+        "elapsed_seconds": 25.46807861328125,
+        "exit_code": 0,
+        "counts": {
+          "passed": 361,
+          "failed": 0,
+          "skipped": 0,
+          "errors": 0
+        },
+        "pytest_summary": "361 passed, 216 warnings in 25.23s"
+      },
+      "full": {
+        "command": [
+          "/tmp/graft-t1-8rv5kjro/venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-ra",
+          "--junitxml=/tmp/graft-t1-8rv5kjro/after-full.xml"
+        ],
+        "cwd": "/tmp/graft-t1-8rv5kjro/project",
+        "elapsed_seconds": 84.17075896263123,
+        "exit_code": 1,
+        "counts": {
+          "passed": 2646,
+          "failed": 3,
+          "skipped": 7,
+          "errors": 0
+        },
+        "pytest_summary": "3 failed, 2646 passed, 7 skipped, 330 warnings in 83.54s (0:01:23)"
+      }
+    }
+  },
+  "comparison": {
+    "case_count": 2656,
+    "outcome_changes_t0_to_before": 0,
+    "outcome_changes_before_to_after": 0,
+    "new_failures": 0,
+    "failure_messages_and_normalized_traces": [
+      {
+        "phase": "t0",
+        "node": "tests.test_combichem_3d::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself",
+        "failure_type": null,
+        "message": "AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>\n  \n  - CLASH_REJECT\n  + PASS",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "t0",
+        "node": "tests.test_md_progress_summary::test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error[0]",
+        "failure_type": null,
+        "message": "AssertionError: assert 'md-gbsa pending:' in ''",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "t0",
+        "node": "tests.test_sequential_driver::test_pending_log_uses_persisted_iteration_stage_elapsed[md-gbsa-MD-GBSA still pending for compound 624598]",
+        "failure_type": null,
+        "message": "AssertionError: assert 'iteration 60: md-gbsa pending: MD-GBSA still pending for compound 624598; elapsed=00:10:00.0 (including waiting, polling and restart recovery); current_time=2026-11-10 14:15:03 KST.' in ''\n +  where '' = CaptureResult(out='', err='').out\n +    where CaptureResult(out='', err='') = readouterr()\n +      where readouterr = <_pytest.capture.CaptureFixture object at 0x7fc7d93464d0>.readouterr",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "before",
+        "node": "tests.test_combichem_3d::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself",
+        "failure_type": null,
+        "message": "AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>\n  \n  - CLASH_REJECT\n  + PASS",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "before",
+        "node": "tests.test_md_progress_summary::test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error[0]",
+        "failure_type": null,
+        "message": "AssertionError: assert 'md-gbsa pending:' in ''",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "before",
+        "node": "tests.test_sequential_driver::test_pending_log_uses_persisted_iteration_stage_elapsed[md-gbsa-MD-GBSA still pending for compound 624598]",
+        "failure_type": null,
+        "message": "AssertionError: assert 'iteration 60: md-gbsa pending: MD-GBSA still pending for compound 624598; elapsed=00:10:00.0 (including waiting, polling and restart recovery); current_time=2026-11-10 14:15:03 KST.' in ''\n +  where '' = CaptureResult(out='', err='').out\n +    where CaptureResult(out='', err='') = readouterr()\n +      where readouterr = <_pytest.capture.CaptureFixture object at 0x7fb0e14cfe50>.readouterr",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "after",
+        "node": "tests.test_combichem_3d::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself",
+        "failure_type": null,
+        "message": "AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>\n  \n  - CLASH_REJECT\n  + PASS",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "after",
+        "node": "tests.test_md_progress_summary::test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error[0]",
+        "failure_type": null,
+        "message": "AssertionError: assert 'md-gbsa pending:' in ''",
+        "normalized_failure_and_trace_equal": true
+      },
+      {
+        "phase": "after",
+        "node": "tests.test_sequential_driver::test_pending_log_uses_persisted_iteration_stage_elapsed[md-gbsa-MD-GBSA still pending for compound 624598]",
+        "failure_type": null,
+        "message": "AssertionError: assert 'iteration 60: md-gbsa pending: MD-GBSA still pending for compound 624598; elapsed=00:10:00.0 (including waiting, polling and restart recovery); current_time=2026-11-10 14:15:03 KST.' in ''\n +  where '' = CaptureResult(out='', err='').out\n +    where CaptureResult(out='', err='') = readouterr()\n +      where readouterr = <_pytest.capture.CaptureFixture object at 0x7fbfcb9ce550>.readouterr",
+        "normalized_failure_and_trace_equal": true
+      }
+    ],
+    "normalizations": [
+      "temporary pytest run directory",
+      "full hexadecimal memory address",
+      "truncated hexadecimal fixture repr address tail"
+    ]
+  },
+  "contracts": {
+    "defined_function_signatures_equal": true,
+    "embedded_strings_equal": true,
+    "cli_and_module_help_equal": true,
+    "compileall_and_imports_pass": true,
+    "original_workspace_compileall_and_imports_pass": true,
+    "fingerprints": {
+      "crem": "f499a2549d9220b931acacfa8b7d791806c51631f73bfc81c889c418f8b0e2ba",
+      "slurm_signature": "49e8795261617f85a2903971393de40070231a330bc76b83f5146767e6ddec1b"
+    },
+    "native_probe_sha256": "1d4f4db1ab855c62019faf82dd79b7d0f9a7b513c9bc9a5ff6f83b42763596ba",
+    "checks": {
+      "cli-help": 0,
+      "generate-help": 0,
+      "glide-help": 0,
+      "growth-help": 0,
+      "generate-module-help": 0,
+      "glide-module-help": 0,
+      "compileall": 0,
+      "imports": 0
+    }
+  },
+  "retained_fingerprint_targets": {
+    "src/graft/stages/combichem_3d.py": "ea986aec23ce8f16ecbc34f6b3c26c9886e92a92bff64f867e1b3879bd39d2de",
+    "src/graft/stages/combichem_slurm_pool.py": "d195924375da12f0ed859e0b25a7f65dfdab3d61eee0493835d27234106d31de"
+  },
+  "log_sha256": {
+    "pytest-before.log": "f7dcf311023c080712fdeb37138f1bc3c5758ce061f8b647b1ac5d0dc40c37ca",
+    "pytest-after.log": "ced755ee74954837963bb8893d6994dc8e0fea7432c18f3a668113f519913da6"
+  }
+}

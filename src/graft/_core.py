@@ -2,7 +2,6 @@
 # LibInvent elite-guided iterative design with async Glide and SQLite.
 
 from graft.paths import iteration_directory, stage_in_iteration
-import argparse
 import sqlite3
 import tomllib
 import tempfile
@@ -679,16 +678,8 @@ def run_command(
 
 
 def canonicalize_smiles(smiles: str) -> str | None:
-    if not isinstance(smiles, str) or not smiles.strip():
-        return None
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None or mol.GetNumAtoms() == 0:
-        return None
-    return Chem.MolToSmiles(
-        mol,
-        canonical=True,
-        isomericSmiles=True,
-    )
+    from graft.chemistry.smiles import canonicalize_smiles as _canonicalize
+    return _canonicalize(smiles)
 
 
 def get_max_iteration(db_path: str | Path) -> int:

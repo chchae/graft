@@ -1,0 +1,264 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -114,122 +114,8 @@
+ 
+ 
+ def load_project_toml(filename):
+-    filename = Path(filename).expanduser().resolve()
+-
+-    with filename.open("rb") as f:
+-        config = tomllib.load(f)
+-
+-    from graft.config import generation_settings
+-    generation = generation_settings(config, filename.parent)
+-
+-    required = [
+-        "dock-grid",
+-        "reference-pose",
+-        "out-dir",
+-        "target-count",
+-        "max-iteration",
+-        "host",
+-    ]
+-    if generation['generation_method'] == 'reinvent4':
+-        required += ['libinvent-prior', 'sample-size']
+-
+-    missing = [key for key in required if key not in config]
+-    if missing:
+-        raise RuntimeError(
+-            "Missing required TOML key(s): " + ", ".join(missing)
+-        )
+-
+-    base = filename.parent
+-    from graft.config import remote_reinvent_settings, remote_aizynth_settings, aizynth_process_count, sa_score_process_count, sa_accepted_ratio, elite_mcs, elite_mcs_fixed
+-    remote_reinvent = (remote_reinvent_settings(config)
+-                       if generation['generation_method'] == 'reinvent4' else None)
+-    remote_aizynth = remote_aizynth_settings(config)
+-
+-    def resolve_path(value):
+-        path = Path(value).expanduser()
+-        if not path.is_absolute():
+-            path = base / path
+-        return path.resolve()
+-
+-    project = str(config.get("project", filename.stem)).strip()
+-    if not project:
+-        raise RuntimeError("TOML 'project' must not be empty.")
+-
+-    synthetic_enabled = bool(config.get("synthetic-feasibility-enabled", True))
+-    aizynth_config = (
+-        (Path(config["aizynth-config"]) if remote_aizynth
+-         else resolve_path(config["aizynth-config"]))
+-        if config.get("aizynth-config")
+-        else None
+-    )
+-    aizynth_cli = str(config.get("aizynth-cli", "aizynthcli")).strip()
+-    if synthetic_enabled and aizynth_config is None:
+-        raise RuntimeError(
+-            "'aizynth-config' is required when synthetic-feasibility-enabled is true."
+-        )
+-    if not aizynth_cli:
+-        raise RuntimeError("'aizynth-cli' must not be empty.")
+-
+-    output = resolve_path(config["out-dir"])
+-    from graft.config import prime_gbsa_license_retry_settings, schrodinger_cpu_settings, schrodinger_stage_hosts, glide_job_timeout, amber_settings, log_level, prime_gbsa_flexdist, fep_settings, debug_settings, distribution_settings, md_gbsa_settings
+-    from graft.config import prime_gbsa_local_settings, submission_installation, attraction_point_settings
+-    return debug_settings(config, {
+-        **attraction_point_settings(config),
+-        **prime_gbsa_local_settings(config),
+-        **distribution_settings(config),
+-        **md_gbsa_settings(config, base),
+-        **generation,
+-        **amber_settings(config, base),
+-        **prime_gbsa_license_retry_settings(config),
+-        **schrodinger_cpu_settings(config),
+-        **schrodinger_stage_hosts(config),
+-        "toml_file": filename,
+-        "submission_schrodinger": submission_installation(config, base),
+-        "log_level": log_level(config),
+-        "project": project,
+-        "db_path": output / f"{project}.sqlite",
+-        "libinvent_prior": ((Path(config["libinvent-prior"]) if remote_reinvent
+-                             else resolve_path(config["libinvent-prior"]))
+-                            if generation['generation_method'] == 'reinvent4' else None),
+-        "remote_reinvent": remote_reinvent,
+-        "grid": resolve_path(config["dock-grid"]),
+-        "reference_poses": resolve_path(config["reference-pose"]),
+-        "mcs_smarts": config.get("reference-mcs"),
+-        "elite_mcs_smarts": elite_mcs(config),
+-        "elite_mcs_fixed": elite_mcs_fixed(config),
+-        "output": output,
+-        "sample_size": generation['sample_size'],
+-        "target_count": int(config["target-count"]),
+-        "max_iteration": int(config["max-iteration"]),
+-        "host": str(config["host"]),
+-        "tail_timeout": int(config.get("tail-timeout", 300)),
+-        "glide_job_timeout": glide_job_timeout(config),
+-        "elite_count": int(config.get("elite-count", 30)),
+-        "elite_best_count": int(config.get("elite-best-count", 10)),
+-        "elite_diverse_count": int(config.get("elite-diverse-count", 20)),
+-        "elite_candidate_pool": int(config.get("elite-candidate-pool", 200)),
+-        "elite_tl_epochs": int(config.get("elite-tl-epochs", 3)),
+-        "prime_gbsa_elite_count": int(config.get("prime-gbsa-elite-count", 10)),
+-        "prime_gbsa_flexdist": prime_gbsa_flexdist(config),
+-        **fep_settings(config),
+-        "synthetic_feasibility_enabled": synthetic_enabled,
+-        "aizynth_config": aizynth_config,
+-        "aizynth_cli": aizynth_cli,
+-        "aizynth_nproc": aizynth_process_count(config),
+-        "sa_score_cpus": sa_score_process_count(config),
+-        "sa_accepted_ratio": sa_accepted_ratio(config),
+-        "remote_aizynth": remote_aizynth,
+-        "prime_gbsa_receptor": (
+-            resolve_path(config["prime-gbsa-receptor"])
+-            if config.get("prime-gbsa-receptor")
+-            else None
+-        ),
+-        "ligprep_ph": float(config.get("ligprep-ph", 7.4)),
+-        "ligprep_pht": float(config.get("ligprep-pht", 1.0)),
+-        "ligprep_max_states": int(config.get("ligprep-max-states", 2)),
+-        "ligprep_max_stereo": int(config.get("ligprep-max-stereo", 1)),
+-        "ligprep_ring_confs": int(config.get("ligprep-ring-confs", 1)),
+-    })
++    from graft.config import load_project_toml as _load
++    return _load(filename)
+ 
+ 
+ def create_sqlite_schema(conn: sqlite3.Connection) -> None:
+--- a/src/graft/config.py
++++ b/src/graft/config.py
+@@ -6,7 +6,7 @@
+ from typing import Any
+ 
+ from graft.paths import stage_directory
+-from graft import _core
++import tomllib
+ 
+ 
+ def combichem_3d_settings(filename):
+@@ -889,7 +889,118 @@
+ 
+ 
+ def load_project_toml(path: str | Path) -> dict[str, Any]:
+-    return _core.load_project_toml(path)
++    filename = Path(path).expanduser().resolve()
++
++    with filename.open("rb") as f:
++        config = tomllib.load(f)
++
++    generation = generation_settings(config, filename.parent)
++
++    required = [
++        "dock-grid",
++        "reference-pose",
++        "out-dir",
++        "target-count",
++        "max-iteration",
++        "host",
++    ]
++    if generation['generation_method'] == 'reinvent4':
++        required += ['libinvent-prior', 'sample-size']
++
++    missing = [key for key in required if key not in config]
++    if missing:
++        raise RuntimeError(
++            "Missing required TOML key(s): " + ", ".join(missing)
++        )
++
++    base = filename.parent
++    remote_reinvent = (remote_reinvent_settings(config)
++                       if generation['generation_method'] == 'reinvent4' else None)
++    remote_aizynth = remote_aizynth_settings(config)
++
++    def resolve_path(value):
++        path = Path(value).expanduser()
++        if not path.is_absolute():
++            path = base / path
++        return path.resolve()
++
++    project = str(config.get("project", filename.stem)).strip()
++    if not project:
++        raise RuntimeError("TOML 'project' must not be empty.")
++
++    synthetic_enabled = bool(config.get("synthetic-feasibility-enabled", True))
++    aizynth_config = (
++        (Path(config["aizynth-config"]) if remote_aizynth
++         else resolve_path(config["aizynth-config"]))
++        if config.get("aizynth-config")
++        else None
++    )
++    aizynth_cli = str(config.get("aizynth-cli", "aizynthcli")).strip()
++    if synthetic_enabled and aizynth_config is None:
++        raise RuntimeError(
++            "'aizynth-config' is required when synthetic-feasibility-enabled is true."
++        )
++    if not aizynth_cli:
++        raise RuntimeError("'aizynth-cli' must not be empty.")
++
++    output = resolve_path(config["out-dir"])
++    return debug_settings(config, {
++        **attraction_point_settings(config),
++        **prime_gbsa_local_settings(config),
++        **distribution_settings(config),
++        **md_gbsa_settings(config, base),
++        **generation,
++        **amber_settings(config, base),
++        **prime_gbsa_license_retry_settings(config),
++        **schrodinger_cpu_settings(config),
++        **schrodinger_stage_hosts(config),
++        "toml_file": filename,
++        "submission_schrodinger": submission_installation(config, base),
++        "log_level": log_level(config),
++        "project": project,
++        "db_path": output / f"{project}.sqlite",
++        "libinvent_prior": ((Path(config["libinvent-prior"]) if remote_reinvent
++                             else resolve_path(config["libinvent-prior"]))
++                            if generation['generation_method'] == 'reinvent4' else None),
++        "remote_reinvent": remote_reinvent,
++        "grid": resolve_path(config["dock-grid"]),
++        "reference_poses": resolve_path(config["reference-pose"]),
++        "mcs_smarts": config.get("reference-mcs"),
++        "elite_mcs_smarts": elite_mcs(config),
++        "elite_mcs_fixed": elite_mcs_fixed(config),
++        "output": output,
++        "sample_size": generation['sample_size'],
++        "target_count": int(config["target-count"]),
++        "max_iteration": int(config["max-iteration"]),
++        "host": str(config["host"]),
++        "tail_timeout": int(config.get("tail-timeout", 300)),
++        "glide_job_timeout": glide_job_timeout(config),
++        "elite_count": int(config.get("elite-count", 30)),
++        "elite_best_count": int(config.get("elite-best-count", 10)),
++        "elite_diverse_count": int(config.get("elite-diverse-count", 20)),
++        "elite_candidate_pool": int(config.get("elite-candidate-pool", 200)),
++        "elite_tl_epochs": int(config.get("elite-tl-epochs", 3)),
++        "prime_gbsa_elite_count": int(config.get("prime-gbsa-elite-count", 10)),
++        "prime_gbsa_flexdist": prime_gbsa_flexdist(config),
++        **fep_settings(config),
++        "synthetic_feasibility_enabled": synthetic_enabled,
++        "aizynth_config": aizynth_config,
++        "aizynth_cli": aizynth_cli,
++        "aizynth_nproc": aizynth_process_count(config),
++        "sa_score_cpus": sa_score_process_count(config),
++        "sa_accepted_ratio": sa_accepted_ratio(config),
++        "remote_aizynth": remote_aizynth,
++        "prime_gbsa_receptor": (
++            resolve_path(config["prime-gbsa-receptor"])
++            if config.get("prime-gbsa-receptor")
++            else None
++        ),
++        "ligprep_ph": float(config.get("ligprep-ph", 7.4)),
++        "ligprep_pht": float(config.get("ligprep-pht", 1.0)),
++        "ligprep_max_states": int(config.get("ligprep-max-states", 2)),
++        "ligprep_max_stereo": int(config.get("ligprep-max-stereo", 1)),
++        "ligprep_ring_confs": int(config.get("ligprep-ring-confs", 1)),
++    })
+ 
+ 
+ def remote_aizynth_settings(config: dict[str, Any]) -> dict[str, str] | None:
+@@ -914,4 +1025,5 @@
+ def configure_project(
+     path: str | Path, schrodinger: str | Path | None = None
+ ) -> SimpleNamespace:
++    from graft import _core
+     return _core.configure_project(path, Path(schrodinger) if schrodinger else None)

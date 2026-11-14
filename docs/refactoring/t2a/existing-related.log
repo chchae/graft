@@ -1,0 +1,11 @@
+........................................................................ [ 29%]
+........................................................................ [ 58%]
+........................................................................ [ 87%]
+..............................                                           [100%]
+=============================== warnings summary ===============================
+tests/test_crem_pipeline.py: 207 warnings
+  /home1/conda/envs/graft/lib/python3.15/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=583243) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+246 passed, 207 warnings in 25.39s

@@ -1,0 +1,6 @@
+{
+  "root_compileall": 0,
+  "root_imports_and_canonicalizer_smoke": 0,
+  "whitespace_check": 0,
+  "tested_source_and_tests_identical": true
+}

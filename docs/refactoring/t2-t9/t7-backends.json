@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/t7-backends.xml",
+    "tests/test_combichem_remote.py",
+    "tests/test_combichem_slurm.py",
+    "tests/test_combichem_slurm_pipeline.py",
+    "tests/test_workspace_remote_recovery.py"
+  ],
+  "exit_code": 0,
+  "seconds": 11.103258761577308
+}

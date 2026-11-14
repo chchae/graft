@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 from pathlib import Path
-import sqlite3
 import csv
 import os
 import tempfile

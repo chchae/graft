@@ -354,6 +354,39 @@ def md_stage_required(args, project_toml, iteration):
     return (getattr(args, 'md_gbsa_enabled', False) or
             database.md_gbsa_selection(args.db_path, iteration) is not None)
 
+def _report_pending_stage(
+    args, iteration: int, stage: str, rc: int, reason: str,
+    previous_pending: tuple[int, str] | None,
+) -> tuple[int, str]:
+    """Report a poll with the existing verbosity, timing and deduplication rules."""
+    routine_prime_gbsa_poll = (rc == 0 and stage in {'prime_gbsa', 'prime_gbsa-recovery'}
+                         and reason.startswith(('prime_gbsa still running for ',
+                                                'reference prime_gbsa still running for ',
+                                                'Existing Prime claims still running')))
+    routine_md_gbsa_poll = (rc == 0 and stage == 'md-gbsa'
+                           and reason.startswith('MD-GBSA still pending for compound '))
+    report = progress if routine_prime_gbsa_poll or routine_md_gbsa_poll else print
+    timing = ''
+    if stage == 'md-gbsa':
+        from graft.stages._summary import md_pending_summary
+        summary = md_pending_summary(args, iteration)
+        if summary:
+            reason += '; ' + summary
+    if stage in {'amber-gbsa', 'md-gbsa'}:
+        elapsed = database.stage_elapsed(args.db_path, iteration, stage)
+        if elapsed is not None:
+            timing = (f'; elapsed={format_elapsed(elapsed)}'
+                      + ('' if stage == 'amber-gbsa' else
+                         ' (including waiting, polling and restart recovery)')
+                      + f'; current_time={current_time()}')
+    pending_key = (rc, reason)  # Elapsed time alone is not a progress change.
+    if stage != 'amber-gbsa' or rc != 0 or pending_key != previous_pending:
+        display_reason = (reason.removesuffix(' Amber GBSA screening')
+                          if stage == 'amber-gbsa' else reason)
+        report(f"[driver  ] iteration {iteration}: {stage} pending: {display_reason}{timing}.", flush=True)
+    return pending_key
+
+
 def supervise_iteration(args, project_toml, iteration, stages, poll_interval, stop, once=False):
     """Run one worker at a time; exit only after this iteration's final stage."""
     pending_stages = list(stages)
@@ -435,32 +468,8 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
                 if iteration > 0 and stage == report_stage:
                     refresh_distribution_report(args, project_toml, iteration, f'{stage}-complete', stop)
                 break
-            routine_prime_gbsa_poll = (rc == 0 and stage in {'prime_gbsa', 'prime_gbsa-recovery'}
-                                 and reason.startswith(('prime_gbsa still running for ',
-                                                        'reference prime_gbsa still running for ',
-                                                        'Existing Prime claims still running')))
-            routine_md_gbsa_poll = (rc == 0 and stage == 'md-gbsa'
-                                   and reason.startswith('MD-GBSA still pending for compound '))
-            report = progress if routine_prime_gbsa_poll or routine_md_gbsa_poll else print
-            timing = ''
-            if stage == 'md-gbsa':
-                from graft.stages._summary import md_pending_summary
-                summary = md_pending_summary(args, iteration)
-                if summary:
-                    reason += '; ' + summary
-            if stage in {'amber-gbsa', 'md-gbsa'}:
-                elapsed = database.stage_elapsed(args.db_path, iteration, stage)
-                if elapsed is not None:
-                    timing = (f'; elapsed={format_elapsed(elapsed)}'
-                              + ('' if stage == 'amber-gbsa' else
-                                 ' (including waiting, polling and restart recovery)')
-                              + f'; current_time={current_time()}')
-            pending_key = (rc, reason)  # Elapsed time alone is not a progress change.
-            if stage != 'amber-gbsa' or rc != 0 or pending_key != previous_pending:
-                display_reason = (reason.removesuffix(' Amber GBSA screening')
-                                  if stage == 'amber-gbsa' else reason)
-                report(f"[driver  ] iteration {iteration}: {stage} pending: {display_reason}{timing}.", flush=True)
-            previous_pending = pending_key
+            previous_pending = _report_pending_stage(
+                args, iteration, stage, rc, reason, previous_pending)
             if once:
                 return False
             if (iteration > 0 and stage != 'generate'

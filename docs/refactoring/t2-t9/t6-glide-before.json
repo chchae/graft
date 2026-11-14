@@ -1,0 +1,21 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/t6-glide-before.xml",
+    "tests/test_glide_resources.py",
+    "tests/test_glide_recovery.py",
+    "tests/test_glide_status_unavailable.py",
+    "tests/test_glide_subjob_timeout.py",
+    "tests/test_glide_timeout_results.py",
+    "tests/test_glide_pipeline.py",
+    "tests/test_docking_prime_gbsa.py"
+  ],
+  "exit_code": 0,
+  "seconds": 0.9396827928721905
+}

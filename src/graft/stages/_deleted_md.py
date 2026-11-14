@@ -1,6 +1,5 @@
 """Verify retired MD work after its compound rows and local output were deleted."""
 import json
-from pathlib import Path
 import shlex
 
 from graft import md_gbsa

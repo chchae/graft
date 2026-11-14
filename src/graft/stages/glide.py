@@ -9,7 +9,6 @@ import shutil
 from pathlib import Path
 from graft.paths import stage_directory
 from graft.stages._logging import detail, progress
-import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -412,6 +411,25 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
     return pending, terminal
 
 
+def _claim_reference_groups(db_path: str | Path, groups):
+    """Claim each group in order, retaining only rows owned by this worker."""
+    claimed_groups = {}
+    for reference_id, compounds in groups.items():
+        claimed_ids = set(
+            database.claim_compounds(
+                db_path,
+                [compound[0] for compound in compounds],
+                expected_state=("ligprepped", "glide_running"),
+                claimed_state="glide_running",
+            )
+        )
+        if claimed_ids:
+            claimed_groups[reference_id] = [
+                compound for compound in compounds if compound[0] in claimed_ids
+            ]
+    return claimed_groups
+
+
 @timed_stage("Glide stage worker")
 def _run_stage(args, ns):
     args.poll_interval = ns.poll_interval
@@ -442,21 +460,7 @@ def _run_stage(args, ns):
     groups = query_groups(iteration, args.db_path)
     fresh_references = database.fresh_glide_references(args.db_path, iteration)
 
-    claimed_groups = {}
-    for reference_id, compounds in groups.items():
-        claimed_ids = set(
-            database.claim_compounds(
-                args.db_path,
-                [compound[0] for compound in compounds],
-                expected_state=("ligprepped", "glide_running"),
-                claimed_state="glide_running",
-            )
-        )
-        if claimed_ids:
-            claimed_groups[reference_id] = [
-                compound for compound in compounds if compound[0] in claimed_ids
-            ]
-    groups = claimed_groups
+    groups = _claim_reference_groups(args.db_path, groups)
     if not groups:
         print(f"Iteration {iteration}: no Glide-pending compounds.")
         return

@@ -22,10 +22,8 @@ def load_job(directory):
 
 
 def _save(directory, record):
-    path = job_file(directory)
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(record))
-    temporary.replace(path)
+    from graft._job_record import save_job_record
+    save_job_record(job_file(directory), record)
 
 
 def prepare_new_calculation(suite, directory, compound_ids):

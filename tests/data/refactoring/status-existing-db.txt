@@ -1,0 +1,22 @@
+Iteration 0: calculating local RDKit properties for 1 reference compounds (CPU limit=1).
+Iteration 0: reference RDKit properties stored for 1 compounds.
+
+Using existing SQLite project database
+----------------------------------------------------------------------
+Database            : <DB>
+Reference compounds : 1
+Project: project
+Database: <DB>
+
+States
+iteration  state              count
+---------  -----------------  -----
+        0  reference              1
+        1  failed                 1
+        1  prime_gbsa_done        1
+
+Scores
+iteration docked prime_gbsa fep amber synth synth_yes  best_dock best_prime_gbsa best_fep best_amber  md_gbsa best_md_gbsa
+--------- ------ ---- --- ----- ----- ---------  --------- --------- -------- ----------
+        0      0    0   0     0     0         0       None      None     None       None        0         None
+        1      2    1   0     1     2         1       -8.0     -40.0     None      -35.0        0         None

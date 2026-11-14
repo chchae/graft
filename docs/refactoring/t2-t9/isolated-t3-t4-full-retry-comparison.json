@@ -1,0 +1,23 @@
+{
+  "before_count": 2711,
+  "after_count": 2711,
+  "changed": {},
+  "added": {},
+  "failures": {
+    "tests/test_combichem_3d.py::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself": {
+      "status": "failure",
+      "message": "AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>\n  \n  - CLASH_REJECT\n  + PASS",
+      "content": "    def test_real_probes_pass_but_actual_fragment_combination_collides_with_itself(inputs):\n        _,cfg,mol,h = inputs\n        cfg['overlap-tolerance'] = 0.0  # deliberately strict model for this regression\n        checker = BumpChecker(load_receptor(cfg['receptor'],cfg),cfg)\n        sites = growth_sites(mol,h)\n        assert all(conformations.methyl_probe(mol,h,uid,checker,cfg,37)['status']==PoseVerdict.PASS for uid in sites)\n        product,ph = assemble(mol,h,sites,['*c1ccccc1']*2,'two-real-fragments')\n        result = conformations.search(product,ph,checker,cfg,37)\n>       assert result['status'] == PoseVerdict.CLASH_REJECT\nE       AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>\nE         \nE         - CLASH_REJECT\nE         + PASS\n\ntests/test_combichem_3d.py:346: AssertionError"
+    },
+    "tests/test_md_progress_summary.py::test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error[0]": {
+      "status": "failure",
+      "message": "AssertionError: assert 'md-gbsa pending:' in ''",
+      "content": "    def test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error(project, monkeypatch, capsys, rc):\n        args, _, _ = project\n        monkeypatch.setattr(driver, 'stream_process', lambda *a: rc)\n        assert not driver.supervise_iteration(args, args.output/'project.toml', 1,\n            [('md-gbsa', 'graft.stages.md_gbsa')], 30, driver.StopFlag(), once=True)\n        line = capsys.readouterr().out\n>       assert 'md-gbsa pending:' in line\nE       AssertionError: assert 'md-gbsa pending:' in ''\n\ntests/test_md_progress_summary.py:102: AssertionError"
+    },
+    "tests/test_sequential_driver.py::test_pending_log_uses_persisted_iteration_stage_elapsed[md-gbsa-MD-GBSA still pending for compound 624598]": {
+      "status": "failure",
+      "message": "AssertionError: assert 'iteration 60: md-gbsa pending: MD-GBSA still pending for compound 624598; elapsed=00:10:00.0 (including waiting, polling and restart recovery); current_time=2026-11-10 14:15:03 KST.' in ''\n +  where '' = CaptureResult(out='', err='').out\n +    where CaptureResult(out='', err='') = readouterr()\n +      where readouterr = <_pytest.capture.CaptureFixture object at <ADDR>>.readouterr",
+      "content": "    def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatch, capsys, stage, reason):\n        args = project(tmp_path, State.DOCKED, iteration=60)\n        monkeypatch.setattr(driver, 'current_time', lambda: '2026-11-10 14:15:03 KST')\n        args.md_gbsa_enabled = True\n        monkeypatch.setattr(database.time, 'time', lambda: 100.)\n        database.start_stage_timer(args.db_path, 60, stage)\n        monkeypatch.setattr(database.time, 'time', lambda: 700.)\n        monkeypatch.setattr(driver, 'stream_process', lambda *a: 0)\n        monkeypatch.setattr(database, 'stage_completion_reason',\n                            lambda *a: reason)\n        assert not driver.supervise_iteration(\n            args, tmp_path/'p.toml', 60, [(stage, f'graft.stages.{stage.replace(\"-\", \"_\")}')],\n            30, driver.StopFlag(), once=True,\n        )\n        expected = ('iteration 60: amber-gbsa pending: 493 compounds still running; '\n                    'elapsed=00:10:00.0; current_time=2026-11-10 14:15:03 KST.' if stage == 'amber-gbsa' else\n                    f'iteration 60: {stage} pending: {reason}; '\n                    'elapsed=00:10:00.0 (including waiting, polling and restart recovery); '\n                    'current_time=2026-11-10 14:15:03 KST.')\n>       assert expected in capsys.readouterr().out\nE       AssertionError: assert 'iteration 60: md-gbsa pending: MD-GBSA still pending for compound 624598; elapsed=00:10:00.0 (including waiting, polling and restart recovery); current_time=2026-11-10 14:15:03 KST.' in ''\nE        +  where '' = CaptureResult(out='', err='').out\nE        +    where CaptureResult(out='', err='') = readouterr()\nE        +      where readouterr = <_pytest.capture.CaptureFixture object at <ADDR>>.readouterr\n\ntests/test_sequential_driver.py:114: AssertionError"
+    }
+  }
+}

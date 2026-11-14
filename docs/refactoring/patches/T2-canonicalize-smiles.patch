@@ -1,0 +1,40 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -685,16 +685,8 @@
+ 
+ 
+ def canonicalize_smiles(smiles: str) -> str | None:
+-    if not isinstance(smiles, str) or not smiles.strip():
+-        return None
+-    mol = Chem.MolFromSmiles(smiles)
+-    if mol is None or mol.GetNumAtoms() == 0:
+-        return None
+-    return Chem.MolToSmiles(
+-        mol,
+-        canonical=True,
+-        isomericSmiles=True,
+-    )
++    from graft.chemistry.smiles import canonicalize_smiles as _canonicalize
++    return _canonicalize(smiles)
+ 
+ 
+ def get_max_iteration(db_path: str | Path) -> int:
+--- a/src/graft/chemistry/smiles.py
++++ b/src/graft/chemistry/smiles.py
+@@ -0,0 +1,16 @@
++"""Canonical isomeric SMILES using the existing project parsing rules."""
++from rdkit import Chem
++
++
++def canonicalize_smiles(smiles: str) -> str | None:
++    if not isinstance(smiles, str) or not smiles.strip():
++        return None
++    mol = Chem.MolFromSmiles(smiles)
++    if mol is None or mol.GetNumAtoms() == 0:
++        return None
++    return Chem.MolToSmiles(
++        mol,
++        canonical=True,
++        isomericSmiles=True,
++    )
++

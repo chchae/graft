@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/isolated-t3-t4-full-retry.xml"
+  ],
+  "exit_code": 1,
+  "seconds": 85.57395176123828
+}

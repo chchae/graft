@@ -1,0 +1,20 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/t5-before.xml",
+    "tests/test_job_record_contracts.py",
+    "tests/test_prime_gbsa_async.py",
+    "tests/test_glide_recovery.py",
+    "tests/test_schrodinger_parallel.py",
+    "tests/test_fresh_calculations.py",
+    "tests/test_prime_gbsa_launch_recovery.py"
+  ],
+  "exit_code": 0,
+  "seconds": 0.7132772644981742
+}

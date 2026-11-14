@@ -1,0 +1,64 @@
+--- a/src/graft/driver.py
++++ b/src/graft/driver.py
+@@ -354,7 +354,10 @@
+     return (getattr(args, 'md_gbsa_enabled', False) or
+             database.md_gbsa_selection(args.db_path, iteration) is not None)
+ 
+-def _report_pending_stage(args, iteration, stage, rc, reason, previous_pending):
++def _report_pending_stage(
++    args, iteration: int, stage: str, rc: int, reason: str,
++    previous_pending: tuple[int, str] | None,
++) -> tuple[int, str]:
+     """Report a poll with the existing verbosity, timing and deduplication rules."""
+     routine_prime_gbsa_poll = (rc == 0 and stage in {'prime_gbsa', 'prime_gbsa-recovery'}
+                          and reason.startswith(('prime_gbsa still running for ',
+--- a/src/graft/stages/glide.py
++++ b/src/graft/stages/glide.py
+@@ -435,7 +435,7 @@
+     return pending, terminal
+ 
+ 
+-def _claim_reference_groups(db_path, groups):
++def _claim_reference_groups(db_path: str | Path, groups):
+     """Claim each group in order, retaining only rows owned by this worker."""
+     claimed_groups = {}
+     for reference_id, compounds in groups.items():
+--- a/src/graft/chemistry/smiles.py
++++ b/src/graft/chemistry/smiles.py
+@@ -3,6 +3,7 @@
+ 
+ 
+ def canonicalize_smiles(smiles: str) -> str | None:
++    """Return canonical isomeric SMILES or None; propagate RDKit call exceptions."""
+     if not isinstance(smiles, str) or not smiles.strip():
+         return None
+     mol = Chem.MolFromSmiles(smiles)
+--- a/tests/test_refactoring_leaf_imports.py
++++ b/tests/test_refactoring_leaf_imports.py
+@@ -0,0 +1,26 @@
++"""New implementation leaves must import without workflow initialization."""
++import subprocess
++import sys
++
++import pytest
++
++
++@pytest.mark.parametrize('module', ['graft.chemistry.smiles', 'graft._job_record'])
++def test_leaf_import_does_not_load_core_database_or_launch_work(module):
++    code = """
++import importlib
++import sqlite3
++import subprocess
++import sys
++
++def unexpected(*args, **kwargs):
++    raise AssertionError('Implementation leaf initialized workflow I/O')
++
++sqlite3.connect = unexpected
++subprocess.run = unexpected
++subprocess.Popen = unexpected
++importlib.import_module(sys.argv[1])
++assert not {'graft._core', 'graft.database', 'graft.config'} & sys.modules.keys()
++"""
++    subprocess.run([sys.executable, '-c', code, module], check=True,
++                   capture_output=True, text=True)

@@ -1,0 +1,39 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -2,7 +2,6 @@
+ # LibInvent elite-guided iterative design with async Glide and SQLite.
+ 
+ from graft.paths import iteration_directory, stage_in_iteration
+-import argparse
+ import sqlite3
+ import tomllib
+ import tempfile
+--- a/src/graft/stages/generate.py
++++ b/src/graft/stages/generate.py
+@@ -1,7 +1,6 @@
+ #!/usr/bin/env python3
+ import argparse
+ from pathlib import Path
+-import sqlite3
+ import csv
+ import os
+ import tempfile
+--- a/src/graft/stages/glide.py
++++ b/src/graft/stages/glide.py
+@@ -10,7 +10,6 @@
+ from pathlib import Path
+ from graft.paths import stage_directory
+ from graft.stages._logging import detail, progress
+-import sqlite3
+ import time
+ from concurrent.futures import ThreadPoolExecutor
+ from contextvars import copy_context
+--- a/src/graft/stages/_deleted_md.py
++++ b/src/graft/stages/_deleted_md.py
+@@ -1,6 +1,5 @@
+ """Verify retired MD work after its compound rows and local output were deleted."""
+ import json
+-from pathlib import Path
+ import shlex
+ 
+ from graft import md_gbsa

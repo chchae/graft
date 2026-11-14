@@ -1,0 +1,15 @@
+{
+  "revision": "c230d49fc9ff66000ad2e1829a6f9e5f6325b991",
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_push_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-push-qt2je8gc/candidate.xml"
+  ],
+  "exit_code": 1,
+  "seconds": 81.52543663326651
+}

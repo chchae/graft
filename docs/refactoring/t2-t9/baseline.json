@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/baseline.xml"
+  ],
+  "exit_code": 1,
+  "seconds": 85.11384526919574
+}

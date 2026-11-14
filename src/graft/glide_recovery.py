@@ -43,10 +43,8 @@ def output_paths(directory):
 
 
 def save_record(directory, record):
-    path = record_file(directory)
-    pending = path.with_suffix('.tmp')
-    pending.write_text(json.dumps(record))
-    pending.replace(path)
+    from graft._job_record import save_job_record
+    save_job_record(record_file(directory), record)
 
 
 def discard_terminal_results(directory):

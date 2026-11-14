@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/tmp/graft-t2-t9-60av2y50/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-t9-60av2y50/t4-after.xml",
+    "tests/test_project_config.py",
+    "tests/test_refactoring_contracts.py",
+    "tests/test_reference_score_cache.py",
+    "tests/test_output_paths.py",
+    "tests/test_md_gbsa.py"
+  ],
+  "exit_code": 0,
+  "seconds": 6.248150756582618
+}
