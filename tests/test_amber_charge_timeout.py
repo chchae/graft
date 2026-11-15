@@ -29,6 +29,38 @@ def test_charge_timeout_is_terminal_and_never_uses_partial_ligand(tmp_path, monk
     assert calls == ['antechamber']
 
 
+def _process_exited(proc: Path) -> bool:
+    try:
+        state = proc.read_text().split()[2]
+    except (FileNotFoundError, ProcessLookupError):
+        return True  # Reaped between termination and the /proc read.
+    return state in ('Z', 'X')
+
+
+@pytest.mark.parametrize('state,expected', [('R', False), ('S', False), ('Z', True), ('X', True)])
+def test_process_exit_probe_requires_a_terminal_state(tmp_path, monkeypatch, state, expected):
+    monkeypatch.setattr(Path, 'read_text', lambda path: f'123 (test) {state}')
+    assert _process_exited(tmp_path/'stat') is expected
+
+
+@pytest.mark.parametrize('error', [FileNotFoundError(), ProcessLookupError()])
+def test_process_exit_probe_accepts_a_reaped_process(tmp_path, monkeypatch, error):
+    def read(path):
+        raise error
+    monkeypatch.setattr(Path, 'read_text', read)
+    assert _process_exited(tmp_path/'stat')
+
+
+def test_process_exit_probe_does_not_hide_other_io_errors(tmp_path, monkeypatch):
+    failure = PermissionError('unreadable process state')
+    def read(path):
+        raise failure
+    monkeypatch.setattr(Path, 'read_text', read)
+    with pytest.raises(PermissionError) as caught:
+        _process_exited(tmp_path/'stat')
+    assert caught.value is failure
+
+
 def test_deadline_kills_parent_and_sqm_like_child_with_inherited_lock(tmp_path):
     # Real Python processes verify process-tree termination; no Amber execution.
     child = "import os,time; from pathlib import Path; Path('child.pid').write_text(str(os.getpid())); time.sleep(60)"
@@ -41,7 +73,7 @@ def test_deadline_kills_parent_and_sqm_like_child_with_inherited_lock(tmp_path):
         pid = int((tmp_path / f'{name}.pid').read_text())
         proc = Path(f'/proc/{pid}/stat')
         # A killed child may briefly remain as an init-owned zombie.
-        assert not proc.exists() or proc.read_text().split()[2] in ('Z', 'X')
+        assert _process_exited(proc)
     import fcntl
     with (tmp_path / 'run.lock').open('a') as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
