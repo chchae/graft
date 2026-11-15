@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/t6-driver-before.xml",
+    "tests/test_driver_logging.py",
+    "tests/test_stage_timing.py",
+    "tests/test_sequential_driver.py",
+    "tests/test_md_progress_summary.py",
+    "tests/test_timeout_warning.py"
+  ],
+  "exit_code": 1,
+  "seconds": 1.9037179937586188
+}

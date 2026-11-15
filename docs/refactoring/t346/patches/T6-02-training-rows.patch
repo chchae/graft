@@ -1,0 +1,62 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -1679,23 +1679,11 @@
+             )
+ 
+ 
+-def write_elite_libinvent_training_files(
+-    elites,
+-    scaffold_smiles,
+-    run_dir,
+-    *,
+-    prior_file=None,
+-    remote=None,
+-    score_source="prime_gbsa",
++def _elite_training_rows(
++    elites, scaffold_smiles, vocabulary, score_source, *,
++    decompose, unsupported_pair_tokens,
+ ):
+-    from graft.chemistry.libinvent_decorations import decompose
+-    from graft.libinvent_vocabulary import load_prior_vocabulary, unsupported_pair_tokens
+-
+-    vocabulary = load_prior_vocabulary(prior_file, remote) if prior_file is not None else None
+-    if vocabulary is not None:
+-        (run_dir / "elite_vocabulary.json").write_text(
+-            json.dumps(vocabulary, indent=2) + "\n", encoding="utf-8"
+-        )
++    """Prepare selected/skipped rows with the existing decomposition/token policy."""
+     usable = []
+     skipped = []
+ 
+@@ -1773,6 +1761,31 @@
+                 decorators,
+             )
+         )
++
++    return usable, skipped
++
++
++def write_elite_libinvent_training_files(
++    elites,
++    scaffold_smiles,
++    run_dir,
++    *,
++    prior_file=None,
++    remote=None,
++    score_source="prime_gbsa",
++):
++    from graft.chemistry.libinvent_decorations import decompose
++    from graft.libinvent_vocabulary import load_prior_vocabulary, unsupported_pair_tokens
++
++    vocabulary = load_prior_vocabulary(prior_file, remote) if prior_file is not None else None
++    if vocabulary is not None:
++        (run_dir / "elite_vocabulary.json").write_text(
++            json.dumps(vocabulary, indent=2) + "\n", encoding="utf-8"
++        )
++    usable, skipped = _elite_training_rows(
++        elites, scaffold_smiles, vocabulary, score_source,
++        decompose=decompose, unsupported_pair_tokens=unsupported_pair_tokens,
++    )
+ 
+     metadata = run_dir / "elite_selected.tsv"
+     train_file = run_dir / "elite_train.smi"

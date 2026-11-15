@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/tmp/graft-hardening-4aztmslk/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-hardening-4aztmslk/test-fixes.xml",
+    "tests/test_md_progress_summary.py",
+    "tests/test_sequential_driver.py",
+    "tests/test_driver_logging.py",
+    "tests/test_combichem_3d.py",
+    "tests/test_amber_charge_timeout.py"
+  ],
+  "exit_code": 0,
+  "seconds": 10.72928791679442
+}

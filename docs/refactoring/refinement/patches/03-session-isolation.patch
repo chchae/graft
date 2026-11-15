@@ -1,0 +1,83 @@
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -1,7 +1,29 @@
+ """Keep mocked submission locks and remote registries separate from live workers."""
++from pathlib import Path
++import tempfile
+ from types import SimpleNamespace
+ 
+ import pytest
++
++
++@pytest.hookimpl(tryfirst=True)
++def pytest_configure(config):
++    """Keep collection/teardown and child processes away from live registries."""
++    # Allocate multiprocessing's separately finalized socket directory first.
++    from multiprocessing.util import get_temp_dir
++    get_temp_dir()
++    temporary = tempfile.TemporaryDirectory(prefix='graft-pytest-')
++    patch = pytest.MonkeyPatch()
++    def cleanup():
++        patch.undo()
++        temporary.cleanup()
++    config.add_cleanup(cleanup)
++    patch.setenv('TMPDIR', temporary.name)
++    patch.setattr(tempfile, 'tempdir', temporary.name)
++    from graft import schrodinger_guard
++    root = Path(temporary.name)
++    patch.setattr(schrodinger_guard, 'tempfile', SimpleNamespace(gettempdir=lambda: str(root)))
++    patch.setattr(schrodinger_guard, '_md_registry', lambda: root/'session-md-remotes.json')
+ 
+ 
+ @pytest.fixture(autouse=True)
+--- /dev/null
++++ b/tests/test_pytest_isolation.py
+@@ -0,0 +1,48 @@
++"""Plain pytest isolates fallback submission resources for its whole lifetime."""
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++
++def test_plain_pytest_isolates_collection_tests_teardown_and_child_tmpdir(tmp_path):
++    suite = tmp_path/'probe'
++    suite.mkdir()
++    (suite/'conftest.py').write_bytes(Path(__file__).with_name('conftest.py').read_bytes())
++    (suite/'test_probe.py').write_text('''
++import json, os, tempfile
++from pathlib import Path
++import pytest
++from graft import schrodinger_guard
++
++snapshot = {'tmpdir': schrodinger_guard.tempfile.gettempdir(), 'stdlib_tmpdir': tempfile.gettempdir(), 'collection': str(schrodinger_guard._md_registry())}
++
++@pytest.fixture(scope='session', autouse=True)
++def record_after_function_fixtures():
++    yield
++    snapshot['teardown'] = str(schrodinger_guard._md_registry())
++    Path(__file__).with_name('observed.json').write_text(json.dumps(snapshot))
++
++def test_probe(tmp_path):
++    snapshot['fixture'] = str(schrodinger_guard._md_registry())
++    snapshot['child_tmpdir'] = os.environ['TMPDIR']
++    from multiprocessing.util import get_temp_dir
++    snapshot['multiprocessing_tmpdir'] = get_temp_dir()
++    assert snapshot['fixture'] == str(tmp_path/'md-remotes.json')
++''')
++    env = dict(os.environ)
++    env.pop('GRAFT_REFACTOR_TEST_TMP', None)
++    result = subprocess.run([sys.executable, '-m', 'pytest', '-q', str(suite)],
++                            cwd=suite, env=env, text=True, capture_output=True, timeout=30)
++    assert result.returncode == 0, result.stdout + result.stderr
++    assert 'Traceback' not in result.stderr, result.stderr
++    observed = json.loads((suite/'observed.json').read_text())
++    temporary = Path(observed['tmpdir'])
++    assert temporary.name.startswith('graft-pytest-')
++    assert temporary != Path(os.environ['TMPDIR'])
++    assert str(temporary/'session-md-remotes.json') == observed['collection'] == observed['teardown']
++    assert observed['child_tmpdir'] == observed['stdlib_tmpdir'] == str(temporary)
++    assert Path(observed['fixture']) != Path(observed['collection'])
++    assert not Path(observed['multiprocessing_tmpdir']).is_relative_to(temporary)
++    assert not temporary.exists()

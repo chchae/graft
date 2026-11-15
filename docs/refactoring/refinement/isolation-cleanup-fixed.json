@@ -1,0 +1,16 @@
+{
+  "command": [
+    "/tmp/graft-hardening-4aztmslk/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-hardening-4aztmslk/isolation-cleanup-fixed.xml",
+    "tests/test_pytest_isolation.py",
+    "tests/test_schrodinger_guard.py",
+    "tests/test_combichem_writer.py",
+    "tests/test_workspace_remote_recovery.py"
+  ],
+  "exit_code": 0,
+  "seconds": 1.408586099743843
+}

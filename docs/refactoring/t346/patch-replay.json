@@ -1,0 +1,21 @@
+{
+  "ordered_patches": [
+    "T3-01-status.patch",
+    "T3-02-open.patch",
+    "T3-03-schema.patch",
+    "T3-04-state.patch",
+    "T3-05-queries.patch",
+    "T4-01-loader.patch",
+    "T4-02-bootstrap.patch",
+    "T4-03-project-keys.patch",
+    "T4-04-values.patch",
+    "T6-01-prime-recovery.patch",
+    "T6-02-training-rows.patch",
+    "T6-03-md-selection.patch",
+    "T6-04-scaffold.patch",
+    "T6-05-glide-recovery.patch",
+    "T6-06-driver-reporting.patch",
+    "tests-additive.patch"
+  ],
+  "source_and_tests_byte_identical": true
+}

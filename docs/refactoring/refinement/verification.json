@@ -1,0 +1,33 @@
+{
+  "checks": [
+    {
+      "check": "compileall",
+      "exit_code": 0
+    },
+    {
+      "check": "imports",
+      "exit_code": 0
+    },
+    {
+      "check": "graft help bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.driver help bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.glide help bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.prime_gbsa help bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.md_gbsa help bytes",
+      "unchanged": true
+    }
+  ],
+  "production_data_modified": false
+}

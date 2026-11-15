@@ -1,0 +1,21 @@
+{
+  "method": "Real unchanged combichem_slurm.signature at identical absolute paths, synthetic config, no guard mock",
+  "probe_root": "/tmp/graft-t346-ii4pbdgh/fingerprint-probe",
+  "before": "d0c43a692bfd078666cc0379c49c09b9db0196860cd9ad3c6fdc9cacf42f0617",
+  "after": "3db0064b3d70382b0b0f5fb5ae6bc17cabfeb4c36cc0c584c9abcc7e6b7352ef",
+  "restored": "d0c43a692bfd078666cc0379c49c09b9db0196860cd9ad3c6fdc9cacf42f0617",
+  "source_guard_changes_signature": true,
+  "restoring_original_bytes_restores_signature": true,
+  "files": {
+    "src/graft/config.py": {
+      "before": "9e4e975011bc618bc19baca6b93e9df6b40598d383bd6e6c0d44f72df86c178f",
+      "after": "e2105b5752e718462649d29167d54183d3bfbece2342be0e705662db60bcd2ad"
+    },
+    "src/graft/database.py": {
+      "before": "68d80c4f1cfb3f9d3f290a094ad1374d42720c5a4cca14cfcc65f54ded7db767",
+      "after": "d03c3e09842c47a525ab57ab19ea6c8e021907e048c4cbd9d86a93a128a1b197"
+    }
+  },
+  "production_data_touched": false,
+  "live_recovery_validated": false
+}

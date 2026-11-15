@@ -3,6 +3,9 @@
 The Python package and command are `graft`. Install with `python -m pip install -e .`,
 then use `graft --help` or `python -m graft --help`.
 The repository is [chchae/graft](https://github.com/chchae/graft).
+Test commands, session isolation and optional dependencies are documented in
+[Testing](docs/TESTING.md). Current refactoring status is in
+[Progress](docs/refactoring/PROGRESS.md).
 Existing calculation outputs and submitted jobs are not migrated by the rename;
 review saved helpers, metadata and submission locks before resuming an older run.
 

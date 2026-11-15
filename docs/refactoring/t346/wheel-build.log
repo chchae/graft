@@ -1,0 +1,12 @@
+Processing /tmp/graft-t346-ii4pbdgh/project
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: graft
+  Building wheel for graft (pyproject.toml): started
+  Building wheel for graft (pyproject.toml): finished with status 'done'
+  Created wheel for graft: filename=graft-0.1.0-py3-none-any.whl size=411489 sha256=f041590a05036c227005cb8a873600849ba8455182aa5e0c8ef422faacfa77ea
+  Stored in directory: /tmp/pip-ephem-wheel-cache-f8bxvlb2/wheels/0e/de/a2/a86ad17fe8eea806913e833fb5e0cc957265ec4f7382d93f81
+Successfully built graft
+
+[notice] A new release of pip is available: 26.2.2 -> 26.3
+[notice] To update, run: /tmp/graft-t346-ii4pbdgh/venv/bin/python -m pip install --upgrade pip

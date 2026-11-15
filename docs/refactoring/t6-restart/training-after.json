@@ -1,0 +1,21 @@
+{
+  "command": [
+    "/tmp/graft-t6-restart-9y41oc2e/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t6-restart-9y41oc2e/training-after.xml",
+    "tests/test_libinvent_pair_file_contracts.py",
+    "tests/test_libinvent_vocabulary.py",
+    "tests/test_libinvent_hydrogen.py",
+    "tests/test_elite_scaffold_attachments.py",
+    "tests/test_iteration_scaffold.py",
+    "tests/test_glide_only.py",
+    "tests/test_reinvent_launcher.py"
+  ],
+  "exit_code": 0,
+  "seconds": 1.9672620575875044
+}

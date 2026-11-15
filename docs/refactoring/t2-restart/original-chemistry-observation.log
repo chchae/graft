@@ -1,0 +1,17 @@
+[11:07:46] SMILES Parse Error: syntax error while parsing: 
+[11:07:46] SMILES Parse Error: check for mistakes around position 1:
+[11:07:46] 
+[11:07:46] ^
+[11:07:46] SMILES Parse Error: Failed parsing SMILES ' ' for input: ' '
+[11:07:46] SMILES Parse Error: syntax error while parsing: not_smiles
+[11:07:46] SMILES Parse Error: check for mistakes around position 3:
+[11:07:46] not_smiles
+[11:07:46] ~~^
+[11:07:46] SMILES Parse Error: Failed parsing SMILES 'not_smiles' for input: 'not_smiles'
+[11:07:46] SMILES Parse Error: syntax error while parsing: not_smiles
+[11:07:46] SMILES Parse Error: check for mistakes around position 3:
+[11:07:46] not_smiles
+[11:07:46] ~~^
+[11:07:46] SMILES Parse Error: Failed parsing SMILES 'not_smiles' for input: 'not_smiles'
+Observed original core: /tmp/graft-t2-restart-5wdgrci4/before/src/graft/_core.py
+10 fingerprints; 19 similarity outcomes

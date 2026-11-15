@@ -1,5 +1,7 @@
 # T6 — Orchestration 경계 두 곳의 독립 추출
 
+2026-11-15 후속: [T6 재개 보고서](T6_RESTART_REPORT.md)의 C–F를 추가 적용했다. 아래 내용은 2026-11-14 초기 작업 기록이다.
+
 ## T6-A: Glide claim 정책
 
 `stages.glide._run_stage` 안의 그룹 claim/filter loop를 `_claim_reference_groups(db_path, groups)`로 그대로 추출했다. 순서가 있는 groups를 순회하고, 각 그룹마다 기존 database.claim_compounds를 같은 expected/claimed state로 호출한다. 빈 claim은 제외하고 원래 compound row/order를 그대로 유지한다.

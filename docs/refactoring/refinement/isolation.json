@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/tmp/graft-hardening-4aztmslk/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-hardening-4aztmslk/isolation.xml",
+    "tests/test_pytest_isolation.py",
+    "tests/test_submission_guard.py",
+    "tests/test_driver_logging.py",
+    "tests/test_workspace_remote_recovery.py"
+  ],
+  "exit_code": 4,
+  "seconds": 0.12468697037547827
+}

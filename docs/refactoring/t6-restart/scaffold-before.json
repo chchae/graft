@@ -1,0 +1,20 @@
+{
+  "command": [
+    "/tmp/graft-t6-restart-9y41oc2e/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t6-restart-9y41oc2e/scaffold-before.xml",
+    "tests/test_scaffold_publication_contracts.py",
+    "tests/test_iteration_scaffold.py",
+    "tests/test_combichem.py",
+    "tests/test_elite_scaffold_attachments.py",
+    "tests/test_scaffold_rings.py",
+    "tests/test_libinvent_scaffold_reduction.py"
+  ],
+  "exit_code": 0,
+  "seconds": 5.595449491403997
+}

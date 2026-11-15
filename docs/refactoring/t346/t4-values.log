@@ -1,0 +1,35 @@
+........................................................................ [ 18%]
+........................................................................ [ 37%]
+.................................................................F...... [ 56%]
+........................................................................ [ 75%]
+........................................................................ [ 94%]
+....................                                                     [100%]
+=================================== FAILURES ===================================
+__ test_real_probes_pass_but_actual_fragment_combination_collides_with_itself __
+
+inputs = (PosixPath('/tmp/graft-t346-ii4pbdgh/test-tmp/t4-values/pytest-of-chchae/pytest-0/test_real_probes_pass_but_actu0/toy/...c45e0>, {'schema': 'graft_pose_history_v1', 'iteration': 1, 'core_smarts': 'c1ccccc1', 'attachments': ['core:0'], ...})
+
+    def test_real_probes_pass_but_actual_fragment_combination_collides_with_itself(inputs):
+        _,cfg,mol,h = inputs
+        cfg['overlap-tolerance'] = 0.0  # deliberately strict model for this regression
+        checker = BumpChecker(load_receptor(cfg['receptor'],cfg),cfg)
+        sites = growth_sites(mol,h)
+        assert all(conformations.methyl_probe(mol,h,uid,checker,cfg,37)['status']==PoseVerdict.PASS for uid in sites)
+        product,ph = assemble(mol,h,sites,['*c1ccccc1']*2,'two-real-fragments')
+        result = conformations.search(product,ph,checker,cfg,37)
+>       assert result['status'] == PoseVerdict.CLASH_REJECT
+E       AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>
+E         
+E         - CLASH_REJECT
+E         + PASS
+
+tests/test_combichem_3d.py:346: AssertionError
+=============================== warnings summary ===============================
+tests/test_crem_pipeline.py: 207 warnings
+  /home1/conda/envs/graft/lib/python3.15/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=4057231) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_combichem_3d.py::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself
+1 failed, 379 passed, 207 warnings in 29.93s

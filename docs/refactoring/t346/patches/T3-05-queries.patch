@@ -1,0 +1,283 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -243,20 +243,8 @@
+ 
+ 
+ def find_iteration_for_state(stage: str, db_path: str | Path) -> int | None:
+-    conditions = {
+-        "ligprep": "iteration>0 AND state IN ('generated','ligprep_running')",
+-        "glide": "iteration>0 AND state IN ('ligprepped','glide_running') AND docking_score IS NULL",
+-        "prime_gbsa": "iteration>0 AND docking_score IS NOT NULL AND prime_gbsa_score IS NULL AND state IN ('docked','prime_gbsa_running')",
+-        "fep": "iteration>0 AND prime_gbsa_score IS NOT NULL AND fep_score IS NULL AND state IN ('prime_gbsa_done','fep_running')",
+-        "synthetic_feasibility": "iteration>0 AND synthetic_feasibility IS NULL AND state IN ('generated','synthetic_running')",
+-    }
+-    if stage not in conditions:
+-        raise ValueError(stage)
+-    with open_sqlite(db_path) as conn:
+-        row = conn.execute(
+-            f"SELECT MIN(iteration) FROM compound WHERE {conditions[stage]}"
+-        ).fetchone()
+-    return row[0] if row and row[0] is not None else None
++    from graft.database import find_iteration_for_state as _implementation
++    return _implementation(stage, db_path)
+ 
+ 
+ def _first_float_property(mol, names):
+@@ -539,28 +527,15 @@
+ 
+ 
+ def get_max_iteration(db_path: str | Path) -> int:
+-    with db_connect(db_path) as conn:
+-        with conn.cursor() as cur:
+-            cur.execute(
+-                "SELECT COALESCE(MAX(iteration), 0) FROM compound"
+-            )
+-            return cur.fetchone()[0]
++    from graft.database import get_max_iteration as _implementation
++    return _implementation(db_path)
+ 
+ 
+ def get_iteration_counts(
+     iteration: int, db_path: str | Path
+ ) -> tuple[int, int]:
+-    with db_connect(db_path) as conn:
+-        with conn.cursor() as cur:
+-            cur.execute(
+-                '''
+-                SELECT COUNT(*), COUNT(docking_score)
+-                FROM compound
+-                WHERE iteration = %s
+-                ''',
+-                (iteration,),
+-            )
+-            return cur.fetchone()
++    from graft.database import get_iteration_counts as _implementation
++    return _implementation(iteration, db_path)
+ 
+ 
+ def determine_start_iteration(db_path: str | Path) -> int:
+@@ -2539,18 +2514,8 @@
+ 
+ 
+ def get_existing_canonical_smiles(cur):
+-    cur.execute(
+-        "SELECT smiles FROM compound"
+-    )
+-
+-    existing = set()
+-
+-    for (smiles,) in cur:
+-        canonical = canonicalize_smiles(smiles)
+-        if canonical is not None:
+-            existing.add(canonical)
+-
+-    return existing
++    from graft.database import get_existing_canonical_smiles as _implementation
++    return _implementation(cur)
+ 
+ 
+ def insert_generated(csv_file, iteration, target_count, db_path, cpus=1):
+@@ -2605,26 +2570,8 @@
+ 
+ 
+ def get_reference_name(reference_id, db_path):
+-    with db_connect(db_path) as conn:
+-        with conn.cursor() as cur:
+-            cur.execute(
+-                '''
+-                SELECT name
+-                FROM compound
+-                WHERE id = %s
+-                  AND iteration = 0
+-                ''',
+-                (reference_id,),
+-            )
+-
+-            row = cur.fetchone()
+-
+-    if row is None:
+-        raise RuntimeError(
+-            f"Reference id={reference_id} not found."
+-        )
+-
+-    return row[0]
++    from graft.database import get_reference_name as _implementation
++    return _implementation(reference_id, db_path)
+ 
+ 
+ def create_reference_extractor(root_dir):
+@@ -4752,23 +4699,11 @@
+ 
+ 
+ def state_counts(iteration, db_path):
+-    with open_sqlite(db_path) as conn:
+-        return conn.execute(
+-            """
+-            SELECT state, COUNT(*)
+-            FROM compound
+-            WHERE iteration=?
+-            GROUP BY state
+-            ORDER BY state
+-            """,
+-            (iteration,),
+-        ).fetchall()
++    from graft.database import state_counts as _implementation
++    return _implementation(iteration, db_path)
+ 
+ 
+ 
+ def list_iteration_compounds(iteration, db_path, where="1=1"):
+-    with open_sqlite(db_path) as conn:
+-        return conn.execute(
+-            f"SELECT id,name,smiles,similar_to,similarity FROM compound WHERE iteration=? AND {where} ORDER BY id",
+-            (iteration,),
+-        ).fetchall()
++    from graft.database import list_iteration_compounds as _implementation
++    return _implementation(iteration, db_path, where)
+--- a/src/graft/database.py
++++ b/src/graft/database.py
+@@ -4273,3 +4273,124 @@
+         )
+         conn.commit()
+ 
++
++
++def find_iteration_for_state(stage: str, db_path: str | Path) -> int | None:
++    conditions = {
++        "ligprep": "iteration>0 AND state IN ('generated','ligprep_running')",
++        "glide": "iteration>0 AND state IN ('ligprepped','glide_running') AND docking_score IS NULL",
++        "prime_gbsa": "iteration>0 AND docking_score IS NOT NULL AND prime_gbsa_score IS NULL AND state IN ('docked','prime_gbsa_running')",
++        "fep": "iteration>0 AND prime_gbsa_score IS NOT NULL AND fep_score IS NULL AND state IN ('prime_gbsa_done','fep_running')",
++        "synthetic_feasibility": "iteration>0 AND synthetic_feasibility IS NULL AND state IN ('generated','synthetic_running')",
++    }
++    if stage not in conditions:
++        raise ValueError(stage)
++    with _core.open_sqlite(db_path) as conn:
++        row = conn.execute(
++            f"SELECT MIN(iteration) FROM compound WHERE {conditions[stage]}"
++        ).fetchone()
++    return row[0] if row and row[0] is not None else None
++
++
++
++def get_max_iteration(db_path: str | Path) -> int:
++    with _core.db_connect(db_path) as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                "SELECT COALESCE(MAX(iteration), 0) FROM compound"
++            )
++            return cur.fetchone()[0]
++
++
++
++def get_iteration_counts(
++    iteration: int, db_path: str | Path
++) -> tuple[int, int]:
++    with _core.db_connect(db_path) as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                '''
++                SELECT COUNT(*), COUNT(docking_score)
++                FROM compound
++                WHERE iteration = %s
++                ''',
++                (iteration,),
++            )
++            return cur.fetchone()
++
++
++
++def get_existing_canonical_smiles(cur):
++    cur.execute(
++        "SELECT smiles FROM compound"
++    )
++
++    existing = set()
++
++    for (smiles,) in cur:
++        canonical = _core.canonicalize_smiles(smiles)
++        if canonical is not None:
++            existing.add(canonical)
++
++    return existing
++
++
++
++def get_reference_name(reference_id, db_path):
++    with _core.db_connect(db_path) as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                '''
++                SELECT name
++                FROM compound
++                WHERE id = %s
++                  AND iteration = 0
++                ''',
++                (reference_id,),
++            )
++
++            row = cur.fetchone()
++
++    if row is None:
++        raise RuntimeError(
++            f"Reference id={reference_id} not found."
++        )
++
++    return row[0]
++
++
++
++def state_counts(iteration, db_path):
++    with _core.open_sqlite(db_path) as conn:
++        return conn.execute(
++            """
++            SELECT state, COUNT(*)
++            FROM compound
++            WHERE iteration=?
++            GROUP BY state
++            ORDER BY state
++            """,
++            (iteration,),
++        ).fetchall()
++
++
++
++def list_iteration_compounds(iteration, db_path, where="1=1"):
++    with _core.open_sqlite(db_path) as conn:
++        return conn.execute(
++            f"SELECT id,name,smiles,similar_to,similarity FROM compound WHERE iteration=? AND {where} ORDER BY id",
++            (iteration,),
++        ).fetchall()
++
++
++
++def latest_compound_iteration(conn) -> int | None:
++    """Read the latest compound iteration in the caller's connection context."""
++    return conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0]
++
++
++def generated_iterations(conn) -> list[int]:
++    """Read positive compound iterations without changing connection ownership."""
++    return [row[0] for row in conn.execute(
++        "SELECT DISTINCT iteration FROM compound WHERE iteration>0 ORDER BY iteration"
++    )]
+--- a/src/graft/driver.py
++++ b/src/graft/driver.py
+@@ -202,15 +202,13 @@
+     if pending_crem is not None:
+         return pending_crem
+     with database.connect(args.db_path) as conn:
+-        latest_retry = conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0]
++        latest_retry = database.latest_compound_iteration(conn)
+     retry_stages = ('prime_gbsa','md_gbsa') if getattr(args,'prime_gbsa_enabled',True) else ('md_gbsa',)
+     if latest_retry is not None and any(database.score_retry_requests(args.db_path, latest_retry, stage)
+                                        for stage in retry_stages):
+         return latest_retry
+     with database.connect(args.db_path) as conn:
+-        iterations = [row[0] for row in conn.execute(
+-            "SELECT DISTINCT iteration FROM compound WHERE iteration>0 ORDER BY iteration"
+-        )]
++        iterations = database.generated_iterations(conn)
+     iterations = sorted(set(iterations) | set(database.crem_iterations(args.db_path)))
+     for iteration in iterations:
+         if (database.md_gbsa_selection(args.db_path,iteration) is not None and

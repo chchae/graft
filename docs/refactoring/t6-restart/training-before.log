@@ -1,0 +1,7 @@
+........................................................................ [ 42%]
+........................................................................ [ 85%]
+.................sssssss                                                 [100%]
+=========================== short test summary info ============================
+SKIPPED [6] tests/test_reinvent_launcher.py:10: could not import 'torch': No module named 'torch'
+SKIPPED [1] tests/test_reinvent_launcher.py:36: could not import 'torch': No module named 'torch'
+161 passed, 7 skipped in 1.79s

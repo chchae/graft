@@ -1,0 +1,55 @@
+--- a/src/graft/md_gbsa.py
++++ b/src/graft/md_gbsa.py
+@@ -264,6 +264,27 @@
+     return True
+ 
+ 
++def _freeze_new_md_selection(args, iteration: int, prime_enabled: bool):
++    """Prepare/check new native inputs before the existing atomic selection claim."""
++    from graft.attraction_point import prepare as prepare_priority
++    prepare_priority(args, iteration, 'md_gbsa')
++    ranking = database.md_gbsa_candidates(args.db_path, iteration,
++                count=getattr(args, 'md_gbsa_input_count', None),
++                ratio=getattr(args, 'md_gbsa_input_ratio', .5), prime_enabled=prime_enabled)
++    proposed=settings_for(args,iteration,ranking)
++    # Read-only compatibility check precedes SQLite claims and job launch.
++    ssh(proposed['ssh_host'],'mkdir -p '+shlex.quote(proposed['root']))
++    upload(proposed['ssh_host'],Path(__file__).with_name('md_gbsa_native.py'),proposed['helper'])
++    response(remote_call(proposed,'check',proposed['root'],'--ids',json.dumps(proposed)))
++    if proposed.get('local_compute'):
++        from graft import md_gbsa_local
++        md_gbsa_local.prepare(proposed)
++    return database.freeze_md_gbsa_selection(args.db_path,iteration,proposed,
++                count=args.md_gbsa_input_count,ratio=args.md_gbsa_input_ratio,
++                target_count=args.target_count,prime_count=args.prime_gbsa_input_count,
++                amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
++
++
+ def run(args, iteration):
+     saved=database.md_gbsa_selection(args.db_path,iteration)
+     if saved is not None and saved['settings'].get('reference_score_cache'):
+@@ -284,23 +305,7 @@
+                     amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
+         if reason:
+             print(reason); return
+-        from graft.attraction_point import prepare as prepare_priority
+-        prepare_priority(args, iteration, 'md_gbsa')
+-        ranking = database.md_gbsa_candidates(args.db_path, iteration,
+-                    count=getattr(args, 'md_gbsa_input_count', None),
+-                    ratio=getattr(args, 'md_gbsa_input_ratio', .5), prime_enabled=prime_enabled)
+-        proposed=settings_for(args,iteration,ranking)
+-        # Read-only compatibility check precedes SQLite claims and job launch.
+-        ssh(proposed['ssh_host'],'mkdir -p '+shlex.quote(proposed['root']))
+-        upload(proposed['ssh_host'],Path(__file__).with_name('md_gbsa_native.py'),proposed['helper'])
+-        response(remote_call(proposed,'check',proposed['root'],'--ids',json.dumps(proposed)))
+-        if proposed.get('local_compute'):
+-            from graft import md_gbsa_local
+-            md_gbsa_local.prepare(proposed)
+-        saved=database.freeze_md_gbsa_selection(args.db_path,iteration,proposed,
+-                    count=args.md_gbsa_input_count,ratio=args.md_gbsa_input_ratio,
+-                    target_count=args.target_count,prime_count=args.prime_gbsa_input_count,
+-                    amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
++        saved = _freeze_new_md_selection(args, iteration, prime_enabled)
+     settings=saved['settings']
+     directory=stage_directory(args.output,iteration,'md_gbsa')
+     if settings.get('local_compute'):

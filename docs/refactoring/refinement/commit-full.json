@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/tmp/graft-hardening-4aztmslk/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-hardening-4aztmslk/commit-full.xml"
+  ],
+  "exit_code": 0,
+  "seconds": 119.96693213935941,
+  "git_tree": "01ddad11a5a4ab55d27f3db62e59c47b4e313949"
+}

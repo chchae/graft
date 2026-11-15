@@ -1,0 +1,42 @@
+{
+  "ast_proof": {
+    "core_original_ast_reconstructed": true,
+    "md_original_ast_reconstructed": true,
+    "scaffold_original_ast_reconstructed": true
+  },
+  "changed_runtime": [
+    "src/graft/_core.py",
+    "src/graft/chemistry/scaffold.py",
+    "src/graft/md_gbsa.py"
+  ],
+  "protected_source_files": 40,
+  "protected_hashes_unchanged": true,
+  "existing_top_level_signatures_unchanged": true,
+  "other_top_level_functions_unchanged": 97,
+  "checks": [
+    {
+      "check": "compileall",
+      "exit_code": 0
+    },
+    {
+      "check": "imports",
+      "exit_code": 0
+    },
+    {
+      "check": "graft CLI help bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.driver CLI help bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.prime_gbsa CLI help bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.md_gbsa CLI help bytes",
+      "unchanged": true
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/t6-recovery.xml",
+    "tests/test_orchestration_followup_contracts.py",
+    "tests/test_prime_orchestration_contracts.py",
+    "tests/test_prime_gbsa_async.py",
+    "tests/test_prime_gbsa_launch_recovery.py",
+    "tests/test_reference_prime_gbsa.py",
+    "tests/test_prime_gbsa_batch.py",
+    "tests/test_prime_gbsa_queue.py",
+    "tests/test_docking_prime_gbsa.py"
+  ],
+  "exit_code": 0,
+  "seconds": 1.9326494932174683
+}

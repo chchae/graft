@@ -1,0 +1,20 @@
+Obtaining file:///tmp/graft-t346-ii4pbdgh/project
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: graft
+  Building editable for graft (pyproject.toml): started
+  Building editable for graft (pyproject.toml): finished with status 'done'
+  Created wheel for graft: filename=graft-0.1.0-0.editable-py3-none-any.whl size=21130 sha256=679fd880d0ca3047a3b1685d4621634cb483de6e106bbfa5eaad0a12381fb25d
+  Stored in directory: /tmp/pip-ephem-wheel-cache-ggzefgi1/wheels/0e/de/a2/a86ad17fe8eea806913e833fb5e0cc957265ec4f7382d93f81
+Successfully built graft
+Installing collected packages: graft
+  Attempting uninstall: graft
+    Found existing installation: graft 0.1.0
+    Not uninstalling graft at /home1/conda/envs/graft/lib/python3.15/site-packages, outside environment /tmp/graft-t346-ii4pbdgh/venv
+    Can't uninstall 'graft'. No files were found to uninstall.
+Successfully installed graft-0.1.0
+
+[notice] A new release of pip is available: 26.2.2 -> 26.3
+[notice] To update, run: /tmp/graft-t346-ii4pbdgh/venv/bin/python -m pip install --upgrade pip

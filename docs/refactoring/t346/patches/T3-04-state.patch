@@ -1,0 +1,62 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -238,23 +238,8 @@
+     db_path: str | Path | None = None,
+ ) -> None:
+     """Set the single pipeline state for a list of compound IDs."""
+-    ids = list(ids)
+-    if not ids:
+-        return
+-    if db_path is None:
+-        raise ValueError("db_path is required to update compound states")
+-    marks = ",".join("?" for _ in ids)
+-    with open_sqlite(db_path) as conn:
+-        conn.execute(
+-            f"""
+-            UPDATE compound
+-            SET state=?, failed_stage=?, failure_message=?,
+-                modified_at=CURRENT_TIMESTAMP
+-            WHERE id IN ({marks})
+-            """,
+-            [state, failed_stage, failure_message, *ids],
+-        )
+-        conn.commit()
++    from graft.database import set_compound_state as _implementation
++    return _implementation(ids, state, failed_stage, failure_message, db_path)
+ 
+ 
+ def find_iteration_for_state(stage: str, db_path: str | Path) -> int | None:
+--- a/src/graft/database.py
++++ b/src/graft/database.py
+@@ -4245,3 +4245,31 @@
+     )
+     conn.commit()
+ 
++
++
++def set_compound_state(
++    ids: Iterable[int],
++    state: str,
++    failed_stage: str | None = None,
++    failure_message: str | None = None,
++    db_path: str | Path | None = None,
++) -> None:
++    """Set the single pipeline state for a list of compound IDs."""
++    ids = list(ids)
++    if not ids:
++        return
++    if db_path is None:
++        raise ValueError("db_path is required to update compound states")
++    marks = ",".join("?" for _ in ids)
++    with _core.open_sqlite(db_path) as conn:
++        conn.execute(
++            f"""
++            UPDATE compound
++            SET state=?, failed_stage=?, failure_message=?,
++                modified_at=CURRENT_TIMESTAMP
++            WHERE id IN ({marks})
++            """,
++            [state, failed_stage, failure_message, *ids],
++        )
++        conn.commit()
++

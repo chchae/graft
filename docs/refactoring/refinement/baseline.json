@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/tmp/graft-hardening-4aztmslk/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-hardening-4aztmslk/baseline.xml"
+  ],
+  "exit_code": 1,
+  "seconds": 85.9191841557622
+}

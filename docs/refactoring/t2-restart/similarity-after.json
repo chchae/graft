@@ -1,0 +1,20 @@
+{
+  "command": [
+    "/tmp/graft-t2-restart-5wdgrci4/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-restart-5wdgrci4/similarity-after.xml",
+    "tests/test_fingerprint_binding_contracts.py",
+    "tests/test_chemistry_fingerprint_leaf.py",
+    "tests/test_chemistry_contracts.py",
+    "tests/test_crem_parent_pose.py",
+    "tests/test_score_diversity.py",
+    "tests/test_synthetic_feasibility.py"
+  ],
+  "exit_code": 0,
+  "seconds": 1.0794157003983855
+}

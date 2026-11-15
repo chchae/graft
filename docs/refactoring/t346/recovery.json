@@ -1,0 +1,43 @@
+{
+  "original_root": "/homes1/chchae/work/GRAFT/graft",
+  "archive": "/homes1/chchae/work/GRAFT/graft/.git/refactoring-backups/graft-t346-ii4pbdgh/source-before.tar.gz",
+  "archive_sha256": "444ec576d4257e0340f555ce7df4dbf191587d960ad87ee6b27470816b1682be",
+  "files": {
+    "src/graft/_core.py": {
+      "before": "f51d51d045fc5bb27656f78c94ea58eba1b0be7b7541c430b500d1c1a947e705",
+      "after": "674095f74209f07d8201ba56311d777d434d45ef64b8a2a0a87169390d147a2a"
+    },
+    "src/graft/chemistry/scaffold.py": {
+      "before": "f391252d2e42c7f2cc01471b81441154f007837f875c577ab67b7fe6847febe1",
+      "after": "5fd50ff129d78f42c2ef6f609ad7033092eeeaf54cfa95aa715a4fa23658acac"
+    },
+    "src/graft/cli.py": {
+      "before": "bb69ac48a9a3ee61558a5bdcb07ea8b9641c7d7cc80dd963bd1ac813fbfb5e34",
+      "after": "5e10505fa4cb54b6b99d188c65a43bb22354d571431ca6a23dd44fc401858c0c"
+    },
+    "src/graft/config.py": {
+      "before": "9e4e975011bc618bc19baca6b93e9df6b40598d383bd6e6c0d44f72df86c178f",
+      "after": "e2105b5752e718462649d29167d54183d3bfbece2342be0e705662db60bcd2ad"
+    },
+    "src/graft/database.py": {
+      "before": "68d80c4f1cfb3f9d3f290a094ad1374d42720c5a4cca14cfcc65f54ded7db767",
+      "after": "d03c3e09842c47a525ab57ab19ea6c8e021907e048c4cbd9d86a93a128a1b197"
+    },
+    "src/graft/driver.py": {
+      "before": "cbedbef553025c84460582a1986e0258deaddeb6035d8b3e110b6c7596139e73",
+      "after": "83383b578aa829762f0b268efd4d72bff8efe4b501ff7bc78b4efcc2d9320948"
+    },
+    "src/graft/md_gbsa.py": {
+      "before": "dd9b0d428276d966e10af36444dfff43e6c057fc39401916ceaf4daa78128ffc",
+      "after": "a12099066936075b4dfc613a7ba99dd6360da1c51abea1756a1de3dc9761d0b8"
+    },
+    "src/graft/stages/glide.py": {
+      "before": "30ee691c84ce9f91c3e7478a26606a4a0fe11ed86c1c391321fa4c570ba317f9",
+      "after": "f284c730335b94efb053baa199852343e35f51c0dff6f5e86ddda89d150ca095"
+    }
+  },
+  "new_unused_after_restore": [
+    "src/graft/project.py"
+  ],
+  "operational_data_included": false
+}

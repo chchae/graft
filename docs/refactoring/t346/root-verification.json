@@ -1,0 +1,14 @@
+{
+  "root": "/homes1/chchae/work/GRAFT/graft",
+  "compileall_exit_code": 0,
+  "package_imports_exit_code": 0,
+  "imported_graft": "/homes1/chchae/work/GRAFT/graft/src/graft/__init__.py",
+  "tracked_diff_whitespace_exit_code": 0,
+  "restore_dry_run": {
+    "applied": false,
+    "checked_files": 8
+  },
+  "runtime_and_tests_byte_identical": true,
+  "production_db_manifest_or_native_results_modified": false,
+  "git_commit_or_push_performed": false
+}

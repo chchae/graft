@@ -1,0 +1,59 @@
+--- a/src/graft/config.py
++++ b/src/graft/config.py
+@@ -7,6 +7,29 @@
+ 
+ from graft.paths import stage_directory
+ import tomllib
++
++
++def _merge_combichem_project_keys(raw, section, base_output: Path):
++    """Apply existing shared-key aliases and section overrides in their order."""
++    aliases = {'receptor':('dock-grid','receptor','prime-gbsa-receptor','amber-receptor'),
++               'parents':('reference-pose','parents','parent-pose','parent-poses'),
++               'reference-smiles':('reference-smiles',), 'history':('history','parent-history')}
++    # Section values override shared keys, without invoking legacy project
++    # initialization or changing its live database/selections.
++    merged = {key:raw[key] for key in ('sidechain-library','max-iteration','target-count','reference-mcs') if key in raw}
++    for target,keys in aliases.items():
++        for key in keys:
++            if key in raw:
++                merged[target]=raw[key]
++                break
++    if 'receptor' not in merged:
++        merged['receptor']=str(stage_directory(base_output,0,'prime_gbsa')/'receptor.maegz')
++    if 'parents' not in merged:
++        parent_root = stage_directory(base_output,1,'glide')
++        merged['parents']=str(parent_root/('best_poses.sdf' if (parent_root/'best_poses.sdf').is_file() else 'best_poses.maegz'))
++    merged['out-dir']=str(base_output/'combichem-3d')
++    merged.update(section)
++    return merged
+ 
+ 
+ def combichem_3d_settings(filename):
+@@ -27,25 +50,7 @@
+         if not project or Path(project).name!=project:
+             raise ValueError('Invalid project name')
+         inherited = dict(raw)
+-        aliases = {'receptor':('dock-grid','receptor','prime-gbsa-receptor','amber-receptor'),
+-                   'parents':('reference-pose','parents','parent-pose','parent-poses'),
+-                   'reference-smiles':('reference-smiles',), 'history':('history','parent-history')}
+-        # Section values override shared keys, without invoking legacy project
+-        # initialization or changing its live database/selections.
+-        merged = {key:raw[key] for key in ('sidechain-library','max-iteration','target-count','reference-mcs') if key in raw}
+-        for target,keys in aliases.items():
+-            for key in keys:
+-                if key in raw:
+-                    merged[target]=raw[key]
+-                    break
+-        if 'receptor' not in merged:
+-            merged['receptor']=str(stage_directory(base_output,0,'prime_gbsa')/'receptor.maegz')
+-        if 'parents' not in merged:
+-            parent_root = stage_directory(base_output,1,'glide')
+-            merged['parents']=str(parent_root/('best_poses.sdf' if (parent_root/'best_poses.sdf').is_file() else 'best_poses.maegz'))
+-        merged['out-dir']=str(base_output/'combichem-3d')
+-        merged.update(section)
+-        raw = merged
++        raw = _merge_combichem_project_keys(raw, section, base_output)
+     defaults = {
+         'max-iteration': 1, 'sidechains-per-site': 10, 'conformers': 8,
+         'sidechain-min-heavy-atoms': 5, 'sidechain-max-heavy-atoms': 10,

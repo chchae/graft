@@ -1,0 +1,343 @@
+--- /dev/null
++++ b/tests/test_database_boundary_contracts.py
+@@ -0,0 +1,142 @@
++"""SQLite connection ownership, explicit commits and legacy patch boundaries."""
++from contextlib import closing
++import sqlite3
++
++import pytest
++
++from graft import _core, database
++
++
++def test_native_connection_context_commits_and_rolls_back_without_closing(tmp_path):
++    conn=_core.open_sqlite(tmp_path/'ctx.sqlite')
++    try:
++        assert type(conn) is sqlite3.Connection
++        assert conn.execute('PRAGMA journal_mode').fetchone()==('wal',)
++        assert conn.execute('PRAGMA busy_timeout').fetchone()==(30000,)
++        assert conn.execute('PRAGMA foreign_keys').fetchone()==(1,)
++        conn.execute('CREATE TABLE sample(value)')
++        with conn:conn.execute('INSERT INTO sample VALUES (1)')
++        with pytest.raises(RuntimeError):
++            with conn:
++                conn.execute('INSERT INTO sample VALUES (2)')
++                raise RuntimeError('rollback')
++        assert conn.execute('SELECT * FROM sample').fetchall()==[(1,)]
++    finally:conn.close()
++
++
++def test_legacy_connection_and_cursor_contexts_translate_and_close(tmp_path):
++    wrapper=_core.db_connect(tmp_path/'adapter.sqlite')
++    with wrapper as conn:
++        with conn.cursor() as cursor:
++            cursor.execute('CREATE TABLE sample(value,stamp)')
++            assert cursor.execute('INSERT INTO sample VALUES (%s,now())',(7,)) is cursor
++            assert cursor.rowcount==1
++        with pytest.raises(sqlite3.ProgrammingError):cursor.fetchone()
++    with pytest.raises(sqlite3.ProgrammingError):wrapper._conn.execute('SELECT 1')
++    with closing(sqlite3.connect(tmp_path/'adapter.sqlite')) as conn:
++        assert conn.execute('SELECT value,stamp IS NOT NULL FROM sample').fetchall()==[(7,1)]
++
++
++def test_schema_upgrade_explicitly_commits_the_callers_pending_transaction(tmp_path):
++    with closing(sqlite3.connect(tmp_path/'upgrade.sqlite')) as conn:
++        _core.create_sqlite_schema(conn);conn.commit()
++        conn.execute("INSERT INTO compound(name,smiles,iteration,state) VALUES ('pending','CC',1,'failed')")
++        assert conn.in_transaction
++        assert _core.ensure_schema_columns(conn) is None
++        assert not conn.in_transaction
++        conn.rollback()
++        assert conn.execute('SELECT name,state FROM compound').fetchall()==[('pending','failed')]
++
++
++def test_schema_helper_imports_keep_capture_and_later_lookup_order(monkeypatch):
++    events=[]
++    def old_ownership(conn):events.append('original-ownership')
++    def changed_ownership(conn):events.append('changed-ownership')
++    def md(conn):events.append('current-md')
++    def descriptor(conn):
++        events.append('descriptors')
++        monkeypatch.setattr(database,'ensure_druglike_selection_ownership',changed_ownership)
++        monkeypatch.setattr(database,'ensure_md_gbsa_schema',md)
++    monkeypatch.setattr(database,'ensure_rdkit_descriptor_columns',descriptor)
++    monkeypatch.setattr(database,'ensure_druglike_selection_ownership',old_ownership)
++    with closing(sqlite3.connect(':memory:')) as conn:_core.create_sqlite_schema(conn)
++    assert events==['descriptors','original-ownership','current-md']
++
++
++@pytest.mark.parametrize('empty',[[],()])
++def test_empty_state_updates_do_not_require_path_or_open_connection(monkeypatch,empty):
++    monkeypatch.setattr(_core,'open_sqlite',lambda *a:pytest.fail('Empty update opened a DB'))
++    assert _core.set_compound_state(iter(empty),'failed') is None
++    with pytest.raises(ValueError,match='db_path is required'):_core.set_compound_state([1],'failed')
++
++
++@pytest.mark.parametrize('fail',[False,True])
++def test_state_update_preserves_core_connection_patch_and_commit_order(tmp_path,monkeypatch,fail):
++    path=tmp_path/'state.sqlite'
++    conn=sqlite3.connect(path)
++    try:
++        _core.create_sqlite_schema(conn)
++        conn.executemany("INSERT INTO compound(id,name,smiles,iteration,state) VALUES (?,?,'CC',1,'docked')",[(1,'one'),(2,'two')]);conn.commit()
++        events=[];failure=RuntimeError('update unavailable')
++        class Probe:
++            def __enter__(self):events.append('enter');conn.__enter__();return self
++            def __exit__(self,*args):events.append(('exit',args[0]));return conn.__exit__(*args)
++            def execute(self,sql,params):
++                events.append(('execute',params))
++                if fail:raise failure
++                return conn.execute(sql,params)
++            def commit(self):events.append('commit');conn.commit()
++        def opening(given):assert given is path;events.append('open');return Probe()
++        monkeypatch.setattr(_core,'open_sqlite',opening)
++        if fail:
++            with pytest.raises(RuntimeError) as caught:_core.set_compound_state(iter([2,2]),'failed','glide','diagnostic',path)
++            assert caught.value is failure
++        else:assert _core.set_compound_state(iter([2,2]),'failed','glide','diagnostic',path) is None
++        assert events==['open','enter',('execute',['failed','glide','diagnostic',2,2])]+([] if fail else ['commit'])+[('exit',RuntimeError if fail else None)]
++        assert conn.execute('SELECT id,state,failed_stage,failure_message FROM compound ORDER BY id').fetchall()==[(1,'docked',None,None),(2,'docked' if fail else 'failed',None if fail else 'glide',None if fail else 'diagnostic')]
++    finally:conn.close()
++
++
++def test_database_connect_uses_the_current_core_connection_binding(tmp_path,monkeypatch):
++    marker=object();calls=[]
++    monkeypatch.setattr(_core,'open_sqlite',lambda path:calls.append(path) or marker)
++    assert database.connect(str(tmp_path/'db.sqlite')) is marker
++    assert calls==[tmp_path/'db.sqlite']
++
++
++def test_legacy_small_queries_preserve_rows_scores_and_canonicalizer_patch(tmp_path,monkeypatch):
++    path=tmp_path/'queries.sqlite'
++    with closing(sqlite3.connect(path)) as conn,conn:
++        _core.create_sqlite_schema(conn)
++        conn.executemany("INSERT INTO compound(id,name,smiles,iteration,state,docking_score,similar_to,similarity) VALUES (?,?,?,?,?,?,?,?)",[
++            (1,'REF','OCC',0,'reference',None,None,None),
++            (2,'A','CCN',7,'docked',-8.,1,.25),
++            (3,'B','not_smiles',7,'ligprep_running',None,None,None),
++            (4,'C','OCC',8,'generated',None,None,None)])
++    assert _core.get_max_iteration(path)==8
++    assert _core.get_iteration_counts(7,path)==(2,1)
++    assert sorted(_core.state_counts(7,path))==[('docked',1),('ligprep_running',1)]
++    assert _core.list_iteration_compounds(7,path)==[(2,'A','CCN',1,.25),(3,'B','not_smiles',None,None)]
++    assert _core.list_iteration_compounds(7,path,"state='docked'")==[(2,'A','CCN',1,.25)]
++    assert _core.get_reference_name(1,path)=='REF'
++    with pytest.raises(RuntimeError,match='Reference id=2 not found'):_core.get_reference_name(2,path)
++    original=_core.canonicalize_smiles;seen=[]
++    monkeypatch.setattr(_core,'canonicalize_smiles',lambda smiles:seen.append(smiles) or original(smiles))
++    with _core.db_connect(path) as conn:
++        with conn.cursor() as cursor:
++            assert _core.get_existing_canonical_smiles(cursor)=={'CCO','CCN'}
++            assert cursor.execute('SELECT 1').fetchone()==(1,)
++    assert sorted(seen)==['CCN','OCC','OCC','not_smiles']
++
++
++def test_empty_legacy_queries_and_unknown_stage_do_not_add_new_io(tmp_path,monkeypatch):
++    path=tmp_path/'empty.sqlite'
++    with closing(sqlite3.connect(path)) as conn:_core.create_sqlite_schema(conn)
++    assert _core.get_max_iteration(path)==0
++    assert _core.get_iteration_counts(9,path)==(0,0)
++    assert _core.state_counts(9,path)==[]
++    assert _core.list_iteration_compounds(9,path)==[]
++    assert _core.find_iteration_for_state('glide',path) is None
++    monkeypatch.setattr(_core,'open_sqlite',lambda *a:pytest.fail('Unknown stage accessed SQLite'))
++    with pytest.raises(ValueError) as caught:_core.find_iteration_for_state('unknown',path)
++    assert caught.value.args==('unknown',)
+--- /dev/null
++++ b/tests/test_project_boundary_contracts.py
+@@ -0,0 +1,98 @@
++"""Project startup order and pure-loader compatibility before ownership changes."""
++from pathlib import Path
++
++import pytest
++
++from graft import _core, config, database, reference_scores
++from graft.stages import _logging
++from test_refactoring_contracts import PROJECT_TOML
++
++
++def test_loader_preserves_both_keyword_names_and_no_initialization(tmp_path):
++    path=tmp_path/'project.toml';path.write_text(PROJECT_TOML)
++    assert _core.load_project_toml(filename=path)==config.load_project_toml(path=path)
++    assert list(tmp_path.iterdir())==[path]
++
++
++def test_loader_retains_multi_import_callback_capture_order(tmp_path,monkeypatch):
++    path=tmp_path/'project.toml';path.write_text(PROJECT_TOML);events=[]
++    def original(raw):events.append('original-aizynth');return None
++    def changed(raw):events.append('changed-aizynth');return None
++    def reinvent(raw):
++        events.append('reinvent')
++        monkeypatch.setattr(config,'remote_aizynth_settings',changed)
++        return None
++    monkeypatch.setattr(config,'remote_aizynth_settings',original)
++    monkeypatch.setattr(config,'remote_reinvent_settings',reinvent)
++    _core.load_project_toml(path)
++    assert events==['reinvent','original-aizynth']
++
++
++@pytest.mark.parametrize('phase',[None,'migrate','initialize','restore','open','enter','ensure','exit','mkdir'])
++def test_project_bootstrap_preserves_dynamic_core_hooks_order_and_errors(tmp_path,monkeypatch,phase):
++    path=tmp_path/'project.toml';path.write_text(PROJECT_TOML)
++    cfg=_core.load_project_toml(path);events=[];failure=RuntimeError('startup boundary failure')
++    def point(name):
++        events.append(name)
++        if phase==name:raise failure
++    monkeypatch.setattr(_core,'load_project_toml',lambda value:events.append('load') or dict(cfg))
++    monkeypatch.setattr(_logging,'set_log_level',lambda value:events.append('level'))
++    connection=object()
++    def ensure(conn):assert conn is connection;point('ensure')
++    class Context:
++        def __enter__(self):point('enter');return connection
++        def __exit__(self,*args):point('exit');return False
++    def opening(db):assert db==cfg['db_path'];point('open');return Context()
++    def restore(args):
++        point('restore')
++        monkeypatch.setattr(_core,'open_sqlite',opening)
++        monkeypatch.setattr(_core,'ensure_schema_columns',ensure)
++    def initialize(**kwargs):
++        point('initialize')
++        assert kwargs==dict(db_path=cfg['db_path'],reference_poses=cfg['reference_poses'],schrodinger=tmp_path/'suite',sa_score_cpus=cfg['sa_score_cpus'])
++        return True
++    def migrate(old,new):
++        point('migrate')
++        assert old==tmp_path/'project.sqlite' and new==cfg['db_path']
++        monkeypatch.setattr(_core,'initialize_project_database',initialize)
++    def unexpected(*args,**kwargs):pytest.fail('An outdated startup hook was captured')
++    monkeypatch.setattr(database,'migrate_project_database',migrate)
++    monkeypatch.setattr(_core,'initialize_project_database',unexpected)
++    monkeypatch.setattr(_core,'open_sqlite',unexpected)
++    monkeypatch.setattr(_core,'ensure_schema_columns',unexpected)
++    monkeypatch.setattr(reference_scores,'restore',restore)
++    mkdir=Path.mkdir
++    def creating(directory,*args,**kwargs):
++        if directory==cfg['output']:point('mkdir')
++        return mkdir(directory,*args,**kwargs)
++    monkeypatch.setattr(Path,'mkdir',creating)
++    sequence=['load','level','migrate','initialize','restore','open','enter','ensure','exit','mkdir']
++    if phase:
++        with pytest.raises(RuntimeError) as caught:_core.configure_project(path,tmp_path/'suite')
++        assert caught.value is failure
++        expected=sequence[:sequence.index(phase)+1]
++        if phase=='ensure':expected+=['exit']
++        assert events==expected
++    else:
++        args=_core.configure_project(path,tmp_path/'suite')
++        assert args.db_path==cfg['db_path'] and args.output.is_dir()
++        assert events==sequence
++    assert not cfg['db_path'].exists()
++
++
++def test_config_import_is_independent_of_core_and_workflow_io():
++    import subprocess,sys
++    code="""
++import sqlite3,subprocess,sys
++
++def forbidden(*args,**kwargs):
++    raise AssertionError('Config import initialized workflow I/O')
++
++sqlite3.connect=forbidden
++subprocess.run=forbidden
++subprocess.Popen=forbidden
++import graft.config
++assert 'graft._core' not in sys.modules
++assert 'graft.database' not in sys.modules
++"""
++    subprocess.run([sys.executable,'-c',code],check=True,capture_output=True,text=True)
+--- /dev/null
++++ b/tests/test_orchestration_followup_contracts.py
+@@ -0,0 +1,94 @@
++"""Dependency capture and check-before-freeze contracts for the T6 follow-up."""
++from types import SimpleNamespace
++import json
++
++import pytest
++
++from graft import _core, database, md_gbsa, md_gbsa_local, prime_gbsa_async, remote_cleanup
++from graft import attraction_point, libinvent_vocabulary
++from graft.chemistry import libinvent_decorations
++from test_prime_orchestration_contracts import prime_case
++
++
++@pytest.mark.parametrize('ready',[False,True])
++def test_saved_prime_dependencies_are_bound_before_job_file_loading(prime_case,monkeypatch,ready):
++    case=prime_case();active={'command':['/suite/prime'],'compound_ids':[1,2],'job_id':'kept'}
++    job=case.directory/'prime_job.json';job.write_text('durable job')
++    events=[]
++    def submit(*args,**kwargs):events.append('bound-submit');return ready
++    def failures(*args):events.append('bound-failures')
++    def job_file(folder):events.append('bound-job-file');return job
++    def forbidden(*a,**kw):pytest.fail('Saved-job dependencies were looked up after load')
++    def load(folder):
++        events.append('load')
++        for name in ('submit_or_poll','persist_atomtyping_failures','job_file'):monkeypatch.setattr(prime_gbsa_async,name,forbidden)
++        return active
++    monkeypatch.setattr(prime_gbsa_async,'submit_or_poll',submit)
++    monkeypatch.setattr(prime_gbsa_async,'persist_atomtyping_failures',failures)
++    monkeypatch.setattr(prime_gbsa_async,'job_file',job_file)
++    monkeypatch.setattr(prime_gbsa_async,'load_job',load)
++    monkeypatch.setattr(_core,'finish_iteration_prime_gbsa',lambda *a:events.append('finish') or 7)
++    assert case.run()==(7 if ready else None)
++    assert events==['load','bound-submit']+(['finish','bound-failures','bound-job-file'] if ready else [])
++    assert job.exists() is not ready
++
++
++def test_training_dependencies_are_captured_before_prior_vocabulary_loading(tmp_path,monkeypatch):
++    events=[]
++    def forbidden(*a,**kw):pytest.fail('Vocabulary check was rebound during prior loading')
++    def original(*args):events.append('original-tokens');return []
++    def prior(*args):
++        events.append('prior')
++        monkeypatch.setattr(libinvent_vocabulary,'unsupported_pair_tokens',forbidden)
++        return {'unchanged':'vocabulary'}
++    def decompose(*args):events.append('decompose');return ('C[*]','*N')
++    monkeypatch.setattr(libinvent_vocabulary,'load_prior_vocabulary',prior)
++    monkeypatch.setattr(libinvent_vocabulary,'unsupported_pair_tokens',original)
++    monkeypatch.setattr(libinvent_decorations,'decompose',decompose)
++    rows=[(i,'elite'+str(i),'CCO',1,-10.,-40.) for i in (1,2)]
++    _,train,valid,count=_core.write_elite_libinvent_training_files(rows,'C[*]',tmp_path,prior_file='/original.prior')
++    assert count==2 and train.read_bytes()==valid.read_bytes()==b'C[*]\t*N\n'
++    assert events==['prior','decompose','original-tokens','decompose','original-tokens']
++    assert json.loads((tmp_path/'elite_vocabulary.json').read_text())=={'unchanged':'vocabulary'}
++
++
++@pytest.mark.parametrize('stop_at,local',[(x,False) for x in ('priority','rank','settings','mkdir','upload','check','freeze','after-freeze')]+[('after-freeze',True)])
++def test_md_remote_compatibility_and_local_preparation_precede_freeze(tmp_path,monkeypatch,stop_at,local):
++    args=SimpleNamespace(db_path=tmp_path/'unused.sqlite',output=tmp_path,md_gbsa_enabled=True,
++        target_count=4,prime_gbsa_input_count=4,md_gbsa_input_count=2,md_gbsa_input_ratio=.5)
++    events=[];failure=RuntimeError('boundary stop')
++    settings={'ssh_host':'remote','root':'/remote/run','helper':'/remote/run/native.py'}
++    if local:settings['local_compute']={'enabled':True}
++    def point(name):
++        events.append(name)
++        if name==stop_at:raise failure
++    monkeypatch.setattr(database,'md_gbsa_selection',lambda *a:None)
++    monkeypatch.setattr(md_gbsa,'_md_upstream_ready',lambda *a:True)
++    monkeypatch.setattr(database,'md_gbsa_readiness_reason',lambda *a,**kw:None)
++    monkeypatch.setattr(attraction_point,'prepare',lambda *a:point('priority'))
++    def rank(*a,**kw):point('rank');assert kw==dict(count=2,ratio=.5,prime_enabled=True);return {'ids':[1,2],'ranking_source':'prime_gbsa'}
++    monkeypatch.setattr(database,'md_gbsa_candidates',rank)
++    monkeypatch.setattr(md_gbsa,'settings_for',lambda *a:point('settings') or settings)
++    def mkdir(host,command):assert host=='remote' and command=='mkdir -p /remote/run';point('mkdir')
++    monkeypatch.setattr(md_gbsa,'ssh',mkdir)
++    def upload(host,source,destination):assert source.name=='md_gbsa_native.py' and destination==settings['helper'];point('upload')
++    monkeypatch.setattr(md_gbsa,'upload',upload)
++    def check(given,action,root,*extra):
++        assert given is settings and action=='check' and root==settings['root']
++        assert extra==('--ids',json.dumps(settings));point('check');return 'GRAFT_MD={"status":"compatible"}'
++    monkeypatch.setattr(md_gbsa,'remote_call',check)
++    monkeypatch.setattr(md_gbsa_local,'prepare',lambda given:point('local-prepare'))
++    def freeze(path,iteration,given,**kw):
++        point('freeze');assert given is settings
++        assert kw==dict(count=2,ratio=.5,target_count=4,prime_count=4,amber_keep_count=None,prime_enabled=True)
++        return {'ids':[1,2],'settings':settings}
++    monkeypatch.setattr(database,'freeze_md_gbsa_selection',freeze)
++    monkeypatch.setattr(md_gbsa_local,'cleanup_committed',lambda *a:point('local-cleanup'))
++    monkeypatch.setattr(remote_cleanup,'md',lambda *a:point('remote-cleanup'))
++    monkeypatch.setattr(remote_cleanup,'md_run',lambda *a:point('run-cleanup'))
++    monkeypatch.setattr(database,'enable_md_cycle_retries',lambda *a:point('after-freeze'))
++    sequence=['priority','rank','settings','mkdir','upload','check']+(['local-prepare'] if local else [])+['freeze']+(['local-cleanup'] if local else [])+['remote-cleanup','run-cleanup','after-freeze']
++    with pytest.raises(RuntimeError) as caught:md_gbsa.run(args,1)
++    assert caught.value is failure
++    assert events==sequence[:sequence.index(stop_at)+1]
++    assert not args.db_path.exists()

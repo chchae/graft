@@ -1,0 +1,17 @@
+{
+  "unchanged_test_and_native_helper": true,
+  "probes": [
+    {
+      "source": "/tmp/graft-t346-ii4pbdgh/before",
+      "reproduced": "ProcessLookupError",
+      "message": "[Errno 3] No such process",
+      "native_process_launched": false
+    },
+    {
+      "source": "/tmp/graft-t346-ii4pbdgh/project",
+      "reproduced": "ProcessLookupError",
+      "message": "[Errno 3] No such process",
+      "native_process_launched": false
+    }
+  ]
+}

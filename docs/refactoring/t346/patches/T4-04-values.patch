@@ -1,0 +1,131 @@
+--- a/src/graft/config.py
++++ b/src/graft/config.py
+@@ -30,6 +30,65 @@
+     merged['out-dir']=str(base_output/'combichem-3d')
+     merged.update(section)
+     return merged
++
++
++def _validate_combichem_values(cfg) -> None:
++    """Validate numeric/filter values at the existing point before backend checks."""
++    positive_ints = ('max-iteration', 'sidechains-per-site', 'conformers', 'optimization-iterations',
++                     'minimum-valid-poses', 'target-count', 'processes', 'batch-size', 'result-buffer-size', 'embed-timeout', 'inferred-parent-iteration',
++                     'sidechain-min-heavy-atoms', 'sidechain-max-heavy-atoms','elite-count','next-attachment-count','mcs-timeout')
++    for key in (*positive_ints, 'torsion-trials', 'seed', 'maximum-receptor-clashes', 'maximum-internal-clashes', 'log-structures'):
++        value = cfg[key]
++        if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key in positive_ints else 0):
++            raise ValueError(f'{key} must be an integer >= {1 if key in positive_ints else 0}')
++    for key,minimum in (('crem-radius',1),('crem-min-freq',0)):
++        value=cfg[key]
++        if isinstance(value,bool) or not isinstance(value,int) or value<minimum:
++            raise ValueError(f'{key} must be an integer >= {minimum}')
++    if (cfg['execution-backend']!='slurm' and cfg['processes'] > 384) or cfg['seed'] > 2147483646:
++        raise ValueError('processes must be <=384 and seed <=2147483646')
++    for key in ('core-displacement', 'overlap-tolerance', 'one-four-scale', 'restraint-force', 'receptor-repulsion-strength', 'max-seconds', 'grace-seconds', 'log-interval', 'result-buffer-seconds'):
++        value = cfg[key]
++        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
++            raise ValueError(f'{key} must be a finite nonnegative number')
++    if cfg['max-seconds'] <= 0 or cfg['restraint-force'] <= 0 or not 0 < cfg['one-four-scale'] <= 1:
++        raise ValueError('max-seconds/restraint-force must be positive and one-four-scale in (0,1]')
++    if cfg['result-buffer-size'] > 256 or cfg['result-buffer-seconds'] <= 0:
++        raise ValueError('result-buffer-size must be 1..256 and result-buffer-seconds must be positive')
++    if cfg['log-interval'] <= 0 or cfg['log-level'] not in ('INFO','DEBUG','TRACE'):
++        raise ValueError('log-interval must be positive and log-level must be INFO, DEBUG or TRACE')
++    if cfg['log-structures']>20:
++        raise ValueError('log-structures must be between 0 and 20')
++    if cfg['next-attachment-count']>4:
++        raise ValueError('next-attachment-count must be <=4')
++    if cfg['elite-rank-by'] not in (None,'qed','similarity'):
++        raise ValueError('elite-rank-by must be qed or similarity; external ranking requires an explicit imported-score protocol')
++    if cfg['attachment-distance']!='bonds':
++        raise ValueError('attachment-distance must be bonds (minimum shortest-path distance to previous attachment atoms)')
++    if cfg['sidechain-min-heavy-atoms']>cfg['sidechain-max-heavy-atoms']:
++        raise ValueError('sidechain-min-heavy-atoms must not exceed sidechain-max-heavy-atoms')
++    for key in ('include-water', 'include-cofactors', 'include-hydrogens', 'prune-intermediates', 'infer-history', 'sidechain-include-h'):
++        if not isinstance(cfg[key], bool):
++            raise ValueError(f'{key} must be a boolean')
++    for key, allowed in {'one-four-policy': ('exclude', 'include', 'scaled'),
++                         'growth-mode': ('frame-cycles','frontier','fixed-frame'),
++                         'sidechain-selection': ('random','ordered'),
++                         'force-field': ('auto', 'MMFF', 'UFF'),
++                         'core-constraint': ('fixed', 'restraint'), 'stop-mode': ('target', 'time','cycles')}.items():
++        if cfg[key] not in allowed:
++            raise ValueError(f'{key} must be one of {allowed}')
++    properties = {'mw', 'clogp', 'tpsa', 'qed', 'similarity', 'hbd', 'hba', 'rotatable_bonds', 'heavy_atoms'}
++    if not isinstance(cfg['filters'], dict) or set(cfg['filters']) - properties:
++        raise ValueError('filters must contain only supported property ranges')
++    for key, limits in cfg['filters'].items():
++        if (not isinstance(limits, list) or len(limits) != 2
++                or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in limits)
++                or limits[0] > limits[1]):
++            raise ValueError(f'filters.{key} must be [finite minimum, finite maximum]')
++    if not isinstance(cfg['site-candidates'], dict) or any(
++            not isinstance(v, list) or not v or any(not isinstance(x, str) for x in v)
++            for v in cfg['site-candidates'].values()):
++        raise ValueError('site-candidates must map atom UIDs to nonempty fragment SMILES lists')
+ 
+ 
+ def combichem_3d_settings(filename):
+@@ -169,61 +228,7 @@
+             extra = '; add [combichem-3d].history with explicit UID/core/fragment provenance' if key=='history' else ''
+             raise ValueError(f'{key} must be a nonempty local path{extra}')
+         cfg[key] = str((path.parent / Path(value).expanduser()).resolve())
+-    positive_ints = ('max-iteration', 'sidechains-per-site', 'conformers', 'optimization-iterations',
+-                     'minimum-valid-poses', 'target-count', 'processes', 'batch-size', 'result-buffer-size', 'embed-timeout', 'inferred-parent-iteration',
+-                     'sidechain-min-heavy-atoms', 'sidechain-max-heavy-atoms','elite-count','next-attachment-count','mcs-timeout')
+-    for key in (*positive_ints, 'torsion-trials', 'seed', 'maximum-receptor-clashes', 'maximum-internal-clashes', 'log-structures'):
+-        value = cfg[key]
+-        if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key in positive_ints else 0):
+-            raise ValueError(f'{key} must be an integer >= {1 if key in positive_ints else 0}')
+-    for key,minimum in (('crem-radius',1),('crem-min-freq',0)):
+-        value=cfg[key]
+-        if isinstance(value,bool) or not isinstance(value,int) or value<minimum:
+-            raise ValueError(f'{key} must be an integer >= {minimum}')
+-    if (cfg['execution-backend']!='slurm' and cfg['processes'] > 384) or cfg['seed'] > 2147483646:
+-        raise ValueError('processes must be <=384 and seed <=2147483646')
+-    for key in ('core-displacement', 'overlap-tolerance', 'one-four-scale', 'restraint-force', 'receptor-repulsion-strength', 'max-seconds', 'grace-seconds', 'log-interval', 'result-buffer-seconds'):
+-        value = cfg[key]
+-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+-            raise ValueError(f'{key} must be a finite nonnegative number')
+-    if cfg['max-seconds'] <= 0 or cfg['restraint-force'] <= 0 or not 0 < cfg['one-four-scale'] <= 1:
+-        raise ValueError('max-seconds/restraint-force must be positive and one-four-scale in (0,1]')
+-    if cfg['result-buffer-size'] > 256 or cfg['result-buffer-seconds'] <= 0:
+-        raise ValueError('result-buffer-size must be 1..256 and result-buffer-seconds must be positive')
+-    if cfg['log-interval'] <= 0 or cfg['log-level'] not in ('INFO','DEBUG','TRACE'):
+-        raise ValueError('log-interval must be positive and log-level must be INFO, DEBUG or TRACE')
+-    if cfg['log-structures']>20:
+-        raise ValueError('log-structures must be between 0 and 20')
+-    if cfg['next-attachment-count']>4:
+-        raise ValueError('next-attachment-count must be <=4')
+-    if cfg['elite-rank-by'] not in (None,'qed','similarity'):
+-        raise ValueError('elite-rank-by must be qed or similarity; external ranking requires an explicit imported-score protocol')
+-    if cfg['attachment-distance']!='bonds':
+-        raise ValueError('attachment-distance must be bonds (minimum shortest-path distance to previous attachment atoms)')
+-    if cfg['sidechain-min-heavy-atoms']>cfg['sidechain-max-heavy-atoms']:
+-        raise ValueError('sidechain-min-heavy-atoms must not exceed sidechain-max-heavy-atoms')
+-    for key in ('include-water', 'include-cofactors', 'include-hydrogens', 'prune-intermediates', 'infer-history', 'sidechain-include-h'):
+-        if not isinstance(cfg[key], bool):
+-            raise ValueError(f'{key} must be a boolean')
+-    for key, allowed in {'one-four-policy': ('exclude', 'include', 'scaled'),
+-                         'growth-mode': ('frame-cycles','frontier','fixed-frame'),
+-                         'sidechain-selection': ('random','ordered'),
+-                         'force-field': ('auto', 'MMFF', 'UFF'),
+-                         'core-constraint': ('fixed', 'restraint'), 'stop-mode': ('target', 'time','cycles')}.items():
+-        if cfg[key] not in allowed:
+-            raise ValueError(f'{key} must be one of {allowed}')
+-    properties = {'mw', 'clogp', 'tpsa', 'qed', 'similarity', 'hbd', 'hba', 'rotatable_bonds', 'heavy_atoms'}
+-    if not isinstance(cfg['filters'], dict) or set(cfg['filters']) - properties:
+-        raise ValueError('filters must contain only supported property ranges')
+-    for key, limits in cfg['filters'].items():
+-        if (not isinstance(limits, list) or len(limits) != 2
+-                or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in limits)
+-                or limits[0] > limits[1]):
+-            raise ValueError(f'filters.{key} must be [finite minimum, finite maximum]')
+-    if not isinstance(cfg['site-candidates'], dict) or any(
+-            not isinstance(v, list) or not v or any(not isinstance(x, str) for x in v)
+-            for v in cfg['site-candidates'].values()):
+-        raise ValueError('site-candidates must map atom UIDs to nonempty fragment SMILES lists')
++    _validate_combichem_values(cfg)
+     host = cfg['execution-host']
+     script = cfg['remote-env-script']
+     if host is not None or cfg['execution-backend']=='slurm':

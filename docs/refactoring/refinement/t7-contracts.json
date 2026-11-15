@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/tmp/graft-hardening-4aztmslk/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-hardening-4aztmslk/t7-contracts.xml",
+    "tests/test_backend_selection_contracts.py",
+    "tests/test_combichem_remote.py",
+    "tests/test_combichem_slurm.py",
+    "tests/test_combichem_writer.py",
+    "tests/test_workspace_remote_recovery.py"
+  ],
+  "exit_code": 0,
+  "seconds": 1.7723943274468184
+}

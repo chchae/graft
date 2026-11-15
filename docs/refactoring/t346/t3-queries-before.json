@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/t3-queries-before.xml",
+    "tests/test_database_boundary_contracts.py",
+    "tests/test_database.py",
+    "tests/test_refactoring_contracts.py",
+    "tests/test_sequential_driver.py"
+  ],
+  "exit_code": 1,
+  "seconds": 1.2765531223267317
+}

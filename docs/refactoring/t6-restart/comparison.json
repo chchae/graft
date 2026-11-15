@@ -1,0 +1,367 @@
+{
+  "prime-after": {
+    "before_count": 267,
+    "after_count": 267,
+    "outcomes": {
+      "passed": 267
+    },
+    "changed": {},
+    "added": {},
+    "failures": {}
+  },
+  "md-after": {
+    "before_count": 258,
+    "after_count": 258,
+    "outcomes": {
+      "passed": 258
+    },
+    "changed": {},
+    "added": {},
+    "failures": {}
+  },
+  "training-after": {
+    "before_count": 168,
+    "after_count": 168,
+    "outcomes": {
+      "passed": 161,
+      "skipped": 7
+    },
+    "changed": {},
+    "added": {},
+    "failures": {}
+  },
+  "scaffold-after": {
+    "before_count": 216,
+    "after_count": 216,
+    "outcomes": {
+      "passed": 216
+    },
+    "changed": {},
+    "added": {},
+    "failures": {}
+  },
+  "final-full": {
+    "before_count": 2728,
+    "after_count": 2787,
+    "outcomes": {
+      "passed": 2777,
+      "failure": 3,
+      "skipped": 7
+    },
+    "changed": {},
+    "added": {
+      "tests/test_libinvent_pair_file_contracts.py::test_training_pair_bytes_seeded_split_metadata_and_input_order[5]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_training_pair_bytes_seeded_split_metadata_and_input_order[6]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_invalid_pair_keeps_existing_partial_write_and_error_order[pair0-Unsupported bare '*' token in LibInvent TL scaffold: C*-train]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_invalid_pair_keeps_existing_partial_write_and_error_order[pair0-Unsupported bare '*' token in LibInvent TL scaffold: C*-validation]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_invalid_pair_keeps_existing_partial_write_and_error_order[pair1-Unsupported '[*]' token in LibInvent TL decorators: [*]N-train]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_invalid_pair_keeps_existing_partial_write_and_error_order[pair1-Unsupported '[*]' token in LibInvent TL decorators: [*]N-validation]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_pair_file_open_error_propagates_after_metadata_and_preserves_old_target[elite_train.smi]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_pair_file_open_error_propagates_after_metadata_and_preserves_old_target[elite_valid.smi]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_too_few_usable_pairs_does_not_rewrite_existing_train_or_validation[0]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_libinvent_pair_file_contracts.py::test_too_few_usable_pairs_does_not_rewrite_existing_train_or_validation[1]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[saved-prime]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[native:ligprep]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[native:glide]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[native:amber-gbsa]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[native:prime_gbsa]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:generate]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:druglike]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:synthetic_feasibility]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:ligprep]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:glide]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:amber_gbsa]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:prime_gbsa]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_blockers_stop_before_later_native_worker_and_claim_checks[worker:fep]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_reaches_database_readiness_only_after_all_external_and_worker_gates": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_upstream_query_exceptions_propagate_before_selection_or_native_actions[saved-prime]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_upstream_query_exceptions_propagate_before_selection_or_native_actions[native:glide]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_md_upstream_query_exceptions_propagate_before_selection_or_native_actions[worker:amber_gbsa]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_md_upstream_contracts.py::test_disabled_md_without_saved_selection_skips_upstream_inspection": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[False-copy-0]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[False-copy-1]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[False-inplace-0]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[False-inplace-1]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[False-grid-0]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[False-grid-1]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[True-copy-0]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[True-copy-1]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[True-inplace-0]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[True-inplace-1]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[True-grid-0]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_new_prime_input_bytes_identity_and_event_order[True-grid-1]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_prime_preparation_failure_stops_before_later_side_effects[retire]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_prime_preparation_failure_stops_before_later_side_effects[extract-receptor]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_prime_preparation_failure_stops_before_later_side_effects[build-pv]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_prime_preparation_failure_stops_before_later_side_effects[submit-native]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_missing_custom_receptor_preserves_old_results_and_partial_input_files": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_missing_poses_skips_before_cleanup_or_directory_creation": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_saved_prime_modes_bypass_all_new_input_preparation[adam_prime_batch_v1-local-poll_batch]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_saved_prime_modes_bypass_all_new_input_preparation[compound_queue_v1-queue-poll_queue]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_saved_prime_modes_bypass_all_new_input_preparation[native_batch_v1-native-poll_batch]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_legacy_prime_retains_job_until_result_publication[False]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_prime_orchestration_contracts.py::test_legacy_prime_retains_job_until_result_publication[True]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_saved_scaffold_publication_bytes_and_namespace_update_order[False]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_saved_scaffold_publication_bytes_and_namespace_update_order[True]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_saved_scaffold_validation_errors_do_not_publish_or_change_namespace[saved_mcs-Invalid saved MCS/scaffold.]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_saved_scaffold_validation_errors_do_not_publish_or_change_namespace[docking_mcs-Iteration 3: invalid docking constraint.]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_saved_scaffold_validation_errors_do_not_publish_or_change_namespace[containment-Iteration 3: generation scaffold does not contain the fixed docking core.]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_saved_scaffold_validation_errors_do_not_publish_or_change_namespace[references-message3]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_saved_scaffold_validation_errors_do_not_publish_or_change_namespace[attachments-REINVENT4 generation requires exactly two scaffold attachments]": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      },
+      "tests/test_scaffold_publication_contracts.py::test_scaffold_publish_failure_preserves_prior_order_and_namespace": {
+        "status": "passed",
+        "message": "",
+        "body": ""
+      }
+    },
+    "failures": {
+      "tests/test_combichem_3d.py::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself": {
+        "status": "failure",
+        "message": "AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>\n  \n  - CLASH_REJECT\n  + PASS",
+        "body": "    def test_real_probes_pass_but_actual_fragment_combination_collides_with_itself(inputs):\n        _,cfg,mol,h = inputs\n        cfg['overlap-tolerance'] = 0.0  # deliberately strict model for this regression\n        checker = BumpChecker(load_receptor(cfg['receptor'],cfg),cfg)\n        sites = growth_sites(mol,h)\n        assert all(conformations.methyl_probe(mol,h,uid,checker,cfg,37)['status']==PoseVerdict.PASS for uid in sites)\n        product,ph = assemble(mol,h,sites,['*c1ccccc1']*2,'two-real-fragments')\n        result = conformations.search(product,ph,checker,cfg,37)\n>       assert result['status'] == PoseVerdict.CLASH_REJECT\nE       AssertionError: assert <PoseVerdict.PASS: 'PASS'> == <PoseVerdict....CLASH_REJECT'>\nE         \nE         - CLASH_REJECT\nE         + PASS\n\ntests/test_combichem_3d.py:346: AssertionError"
+      },
+      "tests/test_md_progress_summary.py::test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error[0]": {
+        "status": "failure",
+        "message": "AssertionError: assert 'md-gbsa pending:' in ''",
+        "body": "    def test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error(project, monkeypatch, capsys, rc):\n        args, _, _ = project\n        monkeypatch.setattr(driver, 'stream_process', lambda *a: rc)\n        assert not driver.supervise_iteration(args, args.output/'project.toml', 1,\n            [('md-gbsa', 'graft.stages.md_gbsa')], 30, driver.StopFlag(), once=True)\n        line = capsys.readouterr().out\n>       assert 'md-gbsa pending:' in line\nE       AssertionError: assert 'md-gbsa pending:' in ''\n\ntests/test_md_progress_summary.py:102: AssertionError"
+      },
+      "tests/test_sequential_driver.py::test_pending_log_uses_persisted_iteration_stage_elapsed[md-gbsa-MD-GBSA still pending for compound 624598]": {
+        "status": "failure",
+        "message": "AssertionError: assert 'iteration 60: md-gbsa pending: MD-GBSA still pending for compound 624598; elapsed=00:10:00.0 (including waiting, polling and restart recovery); current_time=2026-11-10 14:15:03 KST.' in ''\n +  where '' = CaptureResult(out='', err='').out\n +    where CaptureResult(out='', err='') = readouterr()\n +      where readouterr = <_pytest.capture.CaptureFixture object at <ADDR>>.readouterr",
+        "body": "    def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatch, capsys, stage, reason):\n        args = project(tmp_path, State.DOCKED, iteration=60)\n        monkeypatch.setattr(driver, 'current_time', lambda: '2026-11-10 14:15:03 KST')\n        args.md_gbsa_enabled = True\n        monkeypatch.setattr(database.time, 'time', lambda: 100.)\n        database.start_stage_timer(args.db_path, 60, stage)\n        monkeypatch.setattr(database.time, 'time', lambda: 700.)\n        monkeypatch.setattr(driver, 'stream_process', lambda *a: 0)\n        monkeypatch.setattr(database, 'stage_completion_reason',\n                            lambda *a: reason)\n        assert not driver.supervise_iteration(\n            args, tmp_path/'p.toml', 60, [(stage, f'graft.stages.{stage.replace(\"-\", \"_\")}')],\n            30, driver.StopFlag(), once=True,\n        )\n        expected = ('iteration 60: amber-gbsa pending: 493 compounds still running; '\n                    'elapsed=00:10:00.0; current_time=2026-11-10 14:15:03 KST.' if stage == 'amber-gbsa' else\n                    f'iteration 60: {stage} pending: {reason}; '\n                    'elapsed=00:10:00.0 (including waiting, polling and restart recovery); '\n                    'current_time=2026-11-10 14:15:03 KST.')\n>       assert expected in capsys.readouterr().out\nE       AssertionError: assert 'iteration 60: md-gbsa pending: MD-GBSA still pending for compound 624598; elapsed=00:10:00.0 (including waiting, polling and restart recovery); current_time=2026-11-10 14:15:03 KST.' in ''\nE        +  where '' = CaptureResult(out='', err='').out\nE        +    where CaptureResult(out='', err='') = readouterr()\nE        +      where readouterr = <_pytest.capture.CaptureFixture object at <ADDR>>.readouterr\n\ntests/test_sequential_driver.py:114: AssertionError"
+      }
+    }
+  }
+}

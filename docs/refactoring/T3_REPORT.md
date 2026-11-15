@@ -1,5 +1,7 @@
 # T3 — 작은 DB 조회의 소유권 분리, 배포 보류
 
+> 2026-11-15 후속 적용: [T3_COMPLETION_REPORT.md](T3_COMPLETION_REPORT.md)가 현재 상태다. 아래 본문은 당시 실행·보류 상태의 기록으로 보존한다.
+
 ## 목적·변경 파일·실제 구현
 
 **격리 검증 후보만 구현했고 운영 source에는 적용하지 않았다.** `database.status_rows(conn)`가 CLI status의 기존 두 SELECT를 그대로 소유하도록 옮겼다. `cli._status`는 기존 `_core.configure_project`와 `_core.open_sqlite` context 안에서 helper를 호출하고 기존 출력 코드를 그대로 실행한다.

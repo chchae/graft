@@ -1,0 +1,48 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -4043,16 +4043,11 @@
+ 
+ 
+ 
+-def run_iteration_prime_gbsa(
+-    iteration,
+-    args,
+-    iteration_dir,
+-    glide_dir,
+-    compound_ids=None,
++def _recover_prime_gbsa_work(
++    iteration, args, prime_gbsa_dir, active, *,
++    submit_or_poll, job_file, persist_atomtyping_failures,
+ ):
+-    from graft.prime_gbsa_async import load_job, submit_or_poll, job_file, persist_atomtyping_failures
+-    prime_gbsa_dir = stage_in_iteration(iteration_dir, 'prime_gbsa')
+-    active = load_job(prime_gbsa_dir)
++    """Recover saved work using dependencies captured before loading its record."""
+     if active is not None and active.get('mode')=='adam_prime_batch_v1':
+         from graft.prime_gbsa_local import poll_batch
+         return poll_batch(iteration,args,prime_gbsa_dir,active)
+@@ -4082,6 +4077,24 @@
+         job_file(prime_gbsa_dir).unlink()
+         return updated
+ 
++
++def run_iteration_prime_gbsa(
++    iteration,
++    args,
++    iteration_dir,
++    glide_dir,
++    compound_ids=None,
++):
++    from graft.prime_gbsa_async import load_job, submit_or_poll, job_file, persist_atomtyping_failures
++    prime_gbsa_dir = stage_in_iteration(iteration_dir, 'prime_gbsa')
++    active = load_job(prime_gbsa_dir)
++    if active is not None:
++        return _recover_prime_gbsa_work(
++            iteration, args, prime_gbsa_dir, active,
++            submit_or_poll=submit_or_poll, job_file=job_file,
++            persist_atomtyping_failures=persist_atomtyping_failures,
++        )
++
+     from graft.prime_gbsa_batch import other_submission
+     if other_submission(args, prime_gbsa_dir) is not None:
+         # Do not reserve a second batch: a waiting native manifest would also

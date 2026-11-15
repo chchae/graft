@@ -1,5 +1,9 @@
 # T9 — 자율 리팩토링 최종 검증 및 적용 결과
 
+> 최신 후속 보완·push 기준은 [PROGRESS](PROGRESS.md)와 [REFINEMENT_REPORT](REFINEMENT_REPORT.md)다. 아래는 당시 결과를 보존한 기록이다.
+
+> 2026-11-15 후속 적용: [T346_FINAL_REPORT.md](T346_FINAL_REPORT.md)가 현재 상태다. 아래 본문은 당시 실행·보류 상태의 기록으로 보존한다.
+
 작성일: 2026-11-14 (KST). 기준: 사용자 승인 범위 T2-B–T9 및 시작 시점의 미커밋/미추적 작업 트리. 기존 사용자 변경은 git HEAD로 되돌리지 않았다.
 
 ## 1. 결과와 단계별 판단

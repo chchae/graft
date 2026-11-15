@@ -1,6 +1,13 @@
 # Architecture
 
-This describes the current implementation after the applied T2–T8 changes. It
+Latest verification: 2,882 passed / zero failed / seven skipped. The formerly known
+three failures were repaired in separate authorized test-only work; runtime source
+was unchanged. See [current progress](refactoring/PROGRESS.md) and
+[refinement report](refactoring/REFINEMENT_REPORT.md).
+
+This describes the current worktree after the applied T2–T8 changes and the
+2026-11-15 T6/T2 and T3/T4/T6 follow-ups. See the [latest applied report](refactoring/T346_FINAL_REPORT.md). See [T6](refactoring/T6_RESTART_REPORT.md) and
+[T2](refactoring/T2_RESTART_REPORT.md) for the applied scope and retained compatibility bindings. It
 adds no scientific requirements. [SPEC](SPEC.md) remains authoritative, including
 its evidence/uncertainty labels and unresolved historical scheduling ambiguity.
 [The final refactoring report](refactoring/T9_FINAL_REPORT.md) distinguishes applied
@@ -46,13 +53,17 @@ is insufficient to decide progression.
 
 | Area | Current responsibility |
 |---|---|
-| cli.py / driver.py | CLI compatibility, project/iteration supervision, authoritative completion checks; driver._report_pending_stage owns existing poll diagnostics only |
-| stages/ | Stage orchestration and native submission/recovery. Glide._claim_reference_groups owns the unchanged per-group claim/filter loop |
-| database.py | Most SQL, migrations, atomic claims, frozen selection and result persistence. Some legacy primitives/queries remain in _core and orchestration |
-| config.py | Setting validators/defaults/aliases/path/backend settings; public loader/configure functions still delegate to _core in the applied tree |
-| _core.py | Compatibility APIs and remaining validated prototype implementation, including project initialization, DB primitives, FP_GENERATOR and legacy runners |
+| cli.py / driver.py | CLI compatibility, project/iteration supervision, authoritative completion checks; driver._report_pending_stage owns poll diagnostics; _report_completed_stage owns verified-completion reporting |
+| stages/ | Stage orchestration and native submission/recovery. Glide._claim_reference_groups owns claim/filter; _recover_reference_groups reconciles saved native groups before unchanged submission/collection |
+| database.py | SQL connection/schema/state primitives and small legacy queries, migrations, atomic claims, frozen selections and results. Some business SQL/legacy adapters remain in core |
+| config.py | TOML loader and existing validators/defaults/aliases/path/backend settings; fresh import is independent of core. configure facade imports core only on invocation |
+| _core.py | Compatibility APIs (DB and TOML forwarding), configure namespace/log setup, FP_GENERATOR and remaining validated prototype/legacy runners |
+| project.py | Migration/reference/cache/schema/output initialization, invoked by core.configure at the existing point |
+| md_gbsa.py | Independent MD worker; _md_upstream_ready isolates gates, _freeze_new_md_selection owns check-before-freeze input preparation; saved-job polling and persistence unchanged |
+| chemistry/scaffold.py | _create_iteration_scaffold owns new snapshot construction; _validated_docking_smarts validates attachments/core before SQLite and file publication |
 | chemistry/smiles.py | Canonical isomeric SMILES implementation with the existing input guard and RDKit exception behavior |
-| chemistry/similarity.py | Existing Tanimoto helper; dynamically reads _core.FP_GENERATOR |
+| chemistry/fingerprints.py | Fresh Morgan factory and pure Tanimoto implementation; only RDKit/stdlib/caller-provided fingerprint callable |
+| chemistry/similarity.py | Existing Tanimoto facade; resolves the current _core.FP_GENERATOR for each fingerprint call |
 | _job_record.py | Shared default-JSON/.tmp/replace publication used only by the three package-local Prime/LigPrep/Glide wrappers |
 | native/remote helpers | Existing separately deployed protocols, checksums and calculations; their implementation/persistence policies remain separate |
 
@@ -60,17 +71,28 @@ Applied dependency changes are deliberately limited:
 
 ```text
 existing callers → _core.canonicalize_smiles → chemistry.smiles → rdkit.Chem
+_core.FP_GENERATOR initialization → chemistry.fingerprints.create_morgan_generator
+similarity.tanimoto facade → chemistry.fingerprints.tanimoto_with_fingerprint
 Prime._save / LigPrep._save / Glide.save_record → _job_record → stdlib
 
-database → _core (existing canonicalizer/connection/state primitives)
-_core → database (existing deferred imports)
-config → _core (existing loader/initialization facades)
+_core DB facades → database (implementation owner, deferred imports)
+database → _core (legacy dynamic connection/adapter/canonicalizer hooks)
+_core.load_project_toml → config.load_project_toml → existing config helpers
+_core.configure_project → project.initialize_project → database/core hooks
+config.configure_project → _core (deferred compatibility facade)
 ```
+
+Prime new-batch file preparation is isolated in _core._prepare_prime_gbsa_input_files;
+LibInvent pair writing is isolated in _core._write_libinvent_training_pairs. Existing
+record recovery is separated in _recover_prime_gbsa_work, training row preparation in _elite_training_rows; token-error/partial-file behavior and scientific selection stay unchanged.
 
 The compatibility wrapper keeps the old function path/signature and database's
 dynamic lookup. FP_GENERATOR remains the same module-level shared object with
-Morgan radius 2 / 2048 bits; similarity's lookup and fingerprint settings do not
-change. The new chemistry leaf imports independently of workflow initialization.
+Morgan radius 2 / 2048 bits; similarity's per-molecule lookup and fingerprint settings do not
+change. The factory now owns configuration in chemistry.fingerprints, while core
+constructs the compatibility binding at the original import/reload point. The pure
+Tanimoto API accepts an explicit fingerprint callable; it and the SMILES leaf import
+independently of workflow initialization.
 The existing core/database logical cycle remains; deferred imports currently
 avoid an initialization error. This work does not claim to eliminate that cycle.
 
@@ -97,43 +119,40 @@ fsync or swallow exceptions. Amber's indented/newline/.pending format and fsynci
 Slurm/native policies remain distinct. Failed publication retains the old record
 and its existing temporary-file behavior; no new crash-durability guarantee is made.
 
-## Source fingerprints and deployment-held candidates
+## Source fingerprints and deployment
 
-Source SHA256 is part of restart compatibility. CReM/standalone growth hash their
-combichem3d chemistry/stage sources; Slurm additionally hashes combichem*.py,
-config.py, database.py and amber_slurm_control.py. Remote dispatch also records
-adapter/helper digests; native helpers have separate implementation guards.
-A trivial source change can invalidate saved work. Fingerprint guards, allowlists,
-manifests and stored DB/checksum values have not been altered.
+Source SHA256 is part of restart compatibility. CReM/standalone growth hash
+combichem3d/stage sources; Slurm also hashes combichem*.py, config.py,
+database.py and amber_slurm_control.py. Remote/native helper guards remain
+separate. This follow-up **changes config/database source hashes**. The other
+38 inspected protected source files, native payloads, checks and allowlists are
+unchanged. Existing unfinished Slurm work may reject the new installation.
 
-The following candidates were implemented and tested only in an isolated tree:
+The user authorized the current program to stop during this deployment. This does
+not permit data loss, resetting jobs, rewriting manifests or bypassing hashes.
+The original source (including pre-existing user edits) is archived at the original
+root, with checked dry-run restoration instructions in
+[RECOVERY](refactoring/t346/RECOVERY.md). A synthetic same-path real-signature probe
+verified old != new and old == restored. Live recovery and concurrent mixed-version
+work have not been validated. The prior [held patches](refactoring/held/) remain
+historical evidence and must not be reapplied to the current sources.
 
-* T3: database.status_rows(conn) owns CLI aggregate SELECTs using the same
-  caller-owned connection/context and unchanged output.
-* T4: config owns TOML loading, _core retains a forwarding loader, and config's
-  initialization facade imports core only when called.
-
-They are available as [held patches](refactoring/held/) and **are not present in the
-applied runtime tree**. Their database/config edits change Slurm source hashes;
-existing-job compatibility needs a separate deployment transition decision. They
-must not be enabled by modifying saved manifests or bypassing source validation.
-
-Applied files are outside the source lists inspected in this audit, and the
-included source files/native helper payloads are unchanged from the starting tree.
-That does not establish that every transitive dependency is covered by the current
-fingerprint policy. New chemistry/smiles.py and _job_record.py must be included in
-package deployment. No production jobs, databases, native helpers or outputs were
-replaced, reset or resubmitted by this refactoring.
+The new project.py and earlier chemistry leaves/_job_record must ship with the
+package; wheel content was checked. The current signature coverage does not
+necessarily include all transitive dependencies. No production DB/manifest/native
+helper/result was modified, reset or resubmitted.
 
 ## Verification limits and remaining debt
 
-The full suite retains the three known baseline failures (one synthetic molecular
-self-clash expectation, two MD pending-log expectations); they are neither hidden
-nor changed. Seven Torch-dependent launcher cases remain skipped. Synthetic RDKit,
+The old three baseline failures are resolved by explicit verbose-test setup and a
+deterministic artificial self-clash fixture. The production behavior and all
+original assertion purposes remain. Seven Torch-dependent launcher cases remain skipped. Synthetic RDKit,
 SQLite and mocked recovery tests validate observed contracts, not native scientific
 accuracy, live restart equivalence or multi-host deployment.
 
-Core/DB ownership, project initialization side effects, large Prime/MD and scaffold
-orchestration, and distributed install/uninstall global mutation remain explicit
-technical debt. [T2–T9 reports](refactoring/T9_FINAL_REPORT.md) record the tested scope,
+Remaining core business SQL/legacy adapters, deep native Prime/MD polling/result loops,
+scientific MCS/decoration algorithms and distributed install/uninstall global mutation
+remain explicit technical debt. An unchanged Amber timeout test exposed an independent
+/proc existence/read race once; original/candidate diagnostic reproduction and successful
+rechecks are documented without changing its assertion. [T2–T9 reports](refactoring/T9_FINAL_REPORT.md) record the tested scope,
 held work, API/fingerprint evidence and follow-up constraints.

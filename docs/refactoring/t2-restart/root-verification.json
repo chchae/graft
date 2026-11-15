@@ -1,0 +1,6 @@
+{
+  "compileall_exit": 0,
+  "imports_and_tanimoto_smoke_exit": 0,
+  "whitespace_exit": 0,
+  "tested_source_and_tests_identical": true
+}

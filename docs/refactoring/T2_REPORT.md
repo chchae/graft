@@ -1,5 +1,7 @@
 # T2 — Chemistry 구현 소유권의 첫 분리
 
+2026-11-15 후속: [T2 재개 보고서](T2_RESTART_REPORT.md)의 FP 생성 정책·Tanimoto 구현 분리를 추가 적용했다. 아래 내용은 초기 canonicalizer 분리 기록이다.
+
 ## 목적과 적용 범위
 
 `canonicalize_smiles` 하나의 구현을 `src/graft/chemistry/smiles.py`로 그대로 옮겼다. `_core.canonicalize_smiles(smiles: str) -> str | None`는 함수 내부 import와 forwarding으로 유지한다. 새 chemistry leaf는 RDKit만 직접 참조한다. 공개 함수의 module/name/keyword `smiles`/signature와 기존 caller를 유지했다.

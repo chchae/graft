@@ -1,0 +1,22 @@
+{
+  "command": [
+    "/tmp/graft-t6-restart-9y41oc2e/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t6-restart-9y41oc2e/md-after.xml",
+    "tests/test_md_upstream_contracts.py",
+    "tests/test_md_gbsa.py",
+    "tests/test_md_cycle_retry.py",
+    "tests/test_md_gbsa_dispatch.py",
+    "tests/test_md_gbsa_pool.py",
+    "tests/test_md_gbsa_local.py",
+    "tests/test_reference_score_cache.py",
+    "tests/test_stage_barriers.py"
+  ],
+  "exit_code": 0,
+  "seconds": 6.8353808633983135
+}

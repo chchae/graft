@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/t6-before.xml",
+    "tests/test_orchestration_followup_contracts.py",
+    "tests/test_prime_orchestration_contracts.py",
+    "tests/test_md_upstream_contracts.py",
+    "tests/test_libinvent_pair_file_contracts.py",
+    "tests/test_scaffold_publication_contracts.py",
+    "tests/test_prime_gbsa_async.py",
+    "tests/test_prime_gbsa_launch_recovery.py",
+    "tests/test_reference_prime_gbsa.py",
+    "tests/test_md_gbsa.py",
+    "tests/test_iteration_scaffold.py"
+  ],
+  "exit_code": 0,
+  "seconds": 2.5952739398926497
+}

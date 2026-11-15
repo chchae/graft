@@ -1,0 +1,15 @@
+{
+  "tested_git_tree": "d04fbcf3b5311ea5c6a4551d1c8f6481ab9d9e6d",
+  "full_suite": {
+    "passed": 2882,
+    "failed": 0,
+    "skipped": 7
+  },
+  "no_external_harness": true,
+  "no_exit_traceback": true,
+  "whole_source_and_tests_match": true,
+  "source_changes_during_refinement": 0,
+  "compileall_import_cli_verified": true,
+  "publication_includes_existing_baseline_dependencies": true,
+  "production_or_target_changes_included": false
+}

@@ -1,0 +1,21 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/original-added-contracts.xml",
+    "tests/test_database_boundary_contracts.py",
+    "tests/test_project_boundary_contracts.py",
+    "tests/test_orchestration_followup_contracts.py",
+    "-k",
+    "not test_config_import_is_independent_of_core_and_workflow_io"
+  ],
+  "exit_code": 0,
+  "seconds": 0.3072979059070349,
+  "source_file": "/tmp/graft-t346-ii4pbdgh/before/src/graft/_core.py",
+  "architecture_test_excluded": true
+}

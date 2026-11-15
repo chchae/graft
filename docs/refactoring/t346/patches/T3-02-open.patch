@@ -1,0 +1,64 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -24,27 +24,8 @@
+ 
+ def open_sqlite(path):
+     """Open SQLite for concurrent stage workers."""
+-    conn = sqlite3.connect(path, timeout=30)
+-    try:
+-        conn.execute("PRAGMA busy_timeout=30000")
+-        # Concurrent first connections can race the rollback-to-WAL change;
+-        # SQLite may return BUSY here without invoking its busy handler.
+-        deadline = time.monotonic() + 30
+-        while True:
+-            try:
+-                conn.execute("PRAGMA journal_mode=WAL")
+-                break
+-            except sqlite3.OperationalError as exc:
+-                if (getattr(exc, 'sqlite_errorcode', 0) & 255 not in
+-                        {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+-                        or time.monotonic() >= deadline):
+-                    raise
+-                time.sleep(0.05)
+-        conn.execute("PRAGMA foreign_keys=ON")
+-        return conn
+-    except BaseException:
+-        conn.close()
+-        raise
++    from graft.database import open_sqlite as _implementation
++    return _implementation(path)
+ 
+ 
+ class SQLiteCursor:
+--- a/src/graft/database.py
++++ b/src/graft/database.py
+@@ -4084,3 +4084,29 @@
+         """
+     ).fetchall()
+     return rows, scores
++
++
++def open_sqlite(path):
++    """Open SQLite for concurrent stage workers."""
++    conn = sqlite3.connect(path, timeout=30)
++    try:
++        conn.execute("PRAGMA busy_timeout=30000")
++        # Concurrent first connections can race the rollback-to-WAL change;
++        # SQLite may return BUSY here without invoking its busy handler.
++        deadline = time.monotonic() + 30
++        while True:
++            try:
++                conn.execute("PRAGMA journal_mode=WAL")
++                break
++            except sqlite3.OperationalError as exc:
++                if (getattr(exc, 'sqlite_errorcode', 0) & 255 not in
++                        {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
++                        or time.monotonic() >= deadline):
++                    raise
++                time.sleep(0.05)
++        conn.execute("PRAGMA foreign_keys=ON")
++        return conn
++    except BaseException:
++        conn.close()
++        raise
++

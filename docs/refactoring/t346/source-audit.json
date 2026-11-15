@@ -1,0 +1,75 @@
+{
+  "ast_reconstruction": {
+    "T3 implementation open_sqlite": true,
+    "T3 implementation create_sqlite_schema": true,
+    "T3 implementation ensure_schema_columns": true,
+    "T3 implementation set_compound_state": true,
+    "T3 implementation find_iteration_for_state": true,
+    "T3 implementation get_max_iteration": true,
+    "T3 implementation get_iteration_counts": true,
+    "T3 implementation get_existing_canonical_smiles": true,
+    "T3 implementation get_reference_name": true,
+    "T3 implementation state_counts": true,
+    "T3 implementation list_iteration_compounds": true,
+    "T4 loader statements": true,
+    "T4 project initialization sequence": true,
+    "T4 merge and validation sequence": true,
+    "T6 run_iteration_prime_gbsa": true,
+    "T6 write_elite_libinvent_training_files": true,
+    "T6 run": true,
+    "T6 prepare_iteration_scaffold": true,
+    "T6 _run_stage": true,
+    "T6 supervise_iteration": true
+  },
+  "changed_runtime": [
+    "src/graft/_core.py",
+    "src/graft/chemistry/scaffold.py",
+    "src/graft/cli.py",
+    "src/graft/config.py",
+    "src/graft/database.py",
+    "src/graft/driver.py",
+    "src/graft/md_gbsa.py",
+    "src/graft/stages/glide.py"
+  ],
+  "added_runtime": [
+    "src/graft/project.py"
+  ],
+  "existing_signatures_preserved": 408,
+  "existing_tests_unchanged": true,
+  "protected_source_count": 40,
+  "protected_changes": [
+    "src/graft/config.py",
+    "src/graft/database.py"
+  ],
+  "protected_unchanged": 38,
+  "checks": [
+    {
+      "check": "compileall",
+      "exit_code": 0
+    },
+    {
+      "check": "imports",
+      "exit_code": 0
+    },
+    {
+      "check": "graft CLI help stdout/stderr bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.driver CLI help stdout/stderr bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.glide CLI help stdout/stderr bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.prime_gbsa CLI help stdout/stderr bytes",
+      "unchanged": true
+    },
+    {
+      "check": "graft.stages.md_gbsa CLI help stdout/stderr bytes",
+      "unchanged": true
+    }
+  ]
+}

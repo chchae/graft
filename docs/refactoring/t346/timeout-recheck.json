@@ -1,0 +1,15 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/timeout-recheck.xml",
+    "tests/test_amber_charge_timeout.py"
+  ],
+  "exit_code": 0,
+  "seconds": 2.198182146064937
+}

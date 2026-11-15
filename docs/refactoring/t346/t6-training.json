@@ -1,0 +1,20 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/t6-training.xml",
+    "tests/test_orchestration_followup_contracts.py",
+    "tests/test_libinvent_pair_file_contracts.py",
+    "tests/test_libinvent_vocabulary.py",
+    "tests/test_libinvent_hydrogen.py",
+    "tests/test_iteration_scaffold.py",
+    "tests/test_glide_only.py"
+  ],
+  "exit_code": 0,
+  "seconds": 1.2438289551064372
+}

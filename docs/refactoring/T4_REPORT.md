@@ -1,5 +1,7 @@
 # T4 — TOML loader 소유권 분리, 배포 보류
 
+> 2026-11-15 후속 적용: [T4_COMPLETION_REPORT.md](T4_COMPLETION_REPORT.md)가 현재 상태다. 아래 본문은 당시 실행·보류 상태의 기록으로 보존한다.
+
 ## 목적·실제 구현·파일
 
 **격리 검증 후보만 구현하고 운영 source에는 적용하지 않았다.** `_core.load_project_toml`의 읽기·해석 구현을 기존 `config.load_project_toml`로 이동했다. 기존 config의 `path` keyword/signature와 core의 `filename` keyword를 각각 유지했다. core는 지연 forwarding wrapper다. config의 top-level core import는 configure_project wrapper 내부로 옮겼다.

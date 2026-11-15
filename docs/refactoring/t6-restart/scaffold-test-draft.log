@@ -1,0 +1,68 @@
+FF...................................................................... [ 33%]
+........................................................................ [ 66%]
+........................................................................ [100%]
+=================================== FAILURES ===================================
+___ test_saved_scaffold_publication_bytes_and_namespace_update_order[False] ____
+
+saved_case = (namespace(db_path=PosixPath('/tmp/graft-t6-restart-9y41oc2e/test-tmp/scaffold-before/pytest-of-chchae/pytest-0/test_s...n    1\n  ]\n}\n'), ('publish', 'docking_mcs.smarts', '[#6]\n'), ...], <function iteration_scaffold at 0x7fdf0ebbb740>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fde6e4488a0>
+explicit_docking = False
+
+    @pytest.mark.parametrize('explicit_docking',[False,True])
+    def test_saved_scaffold_publication_bytes_and_namespace_update_order(saved_case,monkeypatch,explicit_docking):
+        args,snapshot,events,db=saved_case
+        if explicit_docking:snapshot['docking_mcs_smarts']='[#6]-[#6]'
+        db(args.db_path,3,snapshot);events.clear()
+        directory=stage_directory(args.output,3,'scaffold');publish=module._publish
+        expected=[('mcs.smarts','[#6]\n'),('libinvent_scaffold.smi','CC([*])C[*]\n'),
+                  ('scaffold_info.json',json.dumps(snapshot,indent=2)+'\n'),
+                  ('docking_mcs.smarts',snapshot.get('docking_mcs_smarts','[#6]')+'\n')]
+        def write(path,text):
+            events.append(('publish',path.name,text))
+            assert args.mcs_smarts=='original args core'
+            assert args.libinvent_scaffold_smiles=='original args scaffold'
+            assert db(args.db_path,3)==snapshot
+            publish(path,text)
+        monkeypatch.setattr(module,'_publish',write)
+        module.prepare_iteration_scaffold(args,3,include_generation=False)
+>       assert events==['read','save']+[('publish',name,text) for name,text in expected]+['log']
+E       assert ['read', 'sav...[#6]\n'), ...] == ['read', 'sav...[#6]\n'), ...]
+E         
+E         At index 4 diff: ('publish', 'scaffold_info.json', '{\n  "generation_method": "reinvent4",\n  "mcs_smarts": "[#6]",\n  "scaffold_smiles": "CC([*])C[*]",\n  "source": "preserved",\n  "source_ids": [\n    1\n  ]\n}\n') != ('publish', 'scaffold_info.json', '{\n  "mcs_smarts": "[#6]",\n  "scaffold_smiles": "CC([*])C[*]",\n  "source": "preserved",\n  "source_ids": [\n    1\n  ],\n  "generation_method": "reinvent4"\n}\n')
+E         Use -v to get more diff
+
+tests/test_scaffold_publication_contracts.py:49: AssertionError
+____ test_saved_scaffold_publication_bytes_and_namespace_update_order[True] ____
+
+saved_case = (namespace(db_path=PosixPath('/tmp/graft-t6-restart-9y41oc2e/test-tmp/scaffold-before/pytest-of-chchae/pytest-0/test_s...1\n  ]\n}\n'), ('publish', 'docking_mcs.smarts', '[#6]-[#6]\n'), ...], <function iteration_scaffold at 0x7fdf0ebbb740>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fdf147548a0>
+explicit_docking = True
+
+    @pytest.mark.parametrize('explicit_docking',[False,True])
+    def test_saved_scaffold_publication_bytes_and_namespace_update_order(saved_case,monkeypatch,explicit_docking):
+        args,snapshot,events,db=saved_case
+        if explicit_docking:snapshot['docking_mcs_smarts']='[#6]-[#6]'
+        db(args.db_path,3,snapshot);events.clear()
+        directory=stage_directory(args.output,3,'scaffold');publish=module._publish
+        expected=[('mcs.smarts','[#6]\n'),('libinvent_scaffold.smi','CC([*])C[*]\n'),
+                  ('scaffold_info.json',json.dumps(snapshot,indent=2)+'\n'),
+                  ('docking_mcs.smarts',snapshot.get('docking_mcs_smarts','[#6]')+'\n')]
+        def write(path,text):
+            events.append(('publish',path.name,text))
+            assert args.mcs_smarts=='original args core'
+            assert args.libinvent_scaffold_smiles=='original args scaffold'
+            assert db(args.db_path,3)==snapshot
+            publish(path,text)
+        monkeypatch.setattr(module,'_publish',write)
+        module.prepare_iteration_scaffold(args,3,include_generation=False)
+>       assert events==['read','save']+[('publish',name,text) for name,text in expected]+['log']
+E       assert ['read', 'sav...[#6]\n'), ...] == ['read', 'sav...[#6]\n'), ...]
+E         
+E         At index 4 diff: ('publish', 'scaffold_info.json', '{\n  "docking_mcs_smarts": "[#6]-[#6]",\n  "generation_method": "reinvent4",\n  "mcs_smarts": "[#6]",\n  "scaffold_smiles": "CC([*])C[*]",\n  "source": "preserved",\n  "source_ids": [\n    1\n  ]\n}\n') != ('publish', 'scaffold_info.json', '{\n  "mcs_smarts": "[#6]",\n  "scaffold_smiles": "CC([*])C[*]",\n  "source": "preserved",\n  "source_ids": [\n    1\n  ],\n  "generation_method": "reinvent4",\n  "docking_mcs_smarts": "[#6]-[#6]"\n}\n')
+E         Use -v to get more diff
+
+tests/test_scaffold_publication_contracts.py:49: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_scaffold_publication_contracts.py::test_saved_scaffold_publication_bytes_and_namespace_update_order[False]
+FAILED tests/test_scaffold_publication_contracts.py::test_saved_scaffold_publication_bytes_and_namespace_update_order[True]
+2 failed, 214 passed in 5.29s

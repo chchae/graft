@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/tmp/graft-t2-restart-5wdgrci4/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t2-restart-5wdgrci4/final-full.xml"
+  ],
+  "exit_code": 1,
+  "seconds": 85.91033155098557
+}

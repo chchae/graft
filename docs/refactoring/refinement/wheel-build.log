@@ -1,0 +1,12 @@
+Processing /tmp/graft-hardening-4aztmslk/project
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: graft
+  Building wheel for graft (pyproject.toml): started
+  Building wheel for graft (pyproject.toml): finished with status 'done'
+  Created wheel for graft: filename=graft-0.1.0-py3-none-any.whl size=411570 sha256=beb5e836687e8f842530f046e2de2737acaf6470e7cb3e1d270d81913e89bd9c
+  Stored in directory: /tmp/pip-ephem-wheel-cache-8d20wzr4/wheels/29/88/b4/ad2f5b187e5ea3e6eb65416eea5bc223f3b947c48b5bcbe1d0
+Successfully built graft
+
+[notice] A new release of pip is available: 26.2.2 -> 26.3
+[notice] To update, run: /tmp/graft-hardening-4aztmslk/venv/bin/python -m pip install --upgrade pip

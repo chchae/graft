@@ -1,0 +1,282 @@
+--- a/src/graft/_core.py
++++ b/src/graft/_core.py
+@@ -214,45 +214,8 @@
+ 
+ 
+ def create_sqlite_schema(conn: sqlite3.Connection) -> None:
+-    conn.execute(
+-        """
+-        CREATE TABLE IF NOT EXISTS compound (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            name TEXT NOT NULL UNIQUE,
+-            smiles TEXT NOT NULL,
+-            iteration INTEGER NOT NULL DEFAULT 0,
+-            dG_exp REAL,
+-            docking_score REAL,
+-            prime_gbsa_score REAL,
+-            amber_gbsa_score REAL,
+-            fep_score REAL,
+-            sa_score REAL,
+-            synthetic_feasibility INTEGER
+-                CHECK (synthetic_feasibility IN (0, 1)),
+-            state TEXT NOT NULL DEFAULT 'generated',
+-            failed_stage TEXT,
+-            failure_message TEXT,
+-            similar_to INTEGER REFERENCES compound(id),
+-            similarity REAL,
+-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+-            modified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+-        )
+-        """
+-    )
+-
+-    conn.execute(
+-        "CREATE INDEX IF NOT EXISTS idx_compound_iteration "
+-        "ON compound(iteration)"
+-    )
+-    conn.execute(
+-        "CREATE INDEX IF NOT EXISTS idx_compound_similar_to "
+-        "ON compound(similar_to)"
+-    )
+-    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
+-    ensure_rdkit_descriptor_columns(conn)
+-    ensure_druglike_selection_ownership(conn)
+-    from graft.database import ensure_md_gbsa_schema
+-    ensure_md_gbsa_schema(conn)
++    from graft.database import create_sqlite_schema as _implementation
++    return _implementation(conn)
+ 
+ 
+ 
+@@ -263,88 +226,8 @@
+     Legacy per-stage status columns are intentionally left in existing databases but
+     are no longer read or written by the modular workers.
+     """
+-    cols = {
+-        row[1]
+-        for row in conn.execute("PRAGMA table_info(compound)")
+-    }
+-    state_added = "state" not in cols
+-
+-    additions = {
+-        "amber_gbsa_score": "REAL",
+-        "prime_gbsa_score": "REAL",
+-        "fep_score": "REAL",
+-        "sa_score": "REAL",
+-        "synthetic_feasibility": "INTEGER CHECK (synthetic_feasibility IN (0, 1))",
+-        "state": "TEXT NOT NULL DEFAULT 'generated'",
+-        "failed_stage": "TEXT",
+-        "failure_message": "TEXT",
+-    }
+-
+-    for name, sql_type in additions.items():
+-        if name not in cols:
+-            conn.execute(
+-                f"ALTER TABLE compound ADD COLUMN {name} {sql_type}"
+-            )
+-
+-    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
+-    ensure_rdkit_descriptor_columns(conn)
+-    ensure_druglike_selection_ownership(conn)
+-    from graft.database import ensure_md_gbsa_schema
+-    ensure_md_gbsa_schema(conn)
+-
+-    # Refresh columns after migration so legacy status columns can be used once
+-    # to infer the new single state.
+-    cols = {
+-        row[1]
+-        for row in conn.execute("PRAGMA table_info(compound)")
+-    }
+-
+-    # Infer states only while adding the single-state column. Re-running
+-    # project setup must not overwrite active or terminal worker states.
+-    if state_added:
+-        conn.execute(
+-            "UPDATE compound SET state='reference' WHERE iteration=0"
+-        )
+-        conn.execute(
+-            "UPDATE compound SET state='fep_done' "
+-            "WHERE iteration>0 AND fep_score IS NOT NULL"
+-        )
+-        conn.execute(
+-            "UPDATE compound SET state='prime_gbsa_done' "
+-            "WHERE iteration>0 AND fep_score IS NULL "
+-            "AND prime_gbsa_score IS NOT NULL"
+-        )
+-        conn.execute(
+-            "UPDATE compound SET state='docked' "
+-            "WHERE iteration>0 AND prime_gbsa_score IS NULL "
+-            "AND docking_score IS NOT NULL"
+-        )
+-
+-        # One-time best-effort migration from the old multi-status model.
+-        if "docking_status" in cols:
+-            conn.execute(
+-                "UPDATE compound SET state='glide_running' "
+-                "WHERE iteration>0 AND docking_score IS NULL "
+-                "AND docking_status='running'"
+-            )
+-        if "ligprep_status" in cols:
+-            conn.execute(
+-                "UPDATE compound SET state='ligprepped' "
+-                "WHERE iteration>0 AND docking_score IS NULL "
+-                "AND ligprep_status='done' "
+-                "AND state NOT IN ('glide_running','failed')"
+-            )
+-            conn.execute(
+-                "UPDATE compound SET state='ligprep_running' "
+-                "WHERE iteration>0 AND docking_score IS NULL "
+-                "AND ligprep_status='running' "
+-                "AND state NOT IN ('ligprepped','glide_running','failed')"
+-            )
+-
+-    conn.execute(
+-        "CREATE INDEX IF NOT EXISTS idx_compound_state ON compound(state)"
+-    )
+-    conn.commit()
++    from graft.database import ensure_schema_columns as _implementation
++    return _implementation(conn)
+ 
+ 
+ def set_compound_state(
+--- a/src/graft/database.py
++++ b/src/graft/database.py
+@@ -4110,3 +4110,138 @@
+         conn.close()
+         raise
+ 
++
++
++def create_sqlite_schema(conn: sqlite3.Connection) -> None:
++    conn.execute(
++        """
++        CREATE TABLE IF NOT EXISTS compound (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            name TEXT NOT NULL UNIQUE,
++            smiles TEXT NOT NULL,
++            iteration INTEGER NOT NULL DEFAULT 0,
++            dG_exp REAL,
++            docking_score REAL,
++            prime_gbsa_score REAL,
++            amber_gbsa_score REAL,
++            fep_score REAL,
++            sa_score REAL,
++            synthetic_feasibility INTEGER
++                CHECK (synthetic_feasibility IN (0, 1)),
++            state TEXT NOT NULL DEFAULT 'generated',
++            failed_stage TEXT,
++            failure_message TEXT,
++            similar_to INTEGER REFERENCES compound(id),
++            similarity REAL,
++            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
++            modified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
++        )
++        """
++    )
++
++    conn.execute(
++        "CREATE INDEX IF NOT EXISTS idx_compound_iteration "
++        "ON compound(iteration)"
++    )
++    conn.execute(
++        "CREATE INDEX IF NOT EXISTS idx_compound_similar_to "
++        "ON compound(similar_to)"
++    )
++    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
++    ensure_rdkit_descriptor_columns(conn)
++    ensure_druglike_selection_ownership(conn)
++    from graft.database import ensure_md_gbsa_schema
++    ensure_md_gbsa_schema(conn)
++
++
++
++def ensure_schema_columns(conn: sqlite3.Connection) -> None:
++    """Upgrade an existing project DB in place to the single-state model.
++
++    New code uses only ``state`` plus optional ``failed_stage`` / ``failure_message``.
++    Legacy per-stage status columns are intentionally left in existing databases but
++    are no longer read or written by the modular workers.
++    """
++    cols = {
++        row[1]
++        for row in conn.execute("PRAGMA table_info(compound)")
++    }
++    state_added = "state" not in cols
++
++    additions = {
++        "amber_gbsa_score": "REAL",
++        "prime_gbsa_score": "REAL",
++        "fep_score": "REAL",
++        "sa_score": "REAL",
++        "synthetic_feasibility": "INTEGER CHECK (synthetic_feasibility IN (0, 1))",
++        "state": "TEXT NOT NULL DEFAULT 'generated'",
++        "failed_stage": "TEXT",
++        "failure_message": "TEXT",
++    }
++
++    for name, sql_type in additions.items():
++        if name not in cols:
++            conn.execute(
++                f"ALTER TABLE compound ADD COLUMN {name} {sql_type}"
++            )
++
++    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
++    ensure_rdkit_descriptor_columns(conn)
++    ensure_druglike_selection_ownership(conn)
++    from graft.database import ensure_md_gbsa_schema
++    ensure_md_gbsa_schema(conn)
++
++    # Refresh columns after migration so legacy status columns can be used once
++    # to infer the new single state.
++    cols = {
++        row[1]
++        for row in conn.execute("PRAGMA table_info(compound)")
++    }
++
++    # Infer states only while adding the single-state column. Re-running
++    # project setup must not overwrite active or terminal worker states.
++    if state_added:
++        conn.execute(
++            "UPDATE compound SET state='reference' WHERE iteration=0"
++        )
++        conn.execute(
++            "UPDATE compound SET state='fep_done' "
++            "WHERE iteration>0 AND fep_score IS NOT NULL"
++        )
++        conn.execute(
++            "UPDATE compound SET state='prime_gbsa_done' "
++            "WHERE iteration>0 AND fep_score IS NULL "
++            "AND prime_gbsa_score IS NOT NULL"
++        )
++        conn.execute(
++            "UPDATE compound SET state='docked' "
++            "WHERE iteration>0 AND prime_gbsa_score IS NULL "
++            "AND docking_score IS NOT NULL"
++        )
++
++        # One-time best-effort migration from the old multi-status model.
++        if "docking_status" in cols:
++            conn.execute(
++                "UPDATE compound SET state='glide_running' "
++                "WHERE iteration>0 AND docking_score IS NULL "
++                "AND docking_status='running'"
++            )
++        if "ligprep_status" in cols:
++            conn.execute(
++                "UPDATE compound SET state='ligprepped' "
++                "WHERE iteration>0 AND docking_score IS NULL "
++                "AND ligprep_status='done' "
++                "AND state NOT IN ('glide_running','failed')"
++            )
++            conn.execute(
++                "UPDATE compound SET state='ligprep_running' "
++                "WHERE iteration>0 AND docking_score IS NULL "
++                "AND ligprep_status='running' "
++                "AND state NOT IN ('ligprepped','glide_running','failed')"
++            )
++
++    conn.execute(
++        "CREATE INDEX IF NOT EXISTS idx_compound_state ON compound(state)"
++    )
++    conn.commit()
++

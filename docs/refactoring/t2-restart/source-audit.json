@@ -1,0 +1,42 @@
+{
+  "core_ast_reconstructed": true,
+  "similarity_body_ast_reconstructed": true,
+  "legacy_signature_and_rdkit_bindings_unchanged": true,
+  "pure_module_has_no_graft_imports": true,
+  "changed_existing_runtime": [
+    "src/graft/_core.py",
+    "src/graft/chemistry/similarity.py"
+  ],
+  "new_runtime": [
+    "src/graft/chemistry/fingerprints.py"
+  ],
+  "protected_files": 40,
+  "protected_hashes_unchanged": true,
+  "database_and_config_and_canonicalizer_unchanged": true,
+  "checks": [
+    {
+      "name": "compileall",
+      "exit_code": 0
+    },
+    {
+      "name": "imports",
+      "exit_code": 0
+    },
+    {
+      "name": "graft help",
+      "bytes_unchanged": true
+    },
+    {
+      "name": "graft.driver help",
+      "bytes_unchanged": true
+    },
+    {
+      "name": "graft.stages.generate help",
+      "bytes_unchanged": true
+    },
+    {
+      "name": "graft.stages.glide help",
+      "bytes_unchanged": true
+    }
+  ]
+}

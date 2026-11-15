@@ -1,0 +1,55 @@
+{
+  "baseline_outcomes": {
+    "passed": 2854,
+    "failed": 3,
+    "skipped": 7
+  },
+  "final_outcomes": {
+    "passed": 2882,
+    "skipped": 7
+  },
+  "intentional_test_repairs": {
+    "tests/test_combichem_3d.py::test_real_probes_pass_but_actual_fragment_combination_collides_with_itself": {
+      "before": "failed",
+      "after": "passed"
+    },
+    "tests/test_md_progress_summary.py::test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error[0]": {
+      "before": "failed",
+      "after": "passed"
+    },
+    "tests/test_sequential_driver.py::test_pending_log_uses_persisted_iteration_stage_elapsed[md-gbsa-MD-GBSA still pending for compound 624598]": {
+      "before": "failed",
+      "after": "passed"
+    }
+  },
+  "added": {
+    "tests/test_amber_charge_timeout.py::test_process_exit_probe_requires_a_terminal_state[R-False]": "passed",
+    "tests/test_amber_charge_timeout.py::test_process_exit_probe_requires_a_terminal_state[S-False]": "passed",
+    "tests/test_amber_charge_timeout.py::test_process_exit_probe_requires_a_terminal_state[Z-True]": "passed",
+    "tests/test_amber_charge_timeout.py::test_process_exit_probe_requires_a_terminal_state[X-True]": "passed",
+    "tests/test_amber_charge_timeout.py::test_process_exit_probe_accepts_a_reaped_process[error0]": "passed",
+    "tests/test_amber_charge_timeout.py::test_process_exit_probe_accepts_a_reaped_process[error1]": "passed",
+    "tests/test_amber_charge_timeout.py::test_process_exit_probe_does_not_hide_other_io_errors": "passed",
+    "tests/test_backend_selection_contracts.py::test_install_uninstall_roundtrips_keep_the_first_worker[1]": "passed",
+    "tests/test_backend_selection_contracts.py::test_install_uninstall_roundtrips_keep_the_first_worker[3]": "passed",
+    "tests/test_backend_selection_contracts.py::test_legacy_install_remembers_one_process_wide_original": "passed",
+    "tests/test_backend_selection_contracts.py::test_local_fallback_keeps_writer_argument_and_return_identity[None]": "passed",
+    "tests/test_backend_selection_contracts.py::test_local_fallback_keeps_writer_argument_and_return_identity[writer1]": "passed",
+    "tests/test_backend_selection_contracts.py::test_local_fallback_keeps_writer_argument_and_return_identity[writer2]": "passed",
+    "tests/test_backend_selection_contracts.py::test_local_fallback_keeps_writer_argument_and_return_identity[False]": "passed",
+    "tests/test_backend_selection_contracts.py::test_slurm_delegates_before_host_or_original_worker_lookup[None]": "passed",
+    "tests/test_backend_selection_contracts.py::test_slurm_delegates_before_host_or_original_worker_lookup[hosts1]": "passed",
+    "tests/test_backend_selection_contracts.py::test_host_slot_order_and_local_remote_selection[1-coordinator]": "passed",
+    "tests/test_backend_selection_contracts.py::test_host_slot_order_and_local_remote_selection[2-coordinator]": "passed",
+    "tests/test_backend_selection_contracts.py::test_host_slot_order_and_local_remote_selection[3-acct@other.domain]": "passed",
+    "tests/test_backend_selection_contracts.py::test_host_slot_order_and_local_remote_selection[6-acct@other.domain]": "passed",
+    "tests/test_backend_selection_contracts.py::test_remote_closes_after_original_worker_and_preserves_exception[False]": "passed",
+    "tests/test_backend_selection_contracts.py::test_remote_closes_after_original_worker_and_preserves_exception[True]": "passed",
+    "tests/test_backend_selection_contracts.py::test_remote_constructor_failure_never_calls_the_local_worker": "passed",
+    "tests/test_backend_selection_contracts.py::test_fork_inherits_legacy_callable_but_keeps_search_mutation_in_child": "passed",
+    "tests/test_pytest_isolation.py::test_plain_pytest_isolates_collection_tests_teardown_and_child_tmpdir": "passed"
+  },
+  "previously_passing_outcome_changes": 0,
+  "existing_skip_count": 7,
+  "new_skips": 0
+}

@@ -1,0 +1,155 @@
+--- /dev/null
++++ b/tests/test_backend_selection_contracts.py
+@@ -0,0 +1,152 @@
++"""Preserve legacy backend selection and fork/recovery seams before T7 changes."""
++import multiprocessing
++from types import SimpleNamespace
++
++import pytest
++
++from graft.stages import combichem_3d as stage
++from graft.stages import combichem_distributed as distributed
++from graft.stages import combichem_slurm_worker
++
++
++@pytest.mark.parametrize('cycles', [1, 3])
++def test_install_uninstall_roundtrips_keep_the_first_worker(monkeypatch, cycles):
++    local = lambda *args: 'local'
++    target = SimpleNamespace(worker_loop=local)
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', None)
++    for _ in range(cycles):
++        distributed.install(target)
++        distributed.install(target)
++        assert target.worker_loop is distributed.worker_loop
++        assert distributed._ORIGINAL_WORKER is local
++        distributed.uninstall(target)
++        assert target.worker_loop is local
++
++
++def test_legacy_install_remembers_one_process_wide_original(monkeypatch):
++    first = SimpleNamespace(worker_loop=lambda *args: 1)
++    second = SimpleNamespace(worker_loop=lambda *args: 2)
++    original = first.worker_loop
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', None)
++    distributed.install(first)
++    distributed.install(second)
++    distributed.uninstall(second)
++    assert second.worker_loop is original  # Existing singleton behavior, not a new contract proposal.
++
++
++@pytest.mark.parametrize('writer', [None, {}, {'stop': 'sentinel'}, False])
++def test_local_fallback_keeps_writer_argument_and_return_identity(monkeypatch, writer):
++    calls = []
++    result = object()
++    def local(*args, **kwargs):
++        calls.append((args, kwargs))
++        return result
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', local)
++    cfg = {}
++    assert distributed.worker_loop('unused.sqlite', cfg, 4, writer) is result
++    assert calls == [(('unused.sqlite', cfg, 4), {} if writer is None else {'result_writer': writer})]
++
++
++@pytest.mark.parametrize('hosts', [None, {'compute': 2}])
++def test_slurm_delegates_before_host_or_original_worker_lookup(monkeypatch, hosts):
++    calls = []
++    result = object()
++    cfg = {'execution-backend': 'slurm'}
++    if hosts is not None:
++        cfg['worker-hosts'] = hosts
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', None)
++    monkeypatch.setattr(combichem_slurm_worker, 'worker_loop', lambda *args: calls.append(args) or result)
++    assert distributed.worker_loop('unused.sqlite', cfg, 7, {'writer': True}) is result
++    assert calls == [('unused.sqlite', cfg, 7)]  # The existing Slurm path omits local writer state.
++
++
++@pytest.mark.parametrize('identity,expected', [(1, 'coordinator'), (2, 'coordinator'), (3, 'acct@other.domain'), (6, 'acct@other.domain')])
++def test_host_slot_order_and_local_remote_selection(monkeypatch, identity, expected):
++    original_search = object()
++    monkeypatch.setattr(stage, 'search', original_search)
++    monkeypatch.setattr(distributed.multiprocessing, 'current_process', lambda: SimpleNamespace(_identity=(41, identity)))
++    monkeypatch.setattr(distributed.socket, 'gethostname', lambda: 'coordinator.domain')
++    events = []
++    remote = SimpleNamespace(close=lambda: events.append('close'))
++    def create(host, cfg):
++        events.append(('remote', host))
++        return remote
++    def local(*args, **kwargs):
++        events.append(('worker', stage.search, kwargs))
++        return 19
++    monkeypatch.setattr(distributed, 'RemoteSearch', create)
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', local)
++    cfg = {'worker-hosts': {'coordinator': 2, 'acct@other.domain': 1}}
++    assert distributed.worker_loop('unused.sqlite', cfg, 2, {'ignored': 'legacy'}) is None
++    if expected == 'coordinator':
++        assert events == [('worker', original_search, {})]
++    else:
++        assert events == [('remote', expected), ('worker', remote, {}), 'close']
++        assert stage.search is remote  # Existing child-local mutation remains after close.
++
++
++@pytest.mark.parametrize('failed', [False, True])
++def test_remote_closes_after_original_worker_and_preserves_exception(monkeypatch, failed):
++    events = []
++    failure = RuntimeError('worker failed')
++    remote = SimpleNamespace(close=lambda: events.append('close'))
++    monkeypatch.setattr(stage, 'search', object())
++    monkeypatch.setattr(distributed.multiprocessing, 'current_process', lambda: SimpleNamespace(_identity=(1,)))
++    monkeypatch.setattr(distributed.socket, 'gethostname', lambda: 'coordinator')
++    monkeypatch.setattr(distributed, 'RemoteSearch', lambda *a: events.append('construct') or remote)
++    def local(*args):
++        events.append('worker')
++        if failed:
++            raise failure
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', local)
++    if failed:
++        with pytest.raises(RuntimeError) as caught:
++            distributed.worker_loop('unused.sqlite', {'worker-hosts': {'other': 1}}, 1)
++        assert caught.value is failure
++    else:
++        distributed.worker_loop('unused.sqlite', {'worker-hosts': {'other': 1}}, 1)
++    assert events == ['construct', 'worker', 'close']
++
++
++def test_remote_constructor_failure_never_calls_the_local_worker(monkeypatch):
++    failure = OSError('remote initialization failed')
++    original_search = object()
++    monkeypatch.setattr(stage, 'search', original_search)
++    monkeypatch.setattr(distributed.multiprocessing, 'current_process', lambda: SimpleNamespace(_identity=(1,)))
++    monkeypatch.setattr(distributed.socket, 'gethostname', lambda: 'coordinator')
++    def constructor(*args):
++        raise failure
++    monkeypatch.setattr(distributed, 'RemoteSearch', constructor)
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', lambda *a: pytest.fail('Worker ran after constructor failure'))
++    with pytest.raises(OSError) as caught:
++        distributed.worker_loop('unused.sqlite', {'worker-hosts': {'other': 1}}, 1)
++    assert caught.value is failure
++    assert stage.search is original_search
++
++
++def test_fork_inherits_legacy_callable_but_keeps_search_mutation_in_child(monkeypatch):
++    context = multiprocessing.get_context('fork')
++    events = context.Queue()
++    original_search = object()
++    monkeypatch.setattr(stage, 'search', original_search)
++    monkeypatch.setattr(distributed.socket, 'gethostname', lambda: 'coordinator')
++    remote = SimpleNamespace(label='remote', close=lambda: events.put('close'))
++    monkeypatch.setattr(distributed, 'RemoteSearch', lambda *a: remote)
++    def local(db, cfg, iteration):
++        events.put((db, iteration, stage.search.label))
++    monkeypatch.setattr(distributed, '_ORIGINAL_WORKER', local)
++    process = context.Process(target=distributed.worker_loop,
++        args=('unused.sqlite', {'worker-hosts': {'other': 1}}, 5))
++    try:
++        process.start()
++        process.join(10)
++        assert process.exitcode == 0
++        assert events.get(timeout=2) == ('unused.sqlite', 5, 'remote')
++        assert events.get(timeout=2) == 'close'
++        assert stage.search is original_search
++    finally:
++        if process.is_alive():
++            process.terminate()
++            process.join(5)
++        events.close()
++        events.join_thread()

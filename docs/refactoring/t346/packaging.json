@@ -1,0 +1,12 @@
+{
+  "wheel": "graft-0.1.0-py3-none-any.whl",
+  "required_modules": [
+    "graft/project.py",
+    "graft/config.py",
+    "graft/database.py",
+    "graft/chemistry/fingerprints.py",
+    "graft/chemistry/smiles.py",
+    "graft/_job_record.py"
+  ],
+  "contents_match_tested_source": true
+}

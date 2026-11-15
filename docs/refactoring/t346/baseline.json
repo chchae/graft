@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/tmp/graft-t346-ii4pbdgh/venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "graft_refactor_isolation",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-t346-ii4pbdgh/baseline.xml"
+  ],
+  "exit_code": 1,
+  "seconds": 85.41130881849676
+}
