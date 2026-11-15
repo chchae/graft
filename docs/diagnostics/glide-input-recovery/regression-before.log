@@ -1,0 +1,753 @@
+FFFFFFFFFFFFFFFFFFF                                                      [100%]
+=================================== FAILURES ===================================
+__________ test_changed_source_recovers_only_hash_verified_saved_jobs __________
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...ged_source_recovers_o0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c1121f0>)
+capsys = <_pytest.capture.CaptureFixture object at 0x7fb97c0e12b0>
+
+    def test_changed_source_recovers_only_hash_verified_saved_jobs(case,capsys):
+>       case.run()
+
+tests/test_glide_changed_input_recovery.py:65: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_ test_changed_submitted_input_blocks_collection_without_modifying_marker[ligprep_group.maegz] _
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...ged_submitted_input_b0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c112090>)
+name = 'ligprep_group.maegz'
+
+    @pytest.mark.parametrize('name',['ligprep_group.maegz','_reference.maegz','glide_11.in','grid.zip'])
+    def test_changed_submitted_input_blocks_collection_without_modifying_marker(case,name):
+        path=case.args.grid if name=='grid.zip' else case.groups[11]/name
+        path.write_bytes(b'tampered')
+        marker=case.marker.read_bytes()
+        with pytest.raises(RuntimeError,match='input|checksum|digest'):
+>           case.run()
+
+tests/test_glide_changed_input_recovery.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_ test_changed_submitted_input_blocks_collection_without_modifying_marker[_reference.maegz] _
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...ged_submitted_input_b1/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c112820>)
+name = '_reference.maegz'
+
+    @pytest.mark.parametrize('name',['ligprep_group.maegz','_reference.maegz','glide_11.in','grid.zip'])
+    def test_changed_submitted_input_blocks_collection_without_modifying_marker(case,name):
+        path=case.args.grid if name=='grid.zip' else case.groups[11]/name
+        path.write_bytes(b'tampered')
+        marker=case.marker.read_bytes()
+        with pytest.raises(RuntimeError,match='input|checksum|digest'):
+>           case.run()
+
+tests/test_glide_changed_input_recovery.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_ test_changed_submitted_input_blocks_collection_without_modifying_marker[glide_11.in] _
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...ged_submitted_input_b2/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c1128d0>)
+name = 'glide_11.in'
+
+    @pytest.mark.parametrize('name',['ligprep_group.maegz','_reference.maegz','glide_11.in','grid.zip'])
+    def test_changed_submitted_input_blocks_collection_without_modifying_marker(case,name):
+        path=case.args.grid if name=='grid.zip' else case.groups[11]/name
+        path.write_bytes(b'tampered')
+        marker=case.marker.read_bytes()
+        with pytest.raises(RuntimeError,match='input|checksum|digest'):
+>           case.run()
+
+tests/test_glide_changed_input_recovery.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_ test_changed_submitted_input_blocks_collection_without_modifying_marker[grid.zip] _
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...ged_submitted_input_b3/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c112f00>)
+name = 'grid.zip'
+
+    @pytest.mark.parametrize('name',['ligprep_group.maegz','_reference.maegz','glide_11.in','grid.zip'])
+    def test_changed_submitted_input_blocks_collection_without_modifying_marker(case,name):
+        path=case.args.grid if name=='grid.zip' else case.groups[11]/name
+        path.write_bytes(b'tampered')
+        marker=case.marker.read_bytes()
+        with pytest.raises(RuntimeError,match='input|checksum|digest'):
+>           case.run()
+
+tests/test_glide_changed_input_recovery.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+______ test_unverifiable_native_input_contract_fails_closed[missing_hash] ______
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c111d20>)
+damage = 'missing_hash'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_______ test_unverifiable_native_input_contract_fails_closed[bad_base64] _______
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input1/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c1135e0>)
+damage = 'bad_base64'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_______ test_unverifiable_native_input_contract_fails_closed[short_hash] _______
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input2/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c1122a0>)
+damage = 'short_hash'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_____ test_unverifiable_native_input_contract_fails_closed[missing_entry] ______
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input3/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c1121f0>)
+damage = 'missing_entry'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+____ test_unverifiable_native_input_contract_fails_closed[duplicate_entry] _____
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input4/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c113950>)
+damage = 'duplicate_entry'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+______ test_unverifiable_native_input_contract_fails_closed[wrong_parent] ______
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input5/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc5740f0>)
+damage = 'wrong_parent'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+____ test_unverifiable_native_input_contract_fails_closed[wrong_directory] _____
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input6/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc574670>)
+damage = 'wrong_directory'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+____ test_unverifiable_native_input_contract_fails_closed[missing_command] _____
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input7/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb97c1122a0>)
+damage = 'missing_command'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+____ test_unverifiable_native_input_contract_fails_closed[outside_command] _____
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input8/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc5743b0>)
+damage = 'outside_command'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+______ test_unverifiable_native_input_contract_fails_closed[extra_input] _______
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...rifiable_native_input9/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc5749e0>)
+damage = 'extra_input'
+
+    @pytest.mark.parametrize('damage',['missing_hash','bad_base64','short_hash','missing_entry','duplicate_entry','wrong_parent','wrong_directory','missing_command','outside_command','extra_input'])
+    def test_unverifiable_native_input_contract_fails_closed(case,damage):
+        parent=case.metadata['native-11'][0];files=parent['spec']['taskSpec']['input']['inputFiles']
+        if damage=='missing_hash':files[0]['hash']=''
+        elif damage=='bad_base64':files[0]['hash']='invalid***'
+        elif damage=='short_hash':files[0]['hash']=base64.b64encode(b'short').decode()
+        elif damage=='missing_entry':files.pop()
+        elif damage=='duplicate_entry':files.append(dict(files[0]))
+        elif damage=='wrong_parent':parent['jobId']='another-job'
+        elif damage=='wrong_directory':parent['spec']['launchParams']['launchDirectory']=str(case.root/'elsewhere')
+        elif damage=='extra_input':files.append(dict(name='unverified.dat',hash=files[0]['hash']))
+        else:
+            path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text())
+            record['command']=[] if damage=='missing_command' else ['/suite/glide','/elsewhere/changed.in']
+            path.write_text(json.dumps(record))
+>       with pytest.raises(RuntimeError):case.run()
+                                         ^^^^^^^^^^
+
+tests/test_glide_changed_input_recovery.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_ test_native_query_uncertainty_preserves_group_but_does_not_block_verified_peer _
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...ve_query_uncertainty_0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc5750c0>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb8dc55e3f0>
+capsys = <_pytest.capture.CaptureFixture object at 0x7fb8dc2e8e10>
+
+    def test_native_query_uncertainty_preserves_group_but_does_not_block_verified_peer(case,monkeypatch,capsys):
+        def query(suite,identity,directory):
+            if identity=='native-11':raise JobStatusUnavailable('temporary info failure')
+            return copy.deepcopy(case.metadata[identity])
+        monkeypatch.setattr(glide,'job_details',query)
+>       case.run()
+
+tests/test_glide_changed_input_recovery.py:107: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+____________ test_new_group_without_saved_identity_remains_pending _____________
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...group_without_saved_i0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc575640>)
+
+    def test_new_group_without_saved_identity_remains_pending(case):
+        (case.groups[11]/'glide_job.json').unlink()
+>       case.run()
+
+tests/test_glide_changed_input_recovery.py:115: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+___ test_legacy_timeout_members_are_enrolled_before_slow_native_verification ___
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...cy_timeout_members_ar0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc575c70>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb97c149370>
+
+    def test_legacy_timeout_members_are_enrolled_before_slow_native_verification(case,monkeypatch):
+        path=case.groups[11]/'glide_job.json';record=json.loads(path.read_text());record['timeout_requested_at']=1;path.write_text(json.dumps(record))
+        with database.connect(case.args.db_path) as conn:conn.execute("UPDATE compound SET state='failed',failed_stage='glide' WHERE id=21")
+        query=glide.job_details
+        def inspect(suite,identity,directory):
+            with database.connect(case.args.db_path) as conn:
+                assert conn.execute('SELECT reference_id,job_id FROM glide_timeout_collection').fetchall()==[(11,'native-11')]
+            return query(suite,identity,directory)
+        monkeypatch.setattr(glide,'job_details',inspect)
+>       case.run()
+
+tests/test_glide_changed_input_recovery.py:128: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+_ test_verified_completed_peer_publishes_before_committing_while_other_job_stays_pending _
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ih...fied_completed_peer_p0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fb8dc574f60>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb97c137150>
+
+    def test_verified_completed_peer_publishes_before_committing_while_other_job_stays_pending(case,monkeypatch):
+        collect=__import__('graft.stages.glide',fromlist=['collect_finished_groups']).collect_finished_groups
+        # The real collector is preserved before this fixture's replacement via the module snapshot below.
+        monkeypatch.setattr(glide,'collect_finished_groups',REAL_COLLECT)
+        monkeypatch.setattr(glide,'active_jobs',lambda *a:[])
+        monkeypatch.setattr(glide,'group_status',lambda suite,directory,*a,**kw:'DONE' if directory.name=='ref_11' else 'RUNNING')
+        def extract(suite,helper,output,directory):
+            scores=directory/'scores.tsv';scores.write_text('id\tdocking_score\n21\t-9.25\n')
+            best=directory/'best_poses.maegz';best.write_text('matching original pose')
+            return scores,best
+        def publish(args,root,helper):
+            with database.connect(args.db_path) as conn:assert conn.execute('SELECT docking_score FROM compound WHERE id=21').fetchone()==(None,)
+            (root/'best_poses.maegz').write_text('matching original pose')
+        monkeypatch.setattr(_core,'extract_scores_and_best_poses',extract)
+        monkeypatch.setattr(glide,'merge_current_best',publish)
+        (case.groups[11]/'glide_lib.maegz').write_text('verified native output')
+>       case.run()
+
+tests/test_glide_changed_input_recovery.py:148: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_glide_changed_input_recovery.py:61: in <lambda>
+    return SimpleNamespace(args=args,ns=ns,root=root,groups=groups,metadata=metadata,events=events,snapshot=snapshot,prepared=prepared,marker=marker,run=lambda:glide._run_stage(args,ns))
+                                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/_logging.py:83: in wrapped
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+src/graft/stages/glide.py:549: in _run_stage
+    c.assign_reference_compounds(iteration, args)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (1, namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-before/graft-pytest-u2ihl5ga/pytest...=2, glide_job_timeout=0, poll_interval=1, completion_fraction=0.95, glide_pose_point=None, crem_docking_references={}))
+kw = {}
+
+>   def forbidden(*a,**kw):pytest.fail('Changed input reached fresh preparation, claims or submission')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: Changed input reached fresh preparation, claims or submission
+
+tests/test_glide_changed_input_recovery.py:48: Failed
+=========================== short test summary info ============================
+FAILED tests/test_glide_changed_input_recovery.py::test_changed_source_recovers_only_hash_verified_saved_jobs
+FAILED tests/test_glide_changed_input_recovery.py::test_changed_submitted_input_blocks_collection_without_modifying_marker[ligprep_group.maegz]
+FAILED tests/test_glide_changed_input_recovery.py::test_changed_submitted_input_blocks_collection_without_modifying_marker[_reference.maegz]
+FAILED tests/test_glide_changed_input_recovery.py::test_changed_submitted_input_blocks_collection_without_modifying_marker[glide_11.in]
+FAILED tests/test_glide_changed_input_recovery.py::test_changed_submitted_input_blocks_collection_without_modifying_marker[grid.zip]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[missing_hash]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[bad_base64]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[short_hash]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[missing_entry]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[duplicate_entry]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[wrong_parent]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[wrong_directory]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[missing_command]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[outside_command]
+FAILED tests/test_glide_changed_input_recovery.py::test_unverifiable_native_input_contract_fails_closed[extra_input]
+FAILED tests/test_glide_changed_input_recovery.py::test_native_query_uncertainty_preserves_group_but_does_not_block_verified_peer
+FAILED tests/test_glide_changed_input_recovery.py::test_new_group_without_saved_identity_remains_pending
+FAILED tests/test_glide_changed_input_recovery.py::test_legacy_timeout_members_are_enrolled_before_slow_native_verification
+FAILED tests/test_glide_changed_input_recovery.py::test_verified_completed_peer_publishes_before_committing_while_other_job_stays_pending
+19 failed in 0.34s

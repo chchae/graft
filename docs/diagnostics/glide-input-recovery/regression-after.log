@@ -1,0 +1,38 @@
+..................F..................................................... [ 72%]
+...........................                                              [100%]
+=================================== FAILURES ===================================
+_ test_verified_completed_peer_publishes_before_committing_while_other_job_stays_pending _
+
+case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/regression-after/graft-pytest-laaqu...fied_completed_peer_p0/iter01/06-glide/ligprep_input.sha256'), run=<function case.<locals>.<lambda> at 0x7fdca1b0cf60>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fdca1b20ad0>
+
+    def test_verified_completed_peer_publishes_before_committing_while_other_job_stays_pending(case,monkeypatch):
+        # The real collector is preserved before this fixture's replacement via the module snapshot below.
+        monkeypatch.setattr(glide,'collect_finished_groups',REAL_COLLECT)
+        monkeypatch.setattr(glide,'active_jobs',lambda *a:[])
+        monkeypatch.setattr(glide,'group_status',lambda suite,directory,*a,**kw:'DONE' if directory.name=='ref_11' else 'RUNNING')
+        def extract(suite,helper,output,directory):
+            scores=directory/'scores.tsv';scores.write_text('id\tdocking_score\n21\t-9.25\n')
+            best=directory/'best_poses.maegz';best.write_text('matching original pose')
+            return scores,best
+        def publish(args,root,helper):
+            with database.connect(args.db_path) as conn:assert conn.execute('SELECT docking_score FROM compound WHERE id=21').fetchone()==(None,)
+            (root/'best_poses.maegz').write_text('matching original pose')
+        monkeypatch.setattr(_core,'extract_scores_and_best_poses',extract)
+        monkeypatch.setattr(glide,'merge_current_best',publish)
+        (case.groups[11]/'glide_lib.maegz').write_text('verified native output')
+        case.run()
+        with database.connect(case.args.db_path) as conn:
+>           assert conn.execute('SELECT id,state,docking_score FROM compound WHERE iteration=1 ORDER BY id').fetchall()==[(21,'docked',-9.25),(22,'glide_running',None),(23,'ligprepped',None)]
+E           AssertionError: assert [(21, 'failed...epped', None)] == [(21, 'docked...epped', None)]
+E             
+E             At index 0 diff: (21, 'failed', None) != (21, 'docked', -9.25)
+E             Use -v to get more diff
+
+tests/test_glide_changed_input_recovery.py:148: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Iteration 1: LigPrep input changed; recovering verified saved Glide jobs only; new submissions blocked.
+Glide verified recovery: 1 groups resolved, 1 still pending; new submissions blocked.
+=========================== short test summary info ============================
+FAILED tests/test_glide_changed_input_recovery.py::test_verified_completed_peer_publishes_before_committing_while_other_job_stays_pending
+1 failed, 98 passed in 0.49s

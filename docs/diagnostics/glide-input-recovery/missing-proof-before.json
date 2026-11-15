@@ -1,0 +1,15 @@
+{
+  "command": [
+    "/tmp/graft-glide-fix-l8drv_hy/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-glide-fix-l8drv_hy/missing-proof-before.xml",
+    "tests/test_glide_changed_input_recovery.py",
+    "-k",
+    "timeout_without_native_identity or empty_frozen_mapping"
+  ],
+  "exit_code": 1,
+  "seconds": 0.23967163730412722
+}

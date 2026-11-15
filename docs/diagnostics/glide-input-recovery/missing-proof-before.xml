@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.090" timestamp="2026-11-15T19:51:08.506700+09:00" hostname="t41.camd.krict.re.kr"><testcase classname="tests.test_glide_changed_input_recovery" name="test_timeout_without_native_identity_cannot_clear_the_completion_gate" time="0.008"><failure message="Failed: DID NOT RAISE RuntimeError">case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/missing-proof-before/graft-pytest-b...out_without_native_id0/iter01/06-glide/ligprep_input.sha256'), run=&lt;function case.&lt;locals&gt;.&lt;lambda&gt; at 0x7fab15717c10&gt;)
+
+    def test_timeout_without_native_identity_cannot_clear_the_completion_gate(case):
+        path=case.groups[11]/'glide_job.json'
+        record=json.loads(path.read_text());record.update(job_id=None,timeout_requested_at=1)
+        path.write_text(json.dumps(record))
+        with database.connect(case.args.db_path) as conn:
+            conn.execute("UPDATE compound SET state='failed',failed_stage='glide' WHERE id=21")
+&gt;       with pytest.raises(RuntimeError,match='identity|JobId'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE RuntimeError
+
+tests/test_glide_changed_input_recovery.py:176: Failed</failure></testcase><testcase classname="tests.test_glide_changed_input_recovery" name="test_empty_frozen_mapping_cannot_establish_safe_recovery" time="0.005"><failure message="Failed: DID NOT RAISE RuntimeError">case = namespace(args=namespace(db_path=PosixPath('/tmp/graft-glide-fix-l8drv_hy/test-tmp/missing-proof-before/graft-pytest-b...y_frozen_mapping_cann0/iter01/06-glide/ligprep_input.sha256'), run=&lt;function case.&lt;locals&gt;.&lt;lambda&gt; at 0x7fab15715430&gt;)
+
+    def test_empty_frozen_mapping_cannot_establish_safe_recovery(case):
+        (case.root/'reference_map.tsv').write_text('id\treference_id\n')
+&gt;       with pytest.raises(RuntimeError,match='mapping'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE RuntimeError
+
+tests/test_glide_changed_input_recovery.py:183: Failed</failure></testcase></testsuite></testsuites>

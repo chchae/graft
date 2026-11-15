@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import csv
 import hashlib
 import json
@@ -410,6 +411,8 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
         record_timing(job['group_dir'], 'status_download', elapsed)
         detail(f"Glide timing: reference {job['reference_id']} status/download="
                f'{elapsed:.2f}s.', flush=True)
+        if status in TERMINAL and job.get('recovery_input_hashes'):
+            _check_recovery_input_hashes(job['recovery_input_hashes'])
         if status == 'DONE':
             if has_timeouts(load_record(job['group_dir'])):
                 if not try_timeout_collection(iteration, args, job, merger, glide_root):
@@ -521,6 +524,121 @@ def _recover_reference_groups(
     return jobs, unsubmitted, reserved
 
 
+def _input_sha256(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.digest()
+
+
+def _verify_saved_input_files(args, directory, record):
+    """Prove cached inputs are the exact bytes registered for this native JobId."""
+    identity = record['job_id']
+    jobs = job_details(args.schrodinger, identity, directory)
+    parents = [job for job in jobs if job.get('jobId') == identity]
+    if len(parents) != 1:
+        raise RuntimeError(f'Cannot verify saved Glide input parent for {directory.name}')
+    spec = parents[0].get('spec', {})
+    launch = spec.get('launchParams', {}).get('launchDirectory')
+    if not launch or Path(launch).resolve() != directory.resolve():
+        raise RuntimeError(f'Saved Glide input launch directory differs for {directory.name}')
+    command = record.get('command', [])
+    if len(command) < 2:
+        raise RuntimeError(f'Saved Glide input command is missing for {directory.name}')
+    infile = Path(command[1])
+    if not infile.is_absolute():
+        infile = directory / infile
+    if infile.resolve().parent != directory.resolve():
+        raise RuntimeError(f'Saved Glide input command escapes {directory.name}')
+    expected = {path.name: path for path in (
+        infile, directory/'ligprep_group.maegz', directory/'_reference.maegz', Path(args.grid))}
+    files = spec.get('taskSpec', {}).get('input', {}).get('inputFiles', [])
+    names = [item.get('name') for item in files]
+    if len(expected) != 4 or len(names) != len(expected) or set(names) != set(expected):
+        raise RuntimeError(f'Cannot verify all submitted Glide input files for {directory.name}')
+    hashes = {}
+    for item in files:
+        path = expected[item['name']]
+        try:
+            checksum = base64.b64decode(item.get('hash', ''), validate=True)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(f'Invalid native input digest for {directory.name}/{path.name}') from exc
+        if len(checksum) != 32:
+            raise RuntimeError(f'Missing native input checksum for {directory.name}/{path.name}')
+        hashes[path] = checksum
+    _check_recovery_input_hashes(hashes)
+    return hashes
+
+
+def _check_recovery_input_hashes(hashes):
+    for path, checksum in hashes.items():
+        if not path.is_file():
+            raise RuntimeError(f'Missing submitted Glide input file: {path.name}')
+        before = path.stat()
+        actual = _input_sha256(path)
+        after = path.stat()
+        stable = (before.st_ino, before.st_size, before.st_mtime_ns) == (after.st_ino, after.st_size, after.st_mtime_ns)
+        if not stable or actual != checksum:
+            raise RuntimeError(f'Submitted Glide input checksum differs for {path.parent.name}/{path.name}; recovery withheld')
+
+
+def _recover_changed_ligprep_input(args, iteration, glide_root):
+    """Recover proven saved submissions only; never prepare, claim or submit work."""
+    mapping = glide_root/'reference_map.tsv'
+    if not mapping.is_file():
+        raise RuntimeError('Changed LigPrep input has no frozen Glide reference mapping')
+    frozen = {}
+    with mapping.open(newline='') as stream:
+        for row in csv.DictReader(stream, delimiter='\t'):
+            cid, refid = int(row['id']), int(row['reference_id'])
+            if cid in frozen:
+                raise RuntimeError('Frozen Glide input mapping contains duplicate compounds')
+            frozen[cid] = refid
+    if not frozen:
+        raise RuntimeError('Changed LigPrep input has an empty frozen Glide mapping')
+    groups = {}
+    for cid, name, smiles, refid, similarity in c.list_iteration_compounds(
+            iteration, args.db_path, where="state='glide_running' AND docking_score IS NULL"):
+        if cid not in frozen:
+            continue  # A claim without original submission membership stays pending.
+        if frozen[cid] != refid:
+            raise RuntimeError('Frozen Glide input reference mapping differs from current ownership')
+        groups.setdefault(refid, []).append((cid, name, smiles, similarity))
+    records = [(path.parent, load_record(path.parent))
+               for path in sorted(glide_root.glob('ref_*/glide_job.json'))]
+    pending_timeouts = [(directory, record) for directory, record in records
+                        if has_timeouts(record) and not record.get('timeout_results_imported')]
+    for directory, record in pending_timeouts:
+        if not record.get('job_id'):
+            raise RuntimeError('Cannot verify legacy Glide timeout collection without a saved native JobId identity')
+        database.begin_glide_timeout_collection(args.db_path, iteration,
+            int(directory.name.removeprefix('ref_')), record['job_id'])
+    work_started(f'Iteration {iteration}: LigPrep input changed; recovering verified saved Glide jobs only; new submissions blocked.')
+    jobs = []
+    for directory, record in records:
+        refid = int(directory.name.removeprefix('ref_'))
+        compounds = groups.get(refid, [])
+        if has_timeouts(record) and not record.get('timeout_results_imported'):
+            compounds = [row for row in database.glide_timeout_rows(args.db_path, iteration, refid)
+                         if frozen.get(row[0]) == refid]
+        if not compounds or not record.get('job_id'):
+            continue
+        try:
+            hashes = _verify_saved_input_files(args, directory, record)
+        except JobStatusUnavailable as exc:
+            print(f'[WARNING] Glide {directory.name}: input verification unavailable; keeping saved job pending: {native_error_message(exc)}', flush=True)
+            continue
+        jobs.append(dict(reference_id=refid, group_dir=directory, compounds=compounds, recovery_input_hashes=hashes))
+    if not jobs:
+        print('Glide: no saved jobs have verified inputs; changed source retained and new submissions blocked.', flush=True)
+        return
+    extractor = c.create_score_extractor(glide_root, attraction_point=args.glide_pose_point)
+    merger = c.create_best_pose_merger(glide_root)
+    pending, terminal = collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root)
+    print(f'Glide verified recovery: {terminal} groups resolved, {len(pending)} still pending; new submissions blocked.', flush=True)
+
+
 @timed_stage("Glide stage worker")
 def _run_stage(args, ns):
     args.poll_interval = ns.poll_interval
@@ -544,6 +662,14 @@ def _run_stage(args, ns):
     prepare_iteration_scaffold(args, iteration, include_generation=False)
     args.glide_pose_point = pose_selection_point(args, iteration)
     args.crem_docking_references = database.crem_glide_references(args.db_path, iteration)
+
+    glide_root = stage_directory(args.output, iteration, 'glide')
+    ligprep_file = stage_directory(args.output, iteration, 'ligprep') / 'ligprep.maegz'
+    signature = glide_root/'ligprep_input.sha256'
+    if (signature.is_file() and ligprep_file.is_file()
+            and signature.read_text().strip() != _input_sha256(ligprep_file).hex()):
+        _recover_changed_ligprep_input(args, iteration, glide_root)
+        return
 
     # Assign nearest reference for any still-undocked compounds.
     c.assign_reference_compounds(iteration, args)

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/tmp/graft-glide-fix-l8drv_hy/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-glide-fix-l8drv_hy/full-final.xml"
+  ],
+  "exit_code": 0,
+  "seconds": 86.55041274335235
+}

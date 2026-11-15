@@ -1,5 +1,8 @@
 # T1–T9 current progress
 
+Latest bug-fix verification: **2,904 passed / zero failed / seven skipped**.
+See [verified Glide input recovery](../diagnostics/GLIDE_INPUT_RECOVERY.md).
+
 Updated 2026-11-15 KST. This table describes the verified **local working tree**,
 including previously existing uncommitted features. It is not an assertion that
 all runtime changes have been committed or deployed. Historical phase reports
@@ -15,7 +18,7 @@ retain their original results; this is the current entry point.
 | T6 | Six orchestration boundaries applied | Prime, training, MD, scaffold, Glide, driver; deeper native loops/scientific algorithms retained |
 | T7 | Characterization expanded; runtime transition held | 17 new cases cover selection, singleton legacy binding, writer forwarding, failure cleanup and real fork inheritance |
 | T8 | Local types/contracts documented | Existing narrow annotations retained; payload/ownership guide added; no global strict-check or broad typing rollout |
-| T9 | Refreshed verification and documentation | Current full suite 2,882 passed / 0 failed / 7 skipped; science/live multi-host recovery remains unverified |
+| T9 | Refreshed verification and documentation | Current full suite 2,904 passed / 0 failed / 7 skipped; science/live multi-host recovery remains unverified |
 
 ## Next boundaries
 

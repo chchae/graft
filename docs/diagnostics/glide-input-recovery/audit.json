@@ -1,0 +1,16 @@
+{
+  "runtime_changed": [
+    "src/graft/stages/glide.py"
+  ],
+  "protected_source_files": 40,
+  "protected_unchanged": true,
+  "global_input_marker_modified": false,
+  "production_data_manually_modified": false,
+  "native_registered_hashes_verified": true,
+  "new_test_cases": 22,
+  "full_tests": {
+    "passed": 2904,
+    "failed": 0,
+    "skipped": 7
+  }
+}

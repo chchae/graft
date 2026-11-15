@@ -1,5 +1,43 @@
 # Graft Development Handoff
 
+## Verify saved Glide inputs when the upstream LigPrep file changes (2026-11-15)
+
+**Observed incident:** a completed older LigPrep job's output/log occupied the
+reused iteration-6 launch directory after current Glide inputs were split and
+submitted. The source file then contained only foreign-iteration CMPIDs. Its SHA256
+differed from the frozen Glide marker, blocking recovery after the worker's tail
+exit. The local background downloader was running, but the exact process that
+performed the overwrite was not established. Source SHA256 mismatch was real,
+not a compression-header or refactoring-fingerprint discrepancy.
+
+**Implementation repair:** changed-source handling may recover only saved Glide
+JobIds whose cached .in, ligand group, reference pose and current grid match the
+base64 SHA256 values in that exact native parent's registered input metadata.
+Require the same native launch directory and unambiguous complete input names;
+missing hashes, changed inputs or mapping inconsistencies fail closed. Limit
+membership to the frozen reference map and existing running claims or pending
+legacy timeout collection. Enroll timeout work before slow native checks.
+Query uncertainty retains that group while verified peers can recover. Recheck
+input hashes after terminal status/download and before consuming results.
+
+This is a recovery-only path: never assign new references, claim new work, split
+LigPrep, regenerate docking inputs, submit/resubmit jobs or rewrite the old global
+input checksum. Keep the changed source file and original marker as evidence.
+The existing global change/cleanup guard remains unchanged for new preparation.
+Reuse authoritative parent/child completion, timeout recovery, pose-before-score
+publication and failure rules. Cached output or a zero worker exit is insufficient.
+No implementation-fingerprint guard, allowlist or saved protocol is altered.
+Older native records without adequate input hashes remain blocked in this mode.
+
+**Evidence limits:** all four original native input hashes matched for each of
+four affected jobs; all 80 cached ligand groups contained current-iteration IDs
+and recorded structure counts. Synthetic tests cover changed/missing/ambiguous
+metadata, command/launch ownership, query uncertainty, original membership,
+legacy timeout enrollment, publication-before-commit and concurrent input change.
+These prove coordination/integrity, not affinity or a new scientific protocol.
+The full suite passes 2,904 tests with seven existing optional-environment skips.
+
+
 ## Isolate unavailable Glide JobServer status queries (2026-11-13)
 
 **Observed bug:** a nonzero `jsc info --json <JobId>` response during runtime

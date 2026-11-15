@@ -9,7 +9,7 @@ python -m compileall -q src tests
 python -c "import graft; import graft.cli"
 ```
 
-The current working-tree baseline is **2,882 passed, zero failed, seven skipped**.
+The current working-tree baseline is **2,904 passed, zero failed, seven skipped**.
 The seven launcher cases need both Torch and the external REINVENT4 LibInvent
 package. They are not scientific end-to-end tests. In an existing environment
 providing those packages, run:

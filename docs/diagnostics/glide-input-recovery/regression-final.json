@@ -1,0 +1,21 @@
+{
+  "command": [
+    "/tmp/graft-glide-fix-l8drv_hy/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--junitxml=/tmp/graft-glide-fix-l8drv_hy/regression-final.xml",
+    "tests/test_glide_changed_input_recovery.py",
+    "tests/test_glide_recovery.py",
+    "tests/test_glide_status_unavailable.py",
+    "tests/test_glide_pipeline.py",
+    "tests/test_glide_timeout_results.py",
+    "tests/test_glide_resources.py",
+    "tests/test_glide_subjob_timeout.py",
+    "tests/test_docking_prime_gbsa.py",
+    "tests/test_sequential_driver.py"
+  ],
+  "exit_code": 0,
+  "seconds": 1.8105834191665053
+}

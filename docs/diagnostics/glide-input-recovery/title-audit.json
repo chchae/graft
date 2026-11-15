@@ -1,0 +1,17 @@
+{
+  "current": {
+    "structures": 25723,
+    "unique": 18219,
+    "minimum": 64851,
+    "maximum": 83069,
+    "iter6": 0
+  },
+  "frozen": {
+    "structures": 85470,
+    "unique": 48600,
+    "minimum": 200392,
+    "maximum": 250391
+  },
+  "invalid_groups": {},
+  "elapsed": 10.044602913782
+}

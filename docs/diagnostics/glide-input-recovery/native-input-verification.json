@@ -1,0 +1,42 @@
+[
+  {
+    "reference_id": 166906,
+    "job_id": "c262551b-e0ae-11f1-b2b0-ece7a713a41c",
+    "verified_files": {
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_166906/_reference.maegz": "00d7cdbcaebf34e6ac133fa51b3972dc2dbbde2501971f8e0529043c78e94e3e",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem/input/egfr-grid.zip": "3e5bd6507d4d65daa746195ecbce1d9587e889eb724815b162585c8b1860e92e",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_166906/glide_166906.in": "c4e0c19f886cdc61a757f698a71531b7e1c5ba717d6a8d08ba873235cc49db86",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_166906/ligprep_group.maegz": "ae84d6affc098ef318db91cf1483c022c73b30a40a308a2db3bb6684ab3fcab8"
+    }
+  },
+  {
+    "reference_id": 172804,
+    "job_id": "7a84d976-e0ae-11f1-96fd-ece7a713a41c",
+    "verified_files": {
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_172804/_reference.maegz": "9b4f311f8a1d8830e7a0019aa81cbcf3243bcdcc42b08e2e756be549686bd78d",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem/input/egfr-grid.zip": "3e5bd6507d4d65daa746195ecbce1d9587e889eb724815b162585c8b1860e92e",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_172804/glide_172804.in": "7e0b614c5b1c2b88413ff4b15ce6b0cdf20dc9b85116d12029252cff4356730b",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_172804/ligprep_group.maegz": "e1b75469c7de1abdbf4407bc45d45005e56905032c467271fdd70be99dde70ea"
+    }
+  },
+  {
+    "reference_id": 174227,
+    "job_id": "708a5ab0-e0b0-11f1-b988-ece7a713a41c",
+    "verified_files": {
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_174227/_reference.maegz": "0e76d9139d11effdbaa05346a451ff7dc3bfa39303e51dc9571862343cb3229f",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem/input/egfr-grid.zip": "3e5bd6507d4d65daa746195ecbce1d9587e889eb724815b162585c8b1860e92e",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_174227/glide_174227.in": "2e128580350e64fe9d7fc187fd7418c113bf39de6cd49311c0f34e3c70c1e650",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_174227/ligprep_group.maegz": "dec557c1e4aa04d7f20af4189abd7e771e7e2f01640394caa7181e6482cb0961"
+    }
+  },
+  {
+    "reference_id": 175887,
+    "job_id": "813da579-e0af-11f1-a55a-ece7a713a41c",
+    "verified_files": {
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_175887/_reference.maegz": "dbb0b5ef465370e6089e7c6c6c91534c8a9840cf7c706e1dcbe97143fa9b02c1",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem/input/egfr-grid.zip": "3e5bd6507d4d65daa746195ecbce1d9587e889eb724815b162585c8b1860e92e",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_175887/glide_175887.in": "c460931667076043a86205da2ae313807749433090ae1d40740510c442833782",
+      "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter06/06-glide/ref_175887/ligprep_group.maegz": "2f2e9703e5bfd34fdb99b167d722b575eeb7418aa2fae92f272d455dc4b98493"
+    }
+  }
+]

@@ -1,6 +1,11 @@
 # Architecture
 
-Latest verification: 2,882 passed / zero failed / seven skipped. The formerly known
+Changed-source Glide recovery is restricted to original JobIds with native input
+SHA256 verification, with no new claims/submission or global checksum rewrite.
+[Incident and limits](diagnostics/GLIDE_INPUT_RECOVERY.md). Latest full suite:
+2,904 passed, zero failed, seven existing skips.
+
+Refinement verification before this Glide repair: 2,882 passed / zero failed / seven skipped. The formerly known
 three failures were repaired in separate authorized test-only work; runtime source
 was unchanged. See [current progress](refactoring/PROGRESS.md) and
 [refinement report](refactoring/REFINEMENT_REPORT.md).
