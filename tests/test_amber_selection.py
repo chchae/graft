@@ -149,6 +149,9 @@ def test_worker_honors_configured_glide_count_and_recovers_legacy_run(population
     stage._run_stage(args, 1)
     assert database.amber_completion_reason(population,1,1000,500) is None
     # Recover a pre-change saved all-pose run intact, even with complete top-500 scores.
+    # Such a legacy DB predates persisted per-stage diverse shortlists.
+    with database.connect(population) as conn:
+        conn.execute('DROP TABLE iteration_score_selection')
     old_ids = database.claim_amber_candidates(population,1,1000,1000)
     assert old_ids == list(range(500,0,-1))
     amber_gbsa.new_record(args,1,directory,old_ids)

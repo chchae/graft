@@ -94,7 +94,7 @@ def test_toml_time_limit_is_pinned_only_in_new_records(project, seconds, limit):
     record = slurm.new_record(project, 1, project.output, [1, 2, 3, 4])
     assert record['slurm_time_limit'] == limit
     assert record['minimization_timeout_s'] == 600
-    assert record['charge_timeout_s'] == 600
+    assert record['charge_timeout_s'] == 1800
     assert 'time_limit' not in record['settings']
     assert record['settings'] == project.amber_remote
     project.amber_slurm_time_limit = '00:05:00'

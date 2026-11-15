@@ -83,6 +83,8 @@ def create_queue(args, directory, compound_ids):
               'prepared': False,
               'prime_gbsa_flexdist': flexibility,
               'entries': {str(cid): 'pending' for cid in compound_ids}}
+    if getattr(args, 'schrodinger', None) is not None:
+        record['schrodinger'] = str(args.schrodinger)
     # Reserve the entire selected set before preparing inputs or launching jobs.
     prime._save(directory, record)
     if flexibility:
@@ -146,6 +148,8 @@ def merge_final_coordinates(args, directory, record):
 def poll_queue(iteration, args, directory, record):
     """Check active jobs, commit each result, then immediately refill free slots."""
     directory = Path(directory)
+    if record.get('schrodinger') and record['schrodinger'] != str(args.schrodinger):
+        raise RuntimeError('Saved Prime queue installation changed; recover with its original installation')
     # Pin the protocol for the entire queue, including not-yet-submitted members.
     # Missing metadata means the historical frozen-receptor protocol, never TOML.
     flexibility = prime_gbsa_flexdist({'prime-gbsa-flexdist': record.get('prime_gbsa_flexdist', 0.0)})

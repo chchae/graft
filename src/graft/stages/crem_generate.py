@@ -87,6 +87,8 @@ def run_stage(args, requested_iteration):
     deleted = database.iteration_was_deleted(args.db_path, iteration)
     if saved and saved['state'] == Growth.DONE and not deleted:
         database.validate_generation_population(args.db_path, iteration, args.target_count)
+        from graft.stages.crem_elites import export_elites
+        export_elites(args.output, iteration, saved['plan'])
         print(f'Iteration {iteration}: retaining completed CReM population ({saved["population_count"]} compounds).')
         return
     if saved is None and database.iteration_has_compounds(args.db_path, iteration):
@@ -131,6 +133,8 @@ def run_stage(args, requested_iteration):
     plan = dict(protocol=protocol,target_count=args.target_count,
                 elite_count=args.elite_count,score_source=score_source,parents=parents,fingerprint=fingerprint)
     database.freeze_crem_generation(args.db_path, iteration, plan)
+    from graft.stages.crem_elites import export_elites
+    export_elites(args.output, iteration, plan)
     _save_scaffold(args, iteration, cfg, parents)
     db = folder/'combichem3d.sqlite'
     work_started(f'Iteration {iteration}: CReM single expansion from {len(parents)} parent(s); '

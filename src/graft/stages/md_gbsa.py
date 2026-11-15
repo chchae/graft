@@ -9,6 +9,9 @@ from graft.stages._logging import timed_stage, work_started
 def _run_stage(args, iteration):
     work_started(f'Iteration {iteration}: recovering or starting Desmond/Prime MD-GBSA.', level=2)
     md_gbsa.run(args,iteration)
+    if iteration == 0:
+        from graft.reference_scores import publish
+        publish(args)
 
 
 def main(argv=None):

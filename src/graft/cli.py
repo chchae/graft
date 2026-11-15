@@ -22,26 +22,8 @@ def _project_args(ns):
 def _status(project_toml):
     args = _core.configure_project(project_toml)
     with _core.open_sqlite(args.db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT iteration, state, COUNT(*)
-            FROM compound
-            GROUP BY iteration, state
-            ORDER BY iteration, state
-            """
-        ).fetchall()
-        scores = conn.execute(
-            """
-            SELECT iteration,
-                   COUNT(docking_score), COUNT(prime_gbsa_score), COUNT(fep_score), COUNT(amber_gbsa_score),
-                   COUNT(synthetic_feasibility), SUM(synthetic_feasibility),
-                   MIN(docking_score), MIN(prime_gbsa_score), MIN(fep_score), MIN(amber_gbsa_score),
-                   COUNT(md_gbsa_score), MIN(md_gbsa_score)
-            FROM compound
-            GROUP BY iteration
-            ORDER BY iteration
-            """
-        ).fetchall()
+        from graft.database import status_rows
+        rows, scores = status_rows(conn)
 
     print(f"Project: {args.project}")
     print(f"Database: {args.db_path}")

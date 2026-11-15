@@ -202,15 +202,13 @@ def choose_iteration(args, requested=None):
     if pending_crem is not None:
         return pending_crem
     with database.connect(args.db_path) as conn:
-        latest_retry = conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0]
+        latest_retry = database.latest_compound_iteration(conn)
     retry_stages = ('prime_gbsa','md_gbsa') if getattr(args,'prime_gbsa_enabled',True) else ('md_gbsa',)
     if latest_retry is not None and any(database.score_retry_requests(args.db_path, latest_retry, stage)
                                        for stage in retry_stages):
         return latest_retry
     with database.connect(args.db_path) as conn:
-        iterations = [row[0] for row in conn.execute(
-            "SELECT DISTINCT iteration FROM compound WHERE iteration>0 ORDER BY iteration"
-        )]
+        iterations = database.generated_iterations(conn)
     iterations = sorted(set(iterations) | set(database.crem_iterations(args.db_path)))
     for iteration in iterations:
         if (database.md_gbsa_selection(args.db_path,iteration) is not None and
@@ -387,6 +385,28 @@ def _report_pending_stage(
     return pending_key
 
 
+def _report_completed_stage(args, project_toml, iteration: int, stage: str, started: float, stop) -> None:
+    """Report verified completion and refresh its report before stage advancement."""
+    if stage in CALCULATION_LABELS:
+        from graft.stages._summary import completion_summary
+        elapsed = database.finish_stage_timer(args.db_path, iteration, stage)
+        print(f"[driver  ] iteration {iteration}: {CALCULATION_LABELS[stage]} stage complete; "
+              f"total elapsed={format_elapsed(elapsed)} "
+              "(including waiting, polling and restart recovery); "
+              f"{completion_summary(args, iteration, stage, elapsed)}; current_time={current_time()}.", flush=True)
+    else:
+        # Recovery alone does not finish the final Prime candidate set.
+        print(f"[driver  ] iteration {iteration}: {stage} complete "
+              f"({time.monotonic() - started:.1f} s including recovery/polling); "
+              f"current_time={current_time()}.", flush=True)
+    report_stage = ('fep' if getattr(args, 'fep_enabled', False) else
+                    'md-gbsa' if getattr(args, 'md_gbsa_enabled', False) else
+                    'prime_gbsa' if getattr(args, 'prime_gbsa_enabled', True) else
+                    'amber-gbsa' if getattr(args, 'amber_gbsa_enabled', False) else 'glide')
+    if iteration > 0 and stage == report_stage:
+        refresh_distribution_report(args, project_toml, iteration, f'{stage}-complete', stop)
+
+
 def supervise_iteration(args, project_toml, iteration, stages, poll_interval, stop, once=False):
     """Run one worker at a time; exit only after this iteration's final stage."""
     pending_stages = list(stages)
@@ -433,6 +453,11 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
             )
             if reason is None:
                 reason = external_completion_reason(args, iteration, stage)
+            if reason is None:
+                from graft.stages._summary import timeout_warning
+                warning = timeout_warning(args, iteration, stage)
+                if warning:
+                    print(f'[driver  ] {warning}', flush=True)
             if (reason is None and stage == 'md-gbsa'
                     and getattr(args, 'md_gbsa_enabled', False)
                     and database.md_gbsa_selection(args.db_path, iteration) is not None):
@@ -449,24 +474,7 @@ def supervise_iteration(args, project_toml, iteration, stages, poll_interval, st
                         and database.md_gbsa_completion_reason(args.db_path, iteration) is not None):
                     pending_stages.insert(0, md_stage)
                     print(f"[driver  ] iteration {iteration}: MD-GBSA enabled; adding the stage after Prime.", flush=True)
-                if stage in CALCULATION_LABELS:
-                    from graft.stages._summary import completion_summary
-                    elapsed = database.finish_stage_timer(args.db_path, iteration, stage)
-                    print(f"[driver  ] iteration {iteration}: {CALCULATION_LABELS[stage]} stage complete; "
-                          f"total elapsed={format_elapsed(elapsed)} "
-                          "(including waiting, polling and restart recovery); "
-                          f"{completion_summary(args, iteration, stage, elapsed)}; current_time={current_time()}.", flush=True)
-                else:
-                    # Recovery alone does not finish the final Prime candidate set.
-                    print(f"[driver  ] iteration {iteration}: {stage} complete "
-                          f"({time.monotonic() - started:.1f} s including recovery/polling); "
-                          f"current_time={current_time()}.", flush=True)
-                report_stage = ('fep' if getattr(args, 'fep_enabled', False) else
-                                'md-gbsa' if getattr(args, 'md_gbsa_enabled', False) else
-                                'prime_gbsa' if getattr(args, 'prime_gbsa_enabled', True) else
-                                'amber-gbsa' if getattr(args, 'amber_gbsa_enabled', False) else 'glide')
-                if iteration > 0 and stage == report_stage:
-                    refresh_distribution_report(args, project_toml, iteration, f'{stage}-complete', stop)
+                _report_completed_stage(args, project_toml, iteration, stage, started, stop)
                 break
             previous_pending = _report_pending_stage(
                 args, iteration, stage, rc, reason, previous_pending)

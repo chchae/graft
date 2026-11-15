@@ -1,0 +1,77 @@
+"""Observed training-pair bytes and failure side effects, without a TL launch."""
+from pathlib import Path
+
+import pytest
+
+from graft import _core
+from graft.chemistry import libinvent_decorations
+
+PAIRS=[('C[*]','*C'),('C[*]','*N'),('C[*]','*O'),('C[*]','*F'),('C[*]','*Cl')]
+TRAIN=b'C[*]\t*O\nC[*]\t*N\nC[*]\t*C\nC[*]\t*F\n'
+VALID=b'C[*]\t*Cl\n'
+
+
+def write_case(folder,monkeypatch,pairs=PAIRS,width=6):
+    iterator=iter(pairs)
+    monkeypatch.setattr(libinvent_decorations,'decompose',lambda *a:next(iterator))
+    rows=[(i,'elite'+str(i),'CCO',2,-10.,-40.)[:width] for i in range(1,len(pairs)+1)]
+    return _core.write_elite_libinvent_training_files(rows,'C[*]',folder,score_source='md_gbsa')
+
+
+@pytest.mark.parametrize('width',[5,6])
+def test_training_pair_bytes_seeded_split_metadata_and_input_order(tmp_path,monkeypatch,capsys,width):
+    metadata,train,valid,count=write_case(tmp_path,monkeypatch,width=width)
+    assert (metadata,train,valid,count)==(tmp_path/'elite_selected.tsv',tmp_path/'elite_train.smi',tmp_path/'elite_valid.smi',5)
+    assert train.read_bytes()==TRAIN and valid.read_bytes()==VALID
+    header='id\tname\tsmiles\titeration\tdocking_score\tmd_gbsa_score\theavy_atoms\tligand_efficiency\tscaffold\tR-groups\r\n'
+    score='-40.0' if width==6 else ''
+    expected=header+''.join(f'{i}\telite{i}\tCCO\t2\t-10.0\t{score}\t3\t-3.3333333333333335\t{scaffold}\t{decorators}\r\n' for i,(scaffold,decorators) in enumerate(PAIRS,1))
+    assert metadata.read_bytes()==expected.encode()
+    assert (tmp_path/'elite_skipped.tsv').read_bytes()==b'id\tname\tunsupported_tokens\tscaffold\tR-groups\treason\r\n'
+    assert capsys.readouterr().out==('\nElite-guided LibInvent TL dataset\n'+'-'*70+'\nRequested elites    : 5\nUsable elites       : 5\nTraining pairs      : 4\nValidation pairs    : 1\nExample scaffold    : C[*]\nExample R-groups    : *O\n')
+
+
+@pytest.mark.parametrize('index',[1,4],ids=['train','validation'])
+@pytest.mark.parametrize('pair,message',[
+    (('C*','*N'),"Unsupported bare '*' token in LibInvent TL scaffold: C*"),
+    (('C[*]','[*]N'),"Unsupported '[*]' token in LibInvent TL decorators: [*]N"),
+])
+def test_invalid_pair_keeps_existing_partial_write_and_error_order(tmp_path,monkeypatch,capsys,index,pair,message):
+    pairs=list(PAIRS);pairs[index]=pair
+    train=tmp_path/'elite_train.smi';valid=tmp_path/'elite_valid.smi'
+    train.write_bytes(b'previous training');valid.write_bytes(b'previous validation')
+    with pytest.raises(RuntimeError) as caught:
+        write_case(tmp_path,monkeypatch,pairs)
+    assert str(caught.value)==message
+    assert train.read_bytes()==(b'C[*]\t*O\n' if index==1 else TRAIN)
+    assert valid.read_bytes()==(b'previous validation' if index==1 else b'')
+    assert (tmp_path/'elite_selected.tsv').is_file() and (tmp_path/'elite_skipped.tsv').is_file()
+    assert capsys.readouterr().out==''
+
+
+@pytest.mark.parametrize('name',['elite_train.smi','elite_valid.smi'])
+def test_pair_file_open_error_propagates_after_metadata_and_preserves_old_target(tmp_path,monkeypatch,name):
+    train=tmp_path/'elite_train.smi';valid=tmp_path/'elite_valid.smi'
+    train.write_bytes(b'previous training');valid.write_bytes(b'previous validation')
+    original=Path.open;failure=OSError('pair file unavailable')
+    def opening(path,*args,**kwargs):
+        if path.name==name and (args and args[0]=='w'):
+            raise failure
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',opening)
+    with pytest.raises(OSError) as caught:
+        write_case(tmp_path,monkeypatch)
+    assert caught.value is failure
+    assert train.read_bytes()==(b'previous training' if name=='elite_train.smi' else TRAIN)
+    assert valid.read_bytes()==b'previous validation'
+    assert (tmp_path/'elite_selected.tsv').is_file()
+
+
+@pytest.mark.parametrize('count',[0,1])
+def test_too_few_usable_pairs_does_not_rewrite_existing_train_or_validation(tmp_path,monkeypatch,count):
+    train=tmp_path/'elite_train.smi';valid=tmp_path/'elite_valid.smi'
+    train.write_bytes(b'previous training');valid.write_bytes(b'previous validation')
+    metadata,out_train,out_valid,usable=write_case(tmp_path,monkeypatch,PAIRS[:count])
+    assert metadata==tmp_path/'elite_selected.tsv'
+    assert (out_train,out_valid,usable)==(None,None,count)
+    assert train.read_bytes()==b'previous training' and valid.read_bytes()==b'previous validation'

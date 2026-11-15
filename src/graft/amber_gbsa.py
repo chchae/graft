@@ -60,8 +60,16 @@ def source_fingerprints(args, iteration):
 
 
 def verify_sources(args, iteration, record):
-    if record.get('source_fingerprints') and record['source_fingerprints'] != source_fingerprints(args, iteration):
-        raise RuntimeError('Receptor/Glide poses changed since Amber submission; saved results and jobs retained')
+    if record.get('source_fingerprints'):
+        current = source_fingerprints(args, iteration)
+        for path, expected in record['source_fingerprints'].items():
+            if current.get(path) == expected:
+                continue
+            if iteration == 0 and path == str(args.reference_poses.resolve()):
+                from graft.reference_scores import annotation_matches
+                if annotation_matches(args, expected):
+                    continue
+            raise RuntimeError('Receptor/Glide poses changed since Amber submission; saved results and jobs retained')
 
 
 def ssh(settings, command, **kwargs):
@@ -375,7 +383,7 @@ def new_record(args, iteration, directory, ids):
     run_id = 'run-' + uuid.uuid4().hex
     record = {'run_id': run_id, 'compound_ids': ids, 'prepared': False,
               'minimization_timeout_s': 600,
-              'charge_timeout_s': 600,
+              'charge_timeout_s': 1800,
               'iteration': iteration, 'db_path': str(args.db_path.resolve()),
               'settings': args.amber_remote, 'charge_method': args.amber_charge_method,
               'remote_dir': str(PurePosixPath(args.amber_remote['remote_work_dir']) / run_id)}

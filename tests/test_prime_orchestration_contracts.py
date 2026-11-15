@@ -1,0 +1,209 @@
+"""Characterize Prime orchestration without submitting a native calculation."""
+from contextlib import closing
+from pathlib import Path
+from types import SimpleNamespace
+import json
+import sqlite3
+
+import pytest
+
+from graft import _core as c, prime_gbsa_async, prime_gbsa_batch, prime_gbsa_local, prime_gbsa_queue
+from graft.paths import stage_in_iteration
+
+
+@pytest.fixture
+def prime_case(tmp_path, monkeypatch):
+    def make(iteration=1, receptor='copy', local=False):
+        db = tmp_path/'project.sqlite'
+        with closing(sqlite3.connect(db)) as conn, conn:
+            c.create_sqlite_schema(conn)
+            conn.executemany(
+                'INSERT INTO compound(id,name,smiles,iteration,state,docking_score,prime_gbsa_score) '
+                'VALUES (?,?,\'CC\',?,?,?,?)',
+                [(1, 'REF,α', iteration, 'reference' if iteration == 0 else 'docked', -10.5, None),
+                 (2, 'REF\tB', iteration, 'reference' if iteration == 0 else 'docked', -9.25, None),
+                 (3, 'already-scored', iteration, 'reference' if iteration == 0 else 'prime_gbsa_done', -8., -40.)])
+        iteration_dir = tmp_path/f'iter{iteration:02d}'
+        directory = stage_in_iteration(iteration_dir, 'prime_gbsa')
+        directory.mkdir(parents=True)
+        glide = tmp_path/'glide';glide.mkdir()
+        reference = tmp_path/'reference.maegz';reference.write_bytes(b'original references')
+        (glide/'best_poses.maegz').write_bytes(b'original generated poses')
+        poses = reference if iteration == 0 else glide/'best_poses.maegz'
+        old = directory/'previous-out.maegz';old.write_bytes(b'old native result')
+        (directory/'prime_gbsa_input.maegz').write_bytes(b'stale PV')
+        (directory/'receptor.maegz').write_bytes(b'kept-in-place')
+        source = tmp_path/'custom-receptor.maegz';source.write_bytes(b'explicit-receptor')
+        args = SimpleNamespace(db_path=db, reference_poses=reference,
+                schrodinger=Path('/suite'), grid=tmp_path/'grid.zip',
+                prime_gbsa_input_count=3, prime_gbsa_local_compute=local,
+                prime_gbsa_receptor={'copy':source, 'inplace':directory/'receptor.maegz', 'grid':None}[receptor])
+        events = [];failure = RuntimeError('injected preparation failure')
+        case = SimpleNamespace(args=args, iteration=iteration, iteration_dir=iteration_dir,
+                glide=glide, directory=directory, poses=poses, old=old, events=events,
+                failure=failure, fail_at=None, receptor=receptor, local=local)
+        expected_tsv = 'id\tname\tdocking_score\r\n1\tREF,α\t-10.5\r\n2\t"REF\tB"\t-9.25\r\n'.encode()
+        def checkpoint(name):
+            events.append(name)
+            if case.fail_at == name:
+                raise failure
+        def retired(*a):
+            checkpoint('retire')
+            assert not (directory/'docking_top.tsv').exists()
+        def extractor(folder):
+            checkpoint('receptor-helper')
+            return folder/'extract.py'
+        def builder(folder):
+            checkpoint('pv-helper')
+            return folder/'build-pv.py'
+        def native(command, *, cwd):
+            assert cwd == directory
+            assert (directory/'docking_top.tsv').read_bytes() == expected_tsv
+            assert (directory/'ids.txt').read_bytes() == b'1\n2\n'
+            assert old.read_bytes() == b'old native result'
+            if command[1].name == 'extract.py':
+                checkpoint('extract-receptor')
+                assert command == [Path('/suite/run'), directory/'extract.py', args.grid, directory/'receptor.maegz']
+                assert not (directory/'receptor.maegz').exists()
+                (directory/'receptor.maegz').write_bytes(b'extracted-receptor')
+            else:
+                checkpoint('build-pv')
+                assert command[:6] == [Path('/suite/run'), directory/'build-pv.py', directory/'receptor.maegz',
+                                       poses, directory/'ids.txt', directory/'prime_gbsa_input.maegz']
+                assert not (directory/'prime_gbsa_input.maegz').exists()
+                expected_receptor = {'copy':b'explicit-receptor','inplace':b'kept-in-place','grid':b'extracted-receptor'}[receptor]
+                assert (directory/'receptor.maegz').read_bytes() == expected_receptor
+                if iteration == 0:
+                    assert command[6:] == [directory/'reference_ids.json']
+                    assert (directory/'reference_ids.json').read_text() == json.dumps({'REF,α':1, 'REF\tB':2})
+                else:
+                    assert len(command) == 6 and not (directory/'reference_ids.json').exists()
+                (directory/'prime_gbsa_input.maegz').write_bytes(b'new PV')
+        def create(backend):
+            def submit(given_args, folder, ids):
+                checkpoint('submit-'+backend)
+                assert backend == ('local' if local else 'native')
+                assert given_args is args and folder == directory and ids == [1,2]
+                assert not old.exists()
+                assert (directory/'prime_gbsa_input.maegz').read_bytes() == b'new PV'
+                return case.record
+            return submit
+        def poll(backend):
+            def collect(given_iteration, given_args, folder, record):
+                checkpoint('poll-'+backend)
+                assert (given_iteration,given_args,folder)==(iteration,args,directory)
+                assert record is case.record
+                return 37
+            return collect
+        case.record = {'saved':'same-record'}
+        monkeypatch.setattr(prime_gbsa_async,'load_job',lambda folder: events.append('load') or None)
+        monkeypatch.setattr(prime_gbsa_batch,'other_submission',lambda *a: events.append('other') or None)
+        monkeypatch.setattr(prime_gbsa_queue,'prepare_new_calculation',retired)
+        monkeypatch.setattr(c,'create_grid_receptor_extractor',extractor)
+        monkeypatch.setattr(c,'create_prime_gbsa_pv_builder',builder)
+        monkeypatch.setattr(c,'run_command',native)
+        for backend,module in [('native',prime_gbsa_batch),('local',prime_gbsa_local)]:
+            monkeypatch.setattr(module,'create_batch',create(backend))
+            monkeypatch.setattr(module,'poll_batch',poll(backend))
+        case.run = lambda: c.run_iteration_prime_gbsa(iteration,args,iteration_dir,glide,[2,1,3])
+        case.expected_events = ['load','other','retire'] + (['receptor-helper','extract-receptor'] if receptor=='grid' else []) + ['pv-helper','build-pv','submit-'+('local' if local else 'native'),'poll-'+('local' if local else 'native')]
+        return case
+    return make
+
+
+@pytest.mark.parametrize('iteration',[0,1])
+@pytest.mark.parametrize('receptor',['copy','inplace','grid'])
+@pytest.mark.parametrize('local',[False,True])
+def test_new_prime_input_bytes_identity_and_event_order(prime_case, capsys, iteration, receptor, local):
+    case = prime_case(iteration,receptor,local)
+    assert case.run() == 37
+    assert case.events == case.expected_events
+    assert capsys.readouterr().out == '\nPRIME_GBSA (Prime)\n' + '-'*70 + '\nDocking top input   : 2\n'
+    with closing(sqlite3.connect(case.args.db_path)) as conn:
+        assert conn.execute('SELECT id,prime_gbsa_score,state FROM compound ORDER BY id').fetchall() == [
+            (1,None,'reference' if iteration==0 else 'docked'),
+            (2,None,'reference' if iteration==0 else 'docked'),
+            (3,-40.,'reference' if iteration==0 else 'prime_gbsa_done')]
+
+
+@pytest.mark.parametrize('phase',['retire','extract-receptor','build-pv','submit-native'])
+def test_prime_preparation_failure_stops_before_later_side_effects(prime_case, phase):
+    case = prime_case(receptor='grid');case.fail_at=phase
+    with pytest.raises(RuntimeError) as caught:
+        case.run()
+    assert caught.value is case.failure
+    assert case.events == case.expected_events[:case.expected_events.index(phase)+1]
+    assert case.old.exists() == (phase != 'submit-native')
+    assert (case.directory/'docking_top.tsv').exists() == (phase != 'retire')
+    assert (case.directory/'prime_gbsa_input.maegz').exists() == (phase != 'build-pv')
+
+
+def test_missing_custom_receptor_preserves_old_results_and_partial_input_files(prime_case):
+    case = prime_case();case.args.prime_gbsa_receptor.unlink()
+    with pytest.raises(FileNotFoundError) as caught:
+        case.run()
+    assert str(caught.value) == f'prime_gbsa receptor not found: {case.args.prime_gbsa_receptor}'
+    assert case.events == ['load','other','retire']
+    assert (case.directory/'docking_top.tsv').exists() and (case.directory/'ids.txt').exists()
+    assert case.old.read_bytes() == b'old native result'
+    assert (case.directory/'prime_gbsa_input.maegz').read_bytes() == b'stale PV'
+
+
+def test_missing_poses_skips_before_cleanup_or_directory_creation(prime_case, capsys):
+    case=prime_case();case.poses.unlink()
+    case.directory.rename(case.directory.with_name('untouched-backup'))
+    assert case.run() == 0
+    assert case.events == ['load','other']
+    assert not case.directory.exists()
+    assert capsys.readouterr().out == f'\nWARNING: prime_gbsa skipped because {case.poses} does not exist.\n'
+
+
+@pytest.mark.parametrize('mode,module_name,function_name',[
+    ('adam_prime_batch_v1','local','poll_batch'),
+    ('compound_queue_v1','queue','poll_queue'),
+    ('native_batch_v1','native','poll_batch'),
+])
+def test_saved_prime_modes_bypass_all_new_input_preparation(prime_case, monkeypatch, mode, module_name, function_name):
+    case=prime_case();active={'mode':mode,'job_id':'retained-native-id'}
+    monkeypatch.setattr(prime_gbsa_async,'load_job',lambda folder:case.events.append('load') or active)
+    modules={'local':prime_gbsa_local,'queue':prime_gbsa_queue,'native':prime_gbsa_batch}
+    def poll(iteration,args,folder,record):
+        assert (iteration,args,folder)==(case.iteration,case.args,case.directory)
+        assert record is active
+        case.events.append('recover-'+mode)
+        return active
+    monkeypatch.setattr(modules[module_name],function_name,poll)
+    assert case.run() is active
+    assert case.events == ['load','recover-'+mode]
+    assert case.old.read_bytes()==b'old native result'
+    assert not (case.directory/'docking_top.tsv').exists()
+
+
+@pytest.mark.parametrize('ready',[False,True])
+def test_legacy_prime_retains_job_until_result_publication(prime_case, monkeypatch, ready):
+    case=prime_case();active={'command':['/suite/prime_mmgbsa'],'compound_ids':[2,1],'job_id':'saved-id'}
+    monkeypatch.setattr(prime_gbsa_async,'load_job',lambda folder:case.events.append('load') or active)
+    def poll(command,folder,ids,**options):
+        assert command is active['command'] and ids is active['compound_ids']
+        assert options['wait_seconds']==300 and options['retries']==3
+        assert callable(options['on_completed_subjobs']) and callable(options['submission_fence'])
+        case.events.append('legacy-poll');return ready
+    monkeypatch.setattr(prime_gbsa_async,'submit_or_poll',poll)
+    monkeypatch.setattr(c,'finish_iteration_prime_gbsa',lambda *a:case.events.append('finish') or 12)
+    monkeypatch.setattr(prime_gbsa_async,'persist_atomtyping_failures',lambda *a:case.events.append('failures'))
+    job=prime_gbsa_async.job_file(case.directory);job.write_text(json.dumps(active))
+    original_replace,original_unlink=Path.replace,Path.unlink
+    def replace(path,target):
+        if path.name=='prime_gbsa_final.pending.maegz':
+            assert job.exists();case.events.append('publish')
+        return original_replace(path,target)
+    def unlink(path,*a,**kw):
+        if path==job:
+            assert (case.directory/'prime_gbsa_final.maegz').read_bytes()==b'old native result'
+            case.events.append('retire-job')
+        return original_unlink(path,*a,**kw)
+    monkeypatch.setattr(Path,'replace',replace);monkeypatch.setattr(Path,'unlink',unlink)
+    assert case.run() == (12 if ready else None)
+    assert case.events == ['load','legacy-poll'] + (['finish','failures','publish','retire-job'] if ready else [])
+    assert job.exists() is not ready
+    assert not (case.directory/'docking_top.tsv').exists()

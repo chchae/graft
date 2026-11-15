@@ -122,3 +122,18 @@ def completion_summary(args, iteration, stage, elapsed):
         else:
             fields.append('native job time=n/a')
     return '; '.join(fields)
+
+
+def timeout_warning(args, iteration, stage):
+    """Warn on >=50% runtime losses among this stage's resolved compounds."""
+    if stage not in {'ligprep', 'glide', 'amber-gbsa', 'prime_gbsa', 'md-gbsa'}:
+        return ''
+    successful, failed = database.stage_summary_results(args.db_path, iteration, stage)
+    total = len(successful | failed)
+    timed_out = failed & database.stage_timeout_failed_ids(args.db_path, iteration, stage)
+    if not total or not timed_out or len(timed_out) * 2 < total:
+        return ''
+    return (f'[WARNING] iteration {iteration}: {stage} calculation time limits caused '
+            f'timeout_failed={len(timed_out)}/{total} ({len(timed_out) / total:.1%}); '
+            'at least half of stage compounds were lost. '
+            'Review calculation time limits and failure logs.')

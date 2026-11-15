@@ -10,7 +10,7 @@ from graft.stages._logging import detail
 from graft.glide_timing import record as record_timing
 
 from graft.schrodinger_guard import (active_jobs, belongs_to_directory,
-    job_details, job_kind, submission_guard, TERMINAL)
+    job_details, job_kind, submission_guard, TERMINAL, JobStatusUnavailable, native_error_message)
 
 
 def record_file(directory):
@@ -59,13 +59,22 @@ def discard_terminal_results(directory):
     print(f'Removed previous Glide results in {directory.name}; starting a fresh calculation.', flush=True)
 
 
-def _enforce_tree_timeout(suite, directory, record, timeout_seconds):
+def _native_recovery_command(command, directory, timeout):
+    """Distinguish an unavailable native RPC from local persistence failures."""
+    try:
+        return subprocess.run(command, cwd=directory, check=True,
+                              capture_output=True, text=True, timeout=timeout)
+    except (subprocess.SubprocessError, OSError) as exc:
+        raise JobStatusUnavailable(f'Glide jsc {command[1]} unavailable: {native_error_message(exc)}') from exc
+
+
+def _enforce_tree_timeout(suite, directory, record, timeout_seconds, *, jobs=None):
     """Stop a timed-out native tree; retain claims until every job terminates."""
     if not record or not record.get('job_id'):
         return None
     if timeout_seconds <= 0 and not record.get('timeout_requested_at'):
         return None
-    jobs = job_details(suite, record['job_id'], directory)
+    jobs = job_details(suite, record['job_id'], directory) if jobs is None else jobs
     parent = next(j for j in jobs if j['jobId'] == record['job_id'])
     running = [j['jobId'] for j in jobs if j.get('status') not in TERMINAL]
     if not running:
@@ -86,8 +95,7 @@ def _enforce_tree_timeout(suite, directory, record, timeout_seconds):
         save_record(directory, record)
     if now - record.get('timeout_stop_sent_at', 0) >= 30:
         # Include live children even if their parent has already terminated.
-        subprocess.run([str(Path(suite) / 'jsc'), 'stop', *running],
-                       cwd=directory, check=True, capture_output=True, text=True, timeout=30)
+        _native_recovery_command([str(Path(suite) / 'jsc'), 'stop', *running], directory, 30)
         record['timeout_stop_sent_at'] = now
         save_record(directory, record)
         print(f"Glide {record['job_id']}: {record['timeout_seconds']}s timeout; "
@@ -107,7 +115,7 @@ def _started_at(job):
         return None
 
 
-def enforce_timeout(suite, directory, record, timeout_seconds):
+def enforce_timeout(suite, directory, record, timeout_seconds, *, jobs=None):
     """Stop only overrun computing children, allowing their parent to merge.
 
     Older durable whole-tree stop intents retain their original reconciliation.
@@ -116,11 +124,11 @@ def enforce_timeout(suite, directory, record, timeout_seconds):
     if not record or not record.get('job_id'):
         return None
     if record.get('timeout_requested_at'):
-        return _enforce_tree_timeout(suite, directory, record, timeout_seconds)
+        return _enforce_tree_timeout(suite, directory, record, timeout_seconds, jobs=jobs)
     intents = record.get('subjob_timeouts', {})
     if timeout_seconds <= 0 and not intents:
         return None
-    jobs = job_details(suite, record['job_id'], directory)
+    jobs = job_details(suite, record['job_id'], directory) if jobs is None else jobs
     parent = next(j for j in jobs if j['jobId'] == record['job_id'])
     children = [j for j in jobs if j['jobId'] != record['job_id']]
     if not children and not intents:
@@ -133,7 +141,7 @@ def enforce_timeout(suite, directory, record, timeout_seconds):
         if (driver or parent.get('status') != 'RUNNING' or started is None or
                 timeout_seconds <= 0 or time.time()-started < timeout_seconds):
             return None
-        return _enforce_tree_timeout(suite, directory, record, timeout_seconds)
+        return _enforce_tree_timeout(suite, directory, record, timeout_seconds, jobs=jobs)
 
     now = time.time()
     limit = record.get('timeout_seconds', timeout_seconds)
@@ -163,8 +171,7 @@ def enforce_timeout(suite, directory, record, timeout_seconds):
     stop = [identity for identity, intent in intents.items() if identity in running and
             now-intent.get('stop_sent_at', 0) >= 30]
     if stop:
-        subprocess.run([str(Path(suite)/'jsc'), 'stop', *stop], cwd=directory,
-                       check=True, capture_output=True, text=True, timeout=30)
+        _native_recovery_command([str(Path(suite)/'jsc'), 'stop', *stop], directory, 30)
         for identity in stop:
             intents[identity]['stop_sent_at'] = now
         save_record(directory, record)
@@ -175,11 +182,21 @@ def enforce_timeout(suite, directory, record, timeout_seconds):
 
 def group_status(suite, directory, log_file, output_file, live=None, timeout_seconds=0):
     """Return a native status, UNKNOWN, or None for an unsubmitted group."""
+    try:
+        return _group_status(suite, directory, log_file, output_file, live, timeout_seconds)
+    except (JobStatusUnavailable, subprocess.SubprocessError) as exc:
+        print(f'[WARNING] Glide {Path(directory).name}: native status/recovery unavailable; '
+              f'keeping UNKNOWN for retry: {native_error_message(exc)}', flush=True)
+        return 'UNKNOWN'
+
+
+def _group_status(suite, directory, log_file, output_file, live=None, timeout_seconds=0):
     directory = Path(directory)
     live = active_jobs(suite) if live is None else live
     matches = [j for j in live if job_kind(j) == 'glide' and
                belongs_to_directory(j, directory)]
     record = load_record(directory)
+    jobs = None
     if matches:
         parents = [j for j in matches if not j.get('parentJobId')]
         if parents:
@@ -189,7 +206,9 @@ def group_status(suite, directory, log_file, output_file, live=None, timeout_sec
                 record = {'job_id': parent['jobId'], 'job_name': parent.get('jobName'),
                           'recovered': True, 'downloaded': False}
                 save_record(directory, record)
-        timeout_status = enforce_timeout(suite, directory, record, timeout_seconds)
+        if record and record.get('job_id') and (timeout_seconds > 0 or has_timeouts(record)):
+            jobs = job_details(suite, record['job_id'], directory)
+        timeout_status = enforce_timeout(suite, directory, record, timeout_seconds, jobs=jobs)
         if timeout_status is not None and timeout_status != 'STOPPED':
             return timeout_status
         if timeout_status != 'STOPPED':
@@ -203,16 +222,15 @@ def group_status(suite, directory, log_file, output_file, live=None, timeout_sec
     if record is not None:
         if not record.get('job_id'):
             return 'UNKNOWN'  # Never repeat an uncertain launch.
-        timeout_status = enforce_timeout(suite, directory, record, timeout_seconds)
+        jobs = job_details(suite, record['job_id'], directory) if jobs is None else jobs
+        timeout_status = enforce_timeout(suite, directory, record, timeout_seconds, jobs=jobs)
         if timeout_status is not None:
             return timeout_status
-        jobs = job_details(suite, record['job_id'], directory)
         if any(j.get('status') not in TERMINAL for j in jobs):
             return 'RUNNING'
         parent = next(j for j in jobs if j['jobId'] == record['job_id'])
         if parent['status'] == 'DONE' and not record.get('downloaded'):
-            subprocess.run([str(Path(suite) / 'jsc'), 'download', '--cwd', record['job_id']],
-                           cwd=directory, check=True, capture_output=True, text=True, timeout=60)
+            _native_recovery_command([str(Path(suite) / 'jsc'), 'download', '--cwd', record['job_id']], directory, 60)
             record['downloaded'] = True
             save_record(directory, record)
         return parent['status']
@@ -250,8 +268,7 @@ def timeout_pose_files(suite, directory):
         if folder.is_symlink():
             raise RuntimeError('Glide timeout output directory is a symlink')
         if identity not in downloaded:
-            subprocess.run([str(Path(suite) / 'jsc'), 'download', '--cwd', identity],
-                           cwd=folder, check=True, capture_output=True, text=True, timeout=60)
+            _native_recovery_command([str(Path(suite) / 'jsc'), 'download', '--cwd', identity], folder, 60)
             downloaded.add(identity)
             record['timeout_downloaded_ids'] = sorted(downloaded)
             save_record(directory, record)

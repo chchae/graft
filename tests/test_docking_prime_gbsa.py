@@ -248,10 +248,20 @@ def test_constrained_glide_settings_match_reference_method(tmp_path):
     for setting in ("PRECISION SP", "POSES_PER_LIG 1", "POSE_OUTTYPE ligandlib",
                     "USE_REF_LIGAND True", "CORE_DEFINITION smarts",
                     'CORE_SMARTS "c1ccccc1"', "CORE_ATOMS 1,2,3,4,5,6",
-                    "CORE_RESTRAIN True", "CORECONS_FALLBACK False"):
+                    "CORE_RESTRAIN True", "CORECONS_FALLBACK False", "CORE_POS_MAX_RMSD 1.0"):
         assert setting in config
     with pytest.raises(ValueError, match="core_atoms"):
         _core.write_constrained_glide_input(tmp_path, "grid", "ligands", "reference", "c1ccccc1")
+
+
+def test_mcssmarts_glide_core_uses_one_angstrom_tolerance(tmp_path):
+    text = _core.write_constrained_glide_input(
+        tmp_path, 'grid.zip', 'ligands.maegz', 'reference.maegz',
+    ).read_text()
+    assert 'CORE_DEFINITION mcssmarts' in text
+    assert 'CORE_POS_MAX_RMSD 1.0' in text
+    assert 'CORE_RESTRAIN True' in text
+    assert 'CORECONS_FALLBACK False' in text
 
 
 @pytest.mark.parametrize("cpus,host", [(None, "compute"), (16, "compute")])

@@ -6,7 +6,89 @@ from types import SimpleNamespace
 from typing import Any
 
 from graft.paths import stage_directory
-from graft import _core
+import tomllib
+
+
+def _merge_combichem_project_keys(raw, section, base_output: Path):
+    """Apply existing shared-key aliases and section overrides in their order."""
+    aliases = {'receptor':('dock-grid','receptor','prime-gbsa-receptor','amber-receptor'),
+               'parents':('reference-pose','parents','parent-pose','parent-poses'),
+               'reference-smiles':('reference-smiles',), 'history':('history','parent-history')}
+    # Section values override shared keys, without invoking legacy project
+    # initialization or changing its live database/selections.
+    merged = {key:raw[key] for key in ('sidechain-library','max-iteration','target-count','reference-mcs') if key in raw}
+    for target,keys in aliases.items():
+        for key in keys:
+            if key in raw:
+                merged[target]=raw[key]
+                break
+    if 'receptor' not in merged:
+        merged['receptor']=str(stage_directory(base_output,0,'prime_gbsa')/'receptor.maegz')
+    if 'parents' not in merged:
+        parent_root = stage_directory(base_output,1,'glide')
+        merged['parents']=str(parent_root/('best_poses.sdf' if (parent_root/'best_poses.sdf').is_file() else 'best_poses.maegz'))
+    merged['out-dir']=str(base_output/'combichem-3d')
+    merged.update(section)
+    return merged
+
+
+def _validate_combichem_values(cfg) -> None:
+    """Validate numeric/filter values at the existing point before backend checks."""
+    positive_ints = ('max-iteration', 'sidechains-per-site', 'conformers', 'optimization-iterations',
+                     'minimum-valid-poses', 'target-count', 'processes', 'batch-size', 'result-buffer-size', 'embed-timeout', 'inferred-parent-iteration',
+                     'sidechain-min-heavy-atoms', 'sidechain-max-heavy-atoms','elite-count','next-attachment-count','mcs-timeout')
+    for key in (*positive_ints, 'torsion-trials', 'seed', 'maximum-receptor-clashes', 'maximum-internal-clashes', 'log-structures'):
+        value = cfg[key]
+        if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key in positive_ints else 0):
+            raise ValueError(f'{key} must be an integer >= {1 if key in positive_ints else 0}')
+    for key,minimum in (('crem-radius',1),('crem-min-freq',0)):
+        value=cfg[key]
+        if isinstance(value,bool) or not isinstance(value,int) or value<minimum:
+            raise ValueError(f'{key} must be an integer >= {minimum}')
+    if (cfg['execution-backend']!='slurm' and cfg['processes'] > 384) or cfg['seed'] > 2147483646:
+        raise ValueError('processes must be <=384 and seed <=2147483646')
+    for key in ('core-displacement', 'overlap-tolerance', 'one-four-scale', 'restraint-force', 'receptor-repulsion-strength', 'max-seconds', 'grace-seconds', 'log-interval', 'result-buffer-seconds'):
+        value = cfg[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError(f'{key} must be a finite nonnegative number')
+    if cfg['max-seconds'] <= 0 or cfg['restraint-force'] <= 0 or not 0 < cfg['one-four-scale'] <= 1:
+        raise ValueError('max-seconds/restraint-force must be positive and one-four-scale in (0,1]')
+    if cfg['result-buffer-size'] > 256 or cfg['result-buffer-seconds'] <= 0:
+        raise ValueError('result-buffer-size must be 1..256 and result-buffer-seconds must be positive')
+    if cfg['log-interval'] <= 0 or cfg['log-level'] not in ('INFO','DEBUG','TRACE'):
+        raise ValueError('log-interval must be positive and log-level must be INFO, DEBUG or TRACE')
+    if cfg['log-structures']>20:
+        raise ValueError('log-structures must be between 0 and 20')
+    if cfg['next-attachment-count']>4:
+        raise ValueError('next-attachment-count must be <=4')
+    if cfg['elite-rank-by'] not in (None,'qed','similarity'):
+        raise ValueError('elite-rank-by must be qed or similarity; external ranking requires an explicit imported-score protocol')
+    if cfg['attachment-distance']!='bonds':
+        raise ValueError('attachment-distance must be bonds (minimum shortest-path distance to previous attachment atoms)')
+    if cfg['sidechain-min-heavy-atoms']>cfg['sidechain-max-heavy-atoms']:
+        raise ValueError('sidechain-min-heavy-atoms must not exceed sidechain-max-heavy-atoms')
+    for key in ('include-water', 'include-cofactors', 'include-hydrogens', 'prune-intermediates', 'infer-history', 'sidechain-include-h'):
+        if not isinstance(cfg[key], bool):
+            raise ValueError(f'{key} must be a boolean')
+    for key, allowed in {'one-four-policy': ('exclude', 'include', 'scaled'),
+                         'growth-mode': ('frame-cycles','frontier','fixed-frame'),
+                         'sidechain-selection': ('random','ordered'),
+                         'force-field': ('auto', 'MMFF', 'UFF'),
+                         'core-constraint': ('fixed', 'restraint'), 'stop-mode': ('target', 'time','cycles')}.items():
+        if cfg[key] not in allowed:
+            raise ValueError(f'{key} must be one of {allowed}')
+    properties = {'mw', 'clogp', 'tpsa', 'qed', 'similarity', 'hbd', 'hba', 'rotatable_bonds', 'heavy_atoms'}
+    if not isinstance(cfg['filters'], dict) or set(cfg['filters']) - properties:
+        raise ValueError('filters must contain only supported property ranges')
+    for key, limits in cfg['filters'].items():
+        if (not isinstance(limits, list) or len(limits) != 2
+                or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in limits)
+                or limits[0] > limits[1]):
+            raise ValueError(f'filters.{key} must be [finite minimum, finite maximum]')
+    if not isinstance(cfg['site-candidates'], dict) or any(
+            not isinstance(v, list) or not v or any(not isinstance(x, str) for x in v)
+            for v in cfg['site-candidates'].values()):
+        raise ValueError('site-candidates must map atom UIDs to nonempty fragment SMILES lists')
 
 
 def combichem_3d_settings(filename):
@@ -27,25 +109,7 @@ def combichem_3d_settings(filename):
         if not project or Path(project).name!=project:
             raise ValueError('Invalid project name')
         inherited = dict(raw)
-        aliases = {'receptor':('dock-grid','receptor','prime-gbsa-receptor','amber-receptor'),
-                   'parents':('reference-pose','parents','parent-pose','parent-poses'),
-                   'reference-smiles':('reference-smiles',), 'history':('history','parent-history')}
-        # Section values override shared keys, without invoking legacy project
-        # initialization or changing its live database/selections.
-        merged = {key:raw[key] for key in ('sidechain-library','max-iteration','target-count','reference-mcs') if key in raw}
-        for target,keys in aliases.items():
-            for key in keys:
-                if key in raw:
-                    merged[target]=raw[key]
-                    break
-        if 'receptor' not in merged:
-            merged['receptor']=str(stage_directory(base_output,0,'prime_gbsa')/'receptor.maegz')
-        if 'parents' not in merged:
-            parent_root = stage_directory(base_output,1,'glide')
-            merged['parents']=str(parent_root/('best_poses.sdf' if (parent_root/'best_poses.sdf').is_file() else 'best_poses.maegz'))
-        merged['out-dir']=str(base_output/'combichem-3d')
-        merged.update(section)
-        raw = merged
+        raw = _merge_combichem_project_keys(raw, section, base_output)
     defaults = {
         'max-iteration': 1, 'sidechains-per-site': 10, 'conformers': 8,
         'sidechain-min-heavy-atoms': 5, 'sidechain-max-heavy-atoms': 10,
@@ -164,61 +228,7 @@ def combichem_3d_settings(filename):
             extra = '; add [combichem-3d].history with explicit UID/core/fragment provenance' if key=='history' else ''
             raise ValueError(f'{key} must be a nonempty local path{extra}')
         cfg[key] = str((path.parent / Path(value).expanduser()).resolve())
-    positive_ints = ('max-iteration', 'sidechains-per-site', 'conformers', 'optimization-iterations',
-                     'minimum-valid-poses', 'target-count', 'processes', 'batch-size', 'result-buffer-size', 'embed-timeout', 'inferred-parent-iteration',
-                     'sidechain-min-heavy-atoms', 'sidechain-max-heavy-atoms','elite-count','next-attachment-count','mcs-timeout')
-    for key in (*positive_ints, 'torsion-trials', 'seed', 'maximum-receptor-clashes', 'maximum-internal-clashes', 'log-structures'):
-        value = cfg[key]
-        if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key in positive_ints else 0):
-            raise ValueError(f'{key} must be an integer >= {1 if key in positive_ints else 0}')
-    for key,minimum in (('crem-radius',1),('crem-min-freq',0)):
-        value=cfg[key]
-        if isinstance(value,bool) or not isinstance(value,int) or value<minimum:
-            raise ValueError(f'{key} must be an integer >= {minimum}')
-    if (cfg['execution-backend']!='slurm' and cfg['processes'] > 384) or cfg['seed'] > 2147483646:
-        raise ValueError('processes must be <=384 and seed <=2147483646')
-    for key in ('core-displacement', 'overlap-tolerance', 'one-four-scale', 'restraint-force', 'receptor-repulsion-strength', 'max-seconds', 'grace-seconds', 'log-interval', 'result-buffer-seconds'):
-        value = cfg[key]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-            raise ValueError(f'{key} must be a finite nonnegative number')
-    if cfg['max-seconds'] <= 0 or cfg['restraint-force'] <= 0 or not 0 < cfg['one-four-scale'] <= 1:
-        raise ValueError('max-seconds/restraint-force must be positive and one-four-scale in (0,1]')
-    if cfg['result-buffer-size'] > 256 or cfg['result-buffer-seconds'] <= 0:
-        raise ValueError('result-buffer-size must be 1..256 and result-buffer-seconds must be positive')
-    if cfg['log-interval'] <= 0 or cfg['log-level'] not in ('INFO','DEBUG','TRACE'):
-        raise ValueError('log-interval must be positive and log-level must be INFO, DEBUG or TRACE')
-    if cfg['log-structures']>20:
-        raise ValueError('log-structures must be between 0 and 20')
-    if cfg['next-attachment-count']>4:
-        raise ValueError('next-attachment-count must be <=4')
-    if cfg['elite-rank-by'] not in (None,'qed','similarity'):
-        raise ValueError('elite-rank-by must be qed or similarity; external ranking requires an explicit imported-score protocol')
-    if cfg['attachment-distance']!='bonds':
-        raise ValueError('attachment-distance must be bonds (minimum shortest-path distance to previous attachment atoms)')
-    if cfg['sidechain-min-heavy-atoms']>cfg['sidechain-max-heavy-atoms']:
-        raise ValueError('sidechain-min-heavy-atoms must not exceed sidechain-max-heavy-atoms')
-    for key in ('include-water', 'include-cofactors', 'include-hydrogens', 'prune-intermediates', 'infer-history', 'sidechain-include-h'):
-        if not isinstance(cfg[key], bool):
-            raise ValueError(f'{key} must be a boolean')
-    for key, allowed in {'one-four-policy': ('exclude', 'include', 'scaled'),
-                         'growth-mode': ('frame-cycles','frontier','fixed-frame'),
-                         'sidechain-selection': ('random','ordered'),
-                         'force-field': ('auto', 'MMFF', 'UFF'),
-                         'core-constraint': ('fixed', 'restraint'), 'stop-mode': ('target', 'time','cycles')}.items():
-        if cfg[key] not in allowed:
-            raise ValueError(f'{key} must be one of {allowed}')
-    properties = {'mw', 'clogp', 'tpsa', 'qed', 'similarity', 'hbd', 'hba', 'rotatable_bonds', 'heavy_atoms'}
-    if not isinstance(cfg['filters'], dict) or set(cfg['filters']) - properties:
-        raise ValueError('filters must contain only supported property ranges')
-    for key, limits in cfg['filters'].items():
-        if (not isinstance(limits, list) or len(limits) != 2
-                or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in limits)
-                or limits[0] > limits[1]):
-            raise ValueError(f'filters.{key} must be [finite minimum, finite maximum]')
-    if not isinstance(cfg['site-candidates'], dict) or any(
-            not isinstance(v, list) or not v or any(not isinstance(x, str) for x in v)
-            for v in cfg['site-candidates'].values()):
-        raise ValueError('site-candidates must map atom UIDs to nonempty fragment SMILES lists')
+    _validate_combichem_values(cfg)
     host = cfg['execution-host']
     script = cfg['remote-env-script']
     if host is not None or cfg['execution-backend']=='slurm':
@@ -889,7 +899,123 @@ def submission_installation(config: dict[str, Any], base: Path) -> Path | None:
 
 
 def load_project_toml(path: str | Path) -> dict[str, Any]:
-    return _core.load_project_toml(path)
+    filename = Path(path).expanduser().resolve()
+
+    with filename.open("rb") as f:
+        config = tomllib.load(f)
+
+    from graft.config import generation_settings
+    generation = generation_settings(config, filename.parent)
+
+    required = [
+        "dock-grid",
+        "reference-pose",
+        "out-dir",
+        "target-count",
+        "max-iteration",
+        "host",
+    ]
+    if generation['generation_method'] == 'reinvent4':
+        required += ['libinvent-prior', 'sample-size']
+
+    missing = [key for key in required if key not in config]
+    if missing:
+        raise RuntimeError(
+            "Missing required TOML key(s): " + ", ".join(missing)
+        )
+
+    base = filename.parent
+    from graft.config import remote_reinvent_settings, remote_aizynth_settings, aizynth_process_count, sa_score_process_count, sa_accepted_ratio, elite_mcs, elite_mcs_fixed
+    remote_reinvent = (remote_reinvent_settings(config)
+                       if generation['generation_method'] == 'reinvent4' else None)
+    remote_aizynth = remote_aizynth_settings(config)
+
+    def resolve_path(value):
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        return path.resolve()
+
+    project = str(config.get("project", filename.stem)).strip()
+    if not project:
+        raise RuntimeError("TOML 'project' must not be empty.")
+
+    synthetic_enabled = bool(config.get("synthetic-feasibility-enabled", True))
+    aizynth_config = (
+        (Path(config["aizynth-config"]) if remote_aizynth
+         else resolve_path(config["aizynth-config"]))
+        if config.get("aizynth-config")
+        else None
+    )
+    aizynth_cli = str(config.get("aizynth-cli", "aizynthcli")).strip()
+    if synthetic_enabled and aizynth_config is None:
+        raise RuntimeError(
+            "'aizynth-config' is required when synthetic-feasibility-enabled is true."
+        )
+    if not aizynth_cli:
+        raise RuntimeError("'aizynth-cli' must not be empty.")
+
+    output = resolve_path(config["out-dir"])
+    from graft.config import prime_gbsa_license_retry_settings, schrodinger_cpu_settings, schrodinger_stage_hosts, glide_job_timeout, amber_settings, log_level, prime_gbsa_flexdist, fep_settings, debug_settings, distribution_settings, md_gbsa_settings
+    from graft.config import prime_gbsa_local_settings, submission_installation, attraction_point_settings
+    return debug_settings(config, {
+        **attraction_point_settings(config),
+        **prime_gbsa_local_settings(config),
+        **distribution_settings(config),
+        **md_gbsa_settings(config, base),
+        **generation,
+        **amber_settings(config, base),
+        **prime_gbsa_license_retry_settings(config),
+        **schrodinger_cpu_settings(config),
+        **schrodinger_stage_hosts(config),
+        "toml_file": filename,
+        "submission_schrodinger": submission_installation(config, base),
+        "log_level": log_level(config),
+        "project": project,
+        "db_path": output / f"{project}.sqlite",
+        "libinvent_prior": ((Path(config["libinvent-prior"]) if remote_reinvent
+                             else resolve_path(config["libinvent-prior"]))
+                            if generation['generation_method'] == 'reinvent4' else None),
+        "remote_reinvent": remote_reinvent,
+        "grid": resolve_path(config["dock-grid"]),
+        "reference_poses": resolve_path(config["reference-pose"]),
+        "mcs_smarts": config.get("reference-mcs"),
+        "elite_mcs_smarts": elite_mcs(config),
+        "elite_mcs_fixed": elite_mcs_fixed(config),
+        "output": output,
+        "sample_size": generation['sample_size'],
+        "target_count": int(config["target-count"]),
+        "max_iteration": int(config["max-iteration"]),
+        "host": str(config["host"]),
+        "tail_timeout": int(config.get("tail-timeout", 300)),
+        "glide_job_timeout": glide_job_timeout(config),
+        "elite_count": int(config.get("elite-count", 30)),
+        "elite_best_count": int(config.get("elite-best-count", 10)),
+        "elite_diverse_count": int(config.get("elite-diverse-count", 20)),
+        "elite_candidate_pool": int(config.get("elite-candidate-pool", 200)),
+        "elite_tl_epochs": int(config.get("elite-tl-epochs", 3)),
+        "prime_gbsa_elite_count": int(config.get("prime-gbsa-elite-count", 10)),
+        "prime_gbsa_flexdist": prime_gbsa_flexdist(config),
+        **fep_settings(config),
+        "synthetic_feasibility_enabled": synthetic_enabled,
+        "aizynth_config": aizynth_config,
+        "aizynth_cli": aizynth_cli,
+        "aizynth_nproc": aizynth_process_count(config),
+        "sa_score_cpus": sa_score_process_count(config),
+        "sa_accepted_ratio": sa_accepted_ratio(config),
+        "remote_aizynth": remote_aizynth,
+        "prime_gbsa_receptor": (
+            resolve_path(config["prime-gbsa-receptor"])
+            if config.get("prime-gbsa-receptor")
+            else None
+        ),
+        "ligprep_ph": float(config.get("ligprep-ph", 7.4)),
+        "ligprep_pht": float(config.get("ligprep-pht", 1.0)),
+        "ligprep_max_states": int(config.get("ligprep-max-states", 2)),
+        "ligprep_max_stereo": int(config.get("ligprep-max-stereo", 1)),
+        "ligprep_ring_confs": int(config.get("ligprep-ring-confs", 1)),
+    })
+
 
 
 def remote_aizynth_settings(config: dict[str, Any]) -> dict[str, str] | None:
@@ -914,4 +1040,5 @@ def remote_aizynth_settings(config: dict[str, Any]) -> dict[str, str] | None:
 def configure_project(
     path: str | Path, schrodinger: str | Path | None = None
 ) -> SimpleNamespace:
+    from graft import _core
     return _core.configure_project(path, Path(schrodinger) if schrodinger else None)

@@ -192,7 +192,6 @@ def test_timeout_stop_failure_keeps_durable_intent_and_claims(tmp_path, monkeypa
     def fail(*a, **kw):
         raise OSError('JobServer unavailable')
     monkeypatch.setattr(recovery.subprocess, 'run', fail)
-    with pytest.raises(OSError):
-        recovery.group_status('/suite', tmp_path, log, out, [], timeout_seconds=1800)
+    assert recovery.group_status('/suite', tmp_path, log, out, [], timeout_seconds=1800) == 'UNKNOWN'
     assert recovery.load_record(tmp_path)['timeout_requested_at'] == 1801
     assert 'timeout_stop_sent_at' not in recovery.load_record(tmp_path)

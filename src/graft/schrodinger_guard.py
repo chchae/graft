@@ -15,6 +15,17 @@ class SubmissionBlocked(RuntimeError):
     pass
 
 
+class JobStatusUnavailable(RuntimeError):
+    """A native query failed; it proves neither completion nor absence."""
+
+
+def native_error_message(exc):
+    text = getattr(exc, 'stderr', None) or getattr(exc, 'stdout', None) or str(exc)
+    if isinstance(text, bytes):
+        text = text.decode(errors='replace')
+    return ' '.join(text.split())[:1000]
+
+
 def verify_submission_host(suite, host):
     """Read-only compatibility preflight before making a new native launch intent."""
     executable = str(Path(suite)/'jsc')
@@ -45,11 +56,14 @@ def verify_submission_host(suite, host):
 
 
 def job_details(suite, job_id, directory=None):
-    result = subprocess.run([str(Path(suite) / 'jsc'), 'info', '--json', job_id],
-                            cwd=directory, check=True, capture_output=True, text=True, timeout=30)
-    rows = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-    if not any(row.get('jobId') == job_id for row in rows):
-        raise RuntimeError(f'JobServer returned no parent {job_id}')
+    try:
+        result = subprocess.run([str(Path(suite) / 'jsc'), 'info', '--json', job_id],
+                                cwd=directory, check=True, capture_output=True, text=True, timeout=30)
+        rows = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        raise JobStatusUnavailable(f'JobServer query for {job_id} unavailable: {native_error_message(exc)}') from exc
+    if not all(isinstance(row,dict) for row in rows) or not any(row.get('jobId') == job_id for row in rows):
+        raise JobStatusUnavailable(f'JobServer returned no valid parent {job_id}')
     return rows
 
 

@@ -72,7 +72,7 @@ def test_only_overrun_child_stops_with_durable_exclusion_and_restart(tmp_path, m
             raise OSError('lost stop response')
     monkeypatch.setattr(recovery.subprocess, 'run', stop)
     if stop_error:
-        with pytest.raises(OSError, match='lost stop response'):
+        with pytest.raises(recovery.JobStatusUnavailable, match='lost stop response'):
             recovery.enforce_timeout('/suite',tmp_path,recovery.load_record(tmp_path),1800)
         assert 'stop_sent_at' not in recovery.load_record(tmp_path)['subjob_timeouts']['overrun']
     else:

@@ -24,27 +24,8 @@ from rdkit.Chem import rdFingerprintGenerator, rdFMCS
 
 def open_sqlite(path):
     """Open SQLite for concurrent stage workers."""
-    conn = sqlite3.connect(path, timeout=30)
-    try:
-        conn.execute("PRAGMA busy_timeout=30000")
-        # Concurrent first connections can race the rollback-to-WAL change;
-        # SQLite may return BUSY here without invoking its busy handler.
-        deadline = time.monotonic() + 30
-        while True:
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-                break
-            except sqlite3.OperationalError as exc:
-                if (getattr(exc, 'sqlite_errorcode', 0) & 255 not in
-                        {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
-                        or time.monotonic() >= deadline):
-                    raise
-                time.sleep(0.05)
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
-    except BaseException:
-        conn.close()
-        raise
+    from graft.database import open_sqlite as _implementation
+    return _implementation(path)
 
 
 class SQLiteCursor:
@@ -114,164 +95,13 @@ def db_connect(path):
 
 
 def load_project_toml(filename):
-    filename = Path(filename).expanduser().resolve()
-
-    with filename.open("rb") as f:
-        config = tomllib.load(f)
-
-    from graft.config import generation_settings
-    generation = generation_settings(config, filename.parent)
-
-    required = [
-        "dock-grid",
-        "reference-pose",
-        "out-dir",
-        "target-count",
-        "max-iteration",
-        "host",
-    ]
-    if generation['generation_method'] == 'reinvent4':
-        required += ['libinvent-prior', 'sample-size']
-
-    missing = [key for key in required if key not in config]
-    if missing:
-        raise RuntimeError(
-            "Missing required TOML key(s): " + ", ".join(missing)
-        )
-
-    base = filename.parent
-    from graft.config import remote_reinvent_settings, remote_aizynth_settings, aizynth_process_count, sa_score_process_count, sa_accepted_ratio, elite_mcs, elite_mcs_fixed
-    remote_reinvent = (remote_reinvent_settings(config)
-                       if generation['generation_method'] == 'reinvent4' else None)
-    remote_aizynth = remote_aizynth_settings(config)
-
-    def resolve_path(value):
-        path = Path(value).expanduser()
-        if not path.is_absolute():
-            path = base / path
-        return path.resolve()
-
-    project = str(config.get("project", filename.stem)).strip()
-    if not project:
-        raise RuntimeError("TOML 'project' must not be empty.")
-
-    synthetic_enabled = bool(config.get("synthetic-feasibility-enabled", True))
-    aizynth_config = (
-        (Path(config["aizynth-config"]) if remote_aizynth
-         else resolve_path(config["aizynth-config"]))
-        if config.get("aizynth-config")
-        else None
-    )
-    aizynth_cli = str(config.get("aizynth-cli", "aizynthcli")).strip()
-    if synthetic_enabled and aizynth_config is None:
-        raise RuntimeError(
-            "'aizynth-config' is required when synthetic-feasibility-enabled is true."
-        )
-    if not aizynth_cli:
-        raise RuntimeError("'aizynth-cli' must not be empty.")
-
-    output = resolve_path(config["out-dir"])
-    from graft.config import prime_gbsa_license_retry_settings, schrodinger_cpu_settings, schrodinger_stage_hosts, glide_job_timeout, amber_settings, log_level, prime_gbsa_flexdist, fep_settings, debug_settings, distribution_settings, md_gbsa_settings
-    from graft.config import prime_gbsa_local_settings, submission_installation, attraction_point_settings
-    return debug_settings(config, {
-        **attraction_point_settings(config),
-        **prime_gbsa_local_settings(config),
-        **distribution_settings(config),
-        **md_gbsa_settings(config, base),
-        **generation,
-        **amber_settings(config, base),
-        **prime_gbsa_license_retry_settings(config),
-        **schrodinger_cpu_settings(config),
-        **schrodinger_stage_hosts(config),
-        "toml_file": filename,
-        "submission_schrodinger": submission_installation(config, base),
-        "log_level": log_level(config),
-        "project": project,
-        "db_path": output / f"{project}.sqlite",
-        "libinvent_prior": ((Path(config["libinvent-prior"]) if remote_reinvent
-                             else resolve_path(config["libinvent-prior"]))
-                            if generation['generation_method'] == 'reinvent4' else None),
-        "remote_reinvent": remote_reinvent,
-        "grid": resolve_path(config["dock-grid"]),
-        "reference_poses": resolve_path(config["reference-pose"]),
-        "mcs_smarts": config.get("reference-mcs"),
-        "elite_mcs_smarts": elite_mcs(config),
-        "elite_mcs_fixed": elite_mcs_fixed(config),
-        "output": output,
-        "sample_size": generation['sample_size'],
-        "target_count": int(config["target-count"]),
-        "max_iteration": int(config["max-iteration"]),
-        "host": str(config["host"]),
-        "tail_timeout": int(config.get("tail-timeout", 300)),
-        "glide_job_timeout": glide_job_timeout(config),
-        "elite_count": int(config.get("elite-count", 30)),
-        "elite_best_count": int(config.get("elite-best-count", 10)),
-        "elite_diverse_count": int(config.get("elite-diverse-count", 20)),
-        "elite_candidate_pool": int(config.get("elite-candidate-pool", 200)),
-        "elite_tl_epochs": int(config.get("elite-tl-epochs", 3)),
-        "prime_gbsa_elite_count": int(config.get("prime-gbsa-elite-count", 10)),
-        "prime_gbsa_flexdist": prime_gbsa_flexdist(config),
-        **fep_settings(config),
-        "synthetic_feasibility_enabled": synthetic_enabled,
-        "aizynth_config": aizynth_config,
-        "aizynth_cli": aizynth_cli,
-        "aizynth_nproc": aizynth_process_count(config),
-        "sa_score_cpus": sa_score_process_count(config),
-        "sa_accepted_ratio": sa_accepted_ratio(config),
-        "remote_aizynth": remote_aizynth,
-        "prime_gbsa_receptor": (
-            resolve_path(config["prime-gbsa-receptor"])
-            if config.get("prime-gbsa-receptor")
-            else None
-        ),
-        "ligprep_ph": float(config.get("ligprep-ph", 7.4)),
-        "ligprep_pht": float(config.get("ligprep-pht", 1.0)),
-        "ligprep_max_states": int(config.get("ligprep-max-states", 2)),
-        "ligprep_max_stereo": int(config.get("ligprep-max-stereo", 1)),
-        "ligprep_ring_confs": int(config.get("ligprep-ring-confs", 1)),
-    })
+    from graft.config import load_project_toml as _implementation
+    return _implementation(filename)
 
 
 def create_sqlite_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS compound (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            smiles TEXT NOT NULL,
-            iteration INTEGER NOT NULL DEFAULT 0,
-            dG_exp REAL,
-            docking_score REAL,
-            prime_gbsa_score REAL,
-            amber_gbsa_score REAL,
-            fep_score REAL,
-            sa_score REAL,
-            synthetic_feasibility INTEGER
-                CHECK (synthetic_feasibility IN (0, 1)),
-            state TEXT NOT NULL DEFAULT 'generated',
-            failed_stage TEXT,
-            failure_message TEXT,
-            similar_to INTEGER REFERENCES compound(id),
-            similarity REAL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            modified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_compound_iteration "
-        "ON compound(iteration)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_compound_similar_to "
-        "ON compound(similar_to)"
-    )
-    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
-    ensure_rdkit_descriptor_columns(conn)
-    ensure_druglike_selection_ownership(conn)
-    from graft.database import ensure_md_gbsa_schema
-    ensure_md_gbsa_schema(conn)
+    from graft.database import create_sqlite_schema as _implementation
+    return _implementation(conn)
 
 
 
@@ -282,88 +112,8 @@ def ensure_schema_columns(conn: sqlite3.Connection) -> None:
     Legacy per-stage status columns are intentionally left in existing databases but
     are no longer read or written by the modular workers.
     """
-    cols = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(compound)")
-    }
-    state_added = "state" not in cols
-
-    additions = {
-        "amber_gbsa_score": "REAL",
-        "prime_gbsa_score": "REAL",
-        "fep_score": "REAL",
-        "sa_score": "REAL",
-        "synthetic_feasibility": "INTEGER CHECK (synthetic_feasibility IN (0, 1))",
-        "state": "TEXT NOT NULL DEFAULT 'generated'",
-        "failed_stage": "TEXT",
-        "failure_message": "TEXT",
-    }
-
-    for name, sql_type in additions.items():
-        if name not in cols:
-            conn.execute(
-                f"ALTER TABLE compound ADD COLUMN {name} {sql_type}"
-            )
-
-    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
-    ensure_rdkit_descriptor_columns(conn)
-    ensure_druglike_selection_ownership(conn)
-    from graft.database import ensure_md_gbsa_schema
-    ensure_md_gbsa_schema(conn)
-
-    # Refresh columns after migration so legacy status columns can be used once
-    # to infer the new single state.
-    cols = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(compound)")
-    }
-
-    # Infer states only while adding the single-state column. Re-running
-    # project setup must not overwrite active or terminal worker states.
-    if state_added:
-        conn.execute(
-            "UPDATE compound SET state='reference' WHERE iteration=0"
-        )
-        conn.execute(
-            "UPDATE compound SET state='fep_done' "
-            "WHERE iteration>0 AND fep_score IS NOT NULL"
-        )
-        conn.execute(
-            "UPDATE compound SET state='prime_gbsa_done' "
-            "WHERE iteration>0 AND fep_score IS NULL "
-            "AND prime_gbsa_score IS NOT NULL"
-        )
-        conn.execute(
-            "UPDATE compound SET state='docked' "
-            "WHERE iteration>0 AND prime_gbsa_score IS NULL "
-            "AND docking_score IS NOT NULL"
-        )
-
-        # One-time best-effort migration from the old multi-status model.
-        if "docking_status" in cols:
-            conn.execute(
-                "UPDATE compound SET state='glide_running' "
-                "WHERE iteration>0 AND docking_score IS NULL "
-                "AND docking_status='running'"
-            )
-        if "ligprep_status" in cols:
-            conn.execute(
-                "UPDATE compound SET state='ligprepped' "
-                "WHERE iteration>0 AND docking_score IS NULL "
-                "AND ligprep_status='done' "
-                "AND state NOT IN ('glide_running','failed')"
-            )
-            conn.execute(
-                "UPDATE compound SET state='ligprep_running' "
-                "WHERE iteration>0 AND docking_score IS NULL "
-                "AND ligprep_status='running' "
-                "AND state NOT IN ('ligprepped','glide_running','failed')"
-            )
-
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_compound_state ON compound(state)"
-    )
-    conn.commit()
+    from graft.database import ensure_schema_columns as _implementation
+    return _implementation(conn)
 
 
 def set_compound_state(
@@ -374,40 +124,13 @@ def set_compound_state(
     db_path: str | Path | None = None,
 ) -> None:
     """Set the single pipeline state for a list of compound IDs."""
-    ids = list(ids)
-    if not ids:
-        return
-    if db_path is None:
-        raise ValueError("db_path is required to update compound states")
-    marks = ",".join("?" for _ in ids)
-    with open_sqlite(db_path) as conn:
-        conn.execute(
-            f"""
-            UPDATE compound
-            SET state=?, failed_stage=?, failure_message=?,
-                modified_at=CURRENT_TIMESTAMP
-            WHERE id IN ({marks})
-            """,
-            [state, failed_stage, failure_message, *ids],
-        )
-        conn.commit()
+    from graft.database import set_compound_state as _implementation
+    return _implementation(ids, state, failed_stage, failure_message, db_path)
 
 
 def find_iteration_for_state(stage: str, db_path: str | Path) -> int | None:
-    conditions = {
-        "ligprep": "iteration>0 AND state IN ('generated','ligprep_running')",
-        "glide": "iteration>0 AND state IN ('ligprepped','glide_running') AND docking_score IS NULL",
-        "prime_gbsa": "iteration>0 AND docking_score IS NOT NULL AND prime_gbsa_score IS NULL AND state IN ('docked','prime_gbsa_running')",
-        "fep": "iteration>0 AND prime_gbsa_score IS NOT NULL AND fep_score IS NULL AND state IN ('prime_gbsa_done','fep_running')",
-        "synthetic_feasibility": "iteration>0 AND synthetic_feasibility IS NULL AND state IN ('generated','synthetic_running')",
-    }
-    if stage not in conditions:
-        raise ValueError(stage)
-    with open_sqlite(db_path) as conn:
-        row = conn.execute(
-            f"SELECT MIN(iteration) FROM compound WHERE {conditions[stage]}"
-        ).fetchone()
-    return row[0] if row and row[0] is not None else None
+    from graft.database import find_iteration_for_state as _implementation
+    return _implementation(stage, db_path)
 
 
 def _first_float_property(mol, names):
@@ -458,6 +181,7 @@ def import_reference_poses_to_sqlite(
 
         references = []
         seen_names = set()
+        has_reference_cache = False
 
         for index, mol in enumerate(supplier, start=1):
             if mol is None:
@@ -486,6 +210,7 @@ def import_reference_poses_to_sqlite(
                     f"Duplicate reference title in {reference_poses}: {name}"
                 )
             seen_names.add(name)
+            has_reference_cache |= mol.HasProp('s_graft_reference_scores')
 
             smiles = Chem.MolToSmiles(
                 Chem.RemoveHs(mol),
@@ -538,6 +263,9 @@ def import_reference_poses_to_sqlite(
             """,
             references,
         )
+        if has_reference_cache:
+            from graft.database import mark_reference_cache_import
+            mark_reference_cache_import(conn)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -555,6 +283,7 @@ def import_reference_poses_to_sqlite(
     print(f"Database            : {db_path}")
     print(f"Reference poses     : {reference_poses}")
     print(f"References inserted : {len(references)}")
+    return bool(has_reference_cache)
 
 
 def initialize_project_database(
@@ -610,7 +339,8 @@ def initialize_project_database(
             print("-" * 70)
             print(f"Database            : {db_path}")
             print(f"Reference compounds : {reference_count}")
-            return
+            from graft.database import reference_cache_import_pending
+            return reference_cache_import_pending(db_path)
 
         if not table_exists:
             print()
@@ -635,17 +365,17 @@ def initialize_project_database(
     # import_reference_poses_to_sqlite() creates the schema and
     # inserts iteration=0 reference ligands.
     # --------------------------------------------------------
-    import_reference_poses_to_sqlite(
+    return import_reference_poses_to_sqlite(
         db_path,
         reference_poses,
         schrodinger,
         sa_score_cpus=sa_score_cpus,
     )
 
-FP_GENERATOR = rdFingerprintGenerator.GetMorganGenerator(
-    radius=2,
-    fpSize=2048,
-)
+from graft.chemistry.fingerprints import create_morgan_generator as _create_morgan_generator
+
+# Keep the legacy binding and its initialization/reload timing here.
+FP_GENERATOR = _create_morgan_generator()
 
 
 def run_command(
@@ -683,28 +413,15 @@ def canonicalize_smiles(smiles: str) -> str | None:
 
 
 def get_max_iteration(db_path: str | Path) -> int:
-    with db_connect(db_path) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COALESCE(MAX(iteration), 0) FROM compound"
-            )
-            return cur.fetchone()[0]
+    from graft.database import get_max_iteration as _implementation
+    return _implementation(db_path)
 
 
 def get_iteration_counts(
     iteration: int, db_path: str | Path
 ) -> tuple[int, int]:
-    with db_connect(db_path) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                '''
-                SELECT COUNT(*), COUNT(docking_score)
-                FROM compound
-                WHERE iteration = %s
-                ''',
-                (iteration,),
-            )
-            return cur.fetchone()
+    from graft.database import get_iteration_counts as _implementation
+    return _implementation(iteration, db_path)
 
 
 def determine_start_iteration(db_path: str | Path) -> int:
@@ -1938,23 +1655,35 @@ def _decompose_elite_match(mol, match, attachment_by_label, label_order, dummy_q
     return decorators
 
 
-def write_elite_libinvent_training_files(
-    elites,
-    scaffold_smiles,
-    run_dir,
-    *,
-    prior_file=None,
-    remote=None,
-    score_source="prime_gbsa",
-):
-    from graft.chemistry.libinvent_decorations import decompose
-    from graft.libinvent_vocabulary import load_prior_vocabulary, unsupported_pair_tokens
+def _write_libinvent_training_pairs(path: Path, pairs) -> None:
+    """Write pairs in order, preserving token errors and partial-file behavior."""
+    with path.open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+        for scaffold, decorators in pairs:
+            if "*" in scaffold.replace("[*]", ""):
+                raise RuntimeError(
+                    "Unsupported bare '*' token in LibInvent TL scaffold: "
+                    f"{scaffold}"
+                )
 
-    vocabulary = load_prior_vocabulary(prior_file, remote) if prior_file is not None else None
-    if vocabulary is not None:
-        (run_dir / "elite_vocabulary.json").write_text(
-            json.dumps(vocabulary, indent=2) + "\n", encoding="utf-8"
-        )
+            if "[*]" in decorators:
+                raise RuntimeError(
+                    "Unsupported '[*]' token in LibInvent TL decorators: "
+                    f"{decorators}"
+                )
+
+            f.write(
+                f"{scaffold}\t{decorators}\n"
+            )
+
+
+def _elite_training_rows(
+    elites, scaffold_smiles, vocabulary, score_source, *,
+    decompose, unsupported_pair_tokens,
+):
+    """Prepare selected/skipped rows with the existing decomposition/token policy."""
     usable = []
     skipped = []
 
@@ -2033,6 +1762,31 @@ def write_elite_libinvent_training_files(
             )
         )
 
+    return usable, skipped
+
+
+def write_elite_libinvent_training_files(
+    elites,
+    scaffold_smiles,
+    run_dir,
+    *,
+    prior_file=None,
+    remote=None,
+    score_source="prime_gbsa",
+):
+    from graft.chemistry.libinvent_decorations import decompose
+    from graft.libinvent_vocabulary import load_prior_vocabulary, unsupported_pair_tokens
+
+    vocabulary = load_prior_vocabulary(prior_file, remote) if prior_file is not None else None
+    if vocabulary is not None:
+        (run_dir / "elite_vocabulary.json").write_text(
+            json.dumps(vocabulary, indent=2) + "\n", encoding="utf-8"
+        )
+    usable, skipped = _elite_training_rows(
+        elites, scaffold_smiles, vocabulary, score_source,
+        decompose=decompose, unsupported_pair_tokens=unsupported_pair_tokens,
+    )
+
     metadata = run_dir / "elite_selected.tsv"
     train_file = run_dir / "elite_train.smi"
     valid_file = run_dir / "elite_valid.smi"
@@ -2099,34 +1853,13 @@ def write_elite_libinvent_training_files(
     valid_rows = rows[:n_valid]
     train_rows = rows[n_valid:]
 
-    def write_pairs(path, pairs):
-        with path.open(
-            "w",
-            encoding="utf-8",
-        ) as f:
-            for scaffold, decorators in pairs:
-                if "*" in scaffold.replace("[*]", ""):
-                    raise RuntimeError(
-                        "Unsupported bare '*' token in LibInvent TL scaffold: "
-                        f"{scaffold}"
-                    )
 
-                if "[*]" in decorators:
-                    raise RuntimeError(
-                        "Unsupported '[*]' token in LibInvent TL decorators: "
-                        f"{decorators}"
-                    )
-
-                f.write(
-                    f"{scaffold}\t{decorators}\n"
-                )
-
-    write_pairs(
+    _write_libinvent_training_pairs(
         train_file,
         train_rows,
     )
 
-    write_pairs(
+    _write_libinvent_training_pairs(
         valid_file,
         valid_rows,
     )
@@ -2680,18 +2413,8 @@ def read_generated_smiles(csv_file):
 
 
 def get_existing_canonical_smiles(cur):
-    cur.execute(
-        "SELECT smiles FROM compound"
-    )
-
-    existing = set()
-
-    for (smiles,) in cur:
-        canonical = canonicalize_smiles(smiles)
-        if canonical is not None:
-            existing.add(canonical)
-
-    return existing
+    from graft.database import get_existing_canonical_smiles as _implementation
+    return _implementation(cur)
 
 
 def insert_generated(csv_file, iteration, target_count, db_path, cpus=1):
@@ -2746,26 +2469,8 @@ def get_reference_groups(iteration, db_path):
 
 
 def get_reference_name(reference_id, db_path):
-    with db_connect(db_path) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                '''
-                SELECT name
-                FROM compound
-                WHERE id = %s
-                  AND iteration = 0
-                ''',
-                (reference_id,),
-            )
-
-            row = cur.fetchone()
-
-    if row is None:
-        raise RuntimeError(
-            f"Reference id={reference_id} not found."
-        )
-
-    return row[0]
+    from graft.database import get_reference_name as _implementation
+    return _implementation(reference_id, db_path)
 
 
 def create_reference_extractor(root_dir):
@@ -3159,6 +2864,7 @@ USE_REF_LIGAND True
 REF_LIGAND_FILE {reference_file}
 
 {core_block}
+CORE_POS_MAX_RMSD 1.0
 """
 
     glide_input.write_text(text, encoding="utf-8")
@@ -4240,110 +3946,10 @@ def update_prime_gbsa_scores(
     return updated
 
 
-def run_iteration_prime_gbsa(
-    iteration,
-    args,
-    iteration_dir,
-    glide_dir,
-    compound_ids=None,
-):
-    from graft.prime_gbsa_async import load_job, submit_or_poll, job_file, persist_atomtyping_failures
-    prime_gbsa_dir = stage_in_iteration(iteration_dir, 'prime_gbsa')
-    active = load_job(prime_gbsa_dir)
-    if active is not None and active.get('mode')=='adam_prime_batch_v1':
-        from graft.prime_gbsa_local import poll_batch
-        return poll_batch(iteration,args,prime_gbsa_dir,active)
-    if active is not None and active.get("mode") == "compound_queue_v1":
-        from graft.prime_gbsa_queue import poll_queue
-        return poll_queue(iteration, args, prime_gbsa_dir, active)
-    if active is not None and active.get("mode") == "native_batch_v1":
-        from graft.prime_gbsa_batch import poll_batch
-        return poll_batch(iteration, args, prime_gbsa_dir, active)
-    if active is not None:
-        from graft.prime_gbsa_streaming import collect_completed_subjobs
-        from graft.schrodinger_guard import submission_guard
-        if not submit_or_poll(active["command"], prime_gbsa_dir, active["compound_ids"],
-                              wait_seconds=getattr(args, "prime_gbsa_license_retry_seconds", 300),
-                              retries=getattr(args, "prime_gbsa_license_retries", 3),
-                              on_completed_subjobs=lambda record, jobs: collect_completed_subjobs(
-                                  args, iteration, prime_gbsa_dir, record, jobs),
-                              submission_fence=lambda: submission_guard(args.schrodinger, "prime_gbsa")):
-            return None
-        updated = finish_iteration_prime_gbsa(iteration, args, prime_gbsa_dir, active["compound_ids"])
-        persist_atomtyping_failures(prime_gbsa_dir, args.db_path)
-        # A legacy batch already contains all its final native structures.
-        output_file = max(prime_gbsa_dir.glob('*-out.maegz'), key=lambda path: path.stat().st_mtime)
-        pending_coordinates = prime_gbsa_dir / 'prime_gbsa_final.pending.maegz'
-        shutil.copy2(output_file, pending_coordinates)
-        pending_coordinates.replace(prime_gbsa_dir / 'prime_gbsa_final.maegz')
-        job_file(prime_gbsa_dir).unlink()
-        return updated
-
-    from graft.prime_gbsa_batch import other_submission
-    if other_submission(args, prime_gbsa_dir) is not None:
-        # Do not reserve a second batch: a waiting native manifest would also
-        # prevent an older individual queue from refilling its remaining slots.
-        print(f'Iteration {iteration}: Prime waiting for another iteration to retire.')
-        return None
-
-    if iteration == 0:
-        with open_sqlite(args.db_path) as conn:
-            top_rows = conn.execute(
-                'SELECT id,name,docking_score FROM compound WHERE iteration=0 ORDER BY id'
-            ).fetchall()
-        from graft import database
-        priority_ids = database.attraction_order_ids(args.db_path, 0, 'prime_gbsa', [r[0] for r in top_rows])
-        by_id = {r[0]: r for r in top_rows}
-        top_rows = [by_id[cid] for cid in priority_ids]
-    else:
-        from graft import database
-        top_rows = database.prime_selection_rows(
-            args.db_path, iteration, args.prime_gbsa_input_count, database.amber_keep_count(args),
-        )
-
-    if compound_ids is not None:
-        claimed_ids = set(compound_ids)
-        top_rows = [row for row in top_rows if row[0] in claimed_ids]
-
-    if top_rows:
-        top_ids = [row[0] for row in top_rows]
-        placeholders = ",".join("?" for _ in top_ids)
-        with open_sqlite(args.db_path) as _conn:
-            done_ids = {
-                row[0]
-                for row in _conn.execute(
-                    f"SELECT id FROM compound WHERE id IN ({placeholders}) AND prime_gbsa_score IS NOT NULL",
-                    top_ids,
-                )
-            }
-        top_rows = [row for row in top_rows if row[0] not in done_ids]
-
-    if not top_rows:
-        print()
-        print(
-            "prime_gbsa skipped: no docked compounds."
-        )
-        return 0
-
-    best_poses = args.reference_poses if iteration == 0 else glide_dir / 'best_poses.maegz'
-
-    if not best_poses.exists():
-        print()
-        print(
-            "WARNING: prime_gbsa skipped because "
-            f"{best_poses} does not exist."
-        )
-        return 0
-
-    prime_gbsa_dir = stage_in_iteration(iteration_dir, 'prime_gbsa')
-
-    prime_gbsa_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    from graft.prime_gbsa_queue import prepare_new_calculation
-    prepare_new_calculation(args, prime_gbsa_dir)
-
+def _prepare_prime_gbsa_input_files(
+    iteration: int, args, prime_gbsa_dir: Path, best_poses: Path, top_rows,
+) -> None:
+    """Build new-batch inputs after the caller verifies retirement of saved work."""
     top_tsv = (
         prime_gbsa_dir
         / "docking_top.tsv"
@@ -4447,6 +4053,129 @@ def run_iteration_prime_gbsa(
         "*-out.maegz"
     ):
         old_file.unlink()
+
+
+
+def _recover_prime_gbsa_work(
+    iteration, args, prime_gbsa_dir, active, *,
+    submit_or_poll, job_file, persist_atomtyping_failures,
+):
+    """Recover saved work using dependencies captured before loading its record."""
+    if active is not None and active.get('mode')=='adam_prime_batch_v1':
+        from graft.prime_gbsa_local import poll_batch
+        return poll_batch(iteration,args,prime_gbsa_dir,active)
+    if active is not None and active.get("mode") == "compound_queue_v1":
+        from graft.prime_gbsa_queue import poll_queue
+        return poll_queue(iteration, args, prime_gbsa_dir, active)
+    if active is not None and active.get("mode") == "native_batch_v1":
+        from graft.prime_gbsa_batch import poll_batch
+        return poll_batch(iteration, args, prime_gbsa_dir, active)
+    if active is not None:
+        from graft.prime_gbsa_streaming import collect_completed_subjobs
+        from graft.schrodinger_guard import submission_guard
+        if not submit_or_poll(active["command"], prime_gbsa_dir, active["compound_ids"],
+                              wait_seconds=getattr(args, "prime_gbsa_license_retry_seconds", 300),
+                              retries=getattr(args, "prime_gbsa_license_retries", 3),
+                              on_completed_subjobs=lambda record, jobs: collect_completed_subjobs(
+                                  args, iteration, prime_gbsa_dir, record, jobs),
+                              submission_fence=lambda: submission_guard(args.schrodinger, "prime_gbsa")):
+            return None
+        updated = finish_iteration_prime_gbsa(iteration, args, prime_gbsa_dir, active["compound_ids"])
+        persist_atomtyping_failures(prime_gbsa_dir, args.db_path)
+        # A legacy batch already contains all its final native structures.
+        output_file = max(prime_gbsa_dir.glob('*-out.maegz'), key=lambda path: path.stat().st_mtime)
+        pending_coordinates = prime_gbsa_dir / 'prime_gbsa_final.pending.maegz'
+        shutil.copy2(output_file, pending_coordinates)
+        pending_coordinates.replace(prime_gbsa_dir / 'prime_gbsa_final.maegz')
+        job_file(prime_gbsa_dir).unlink()
+        return updated
+
+
+def run_iteration_prime_gbsa(
+    iteration,
+    args,
+    iteration_dir,
+    glide_dir,
+    compound_ids=None,
+):
+    from graft.prime_gbsa_async import load_job, submit_or_poll, job_file, persist_atomtyping_failures
+    prime_gbsa_dir = stage_in_iteration(iteration_dir, 'prime_gbsa')
+    active = load_job(prime_gbsa_dir)
+    if active is not None:
+        return _recover_prime_gbsa_work(
+            iteration, args, prime_gbsa_dir, active,
+            submit_or_poll=submit_or_poll, job_file=job_file,
+            persist_atomtyping_failures=persist_atomtyping_failures,
+        )
+
+    from graft.prime_gbsa_batch import other_submission
+    if other_submission(args, prime_gbsa_dir) is not None:
+        # Do not reserve a second batch: a waiting native manifest would also
+        # prevent an older individual queue from refilling its remaining slots.
+        print(f'Iteration {iteration}: Prime waiting for another iteration to retire.')
+        return None
+
+    if iteration == 0:
+        with open_sqlite(args.db_path) as conn:
+            top_rows = conn.execute(
+                'SELECT id,name,docking_score FROM compound WHERE iteration=0 ORDER BY id'
+            ).fetchall()
+        from graft import database
+        priority_ids = database.attraction_order_ids(args.db_path, 0, 'prime_gbsa', [r[0] for r in top_rows])
+        by_id = {r[0]: r for r in top_rows}
+        top_rows = [by_id[cid] for cid in priority_ids]
+    else:
+        from graft import database
+        top_rows = database.prime_selection_rows(
+            args.db_path, iteration, args.prime_gbsa_input_count, database.amber_keep_count(args),
+        )
+
+    if compound_ids is not None:
+        claimed_ids = set(compound_ids)
+        top_rows = [row for row in top_rows if row[0] in claimed_ids]
+
+    if top_rows:
+        top_ids = [row[0] for row in top_rows]
+        placeholders = ",".join("?" for _ in top_ids)
+        with open_sqlite(args.db_path) as _conn:
+            done_ids = {
+                row[0]
+                for row in _conn.execute(
+                    f"SELECT id FROM compound WHERE id IN ({placeholders}) AND prime_gbsa_score IS NOT NULL",
+                    top_ids,
+                )
+            }
+        top_rows = [row for row in top_rows if row[0] not in done_ids]
+
+    if not top_rows:
+        print()
+        print(
+            "prime_gbsa skipped: no docked compounds."
+        )
+        return 0
+
+    best_poses = args.reference_poses if iteration == 0 else glide_dir / 'best_poses.maegz'
+
+    if not best_poses.exists():
+        print()
+        print(
+            "WARNING: prime_gbsa skipped because "
+            f"{best_poses} does not exist."
+        )
+        return 0
+
+    prime_gbsa_dir = stage_in_iteration(iteration_dir, 'prime_gbsa')
+
+    prime_gbsa_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    from graft.prime_gbsa_queue import prepare_new_calculation
+    prepare_new_calculation(args, prime_gbsa_dir)
+
+    _prepare_prime_gbsa_input_files(
+        iteration, args, prime_gbsa_dir, best_poses, top_rows,
+    )
 
     print()
     print("PRIME_GBSA (Prime)")
@@ -4857,21 +4586,8 @@ def configure_project(project_toml, schrodinger=None, *, elite_mcs=None):
     args.mcs_energy_field = "auto"
     args.top_fraction = 0.10
 
-    from graft.database import migrate_project_database
-    migrate_project_database(
-        args.toml_file.parent / f"{args.project}.sqlite", args.db_path
-    )
-    initialize_project_database(
-        db_path=args.db_path,
-        reference_poses=args.reference_poses,
-        schrodinger=args.schrodinger,
-        sa_score_cpus=getattr(args, 'sa_score_cpus', 1),
-    )
-
-    with open_sqlite(args.db_path) as conn:
-        ensure_schema_columns(conn)
-
-    args.output.mkdir(parents=True, exist_ok=True)
+    from graft.project import initialize_project
+    initialize_project(args)
 
     # Initial docking core and iteration-specific generation scaffolds are
     # prepared in stage workers, not by the supervisor or status commands.
@@ -4879,23 +4595,11 @@ def configure_project(project_toml, schrodinger=None, *, elite_mcs=None):
 
 
 def state_counts(iteration, db_path):
-    with open_sqlite(db_path) as conn:
-        return conn.execute(
-            """
-            SELECT state, COUNT(*)
-            FROM compound
-            WHERE iteration=?
-            GROUP BY state
-            ORDER BY state
-            """,
-            (iteration,),
-        ).fetchall()
+    from graft.database import state_counts as _implementation
+    return _implementation(iteration, db_path)
 
 
 
 def list_iteration_compounds(iteration, db_path, where="1=1"):
-    with open_sqlite(db_path) as conn:
-        return conn.execute(
-            f"SELECT id,name,smiles,similar_to,similarity FROM compound WHERE iteration=? AND {where} ORDER BY id",
-            (iteration,),
-        ).fetchall()
+    from graft.database import list_iteration_compounds as _implementation
+    return _implementation(iteration, db_path, where)

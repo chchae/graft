@@ -1,0 +1,218 @@
+{
+  "rdkit": "2026.09.1",
+  "generator_info": "Common arguments : countSimulation=0 fpSize=2048 bitsPerFeature=1 includeChirality=0 --- MorganArguments onlyNonzeroInvariants=0 radius=2 --- MorganEnvironmentGenerator --- MorganInvariantGenerator includeRingMembership=1 --- MorganInvariantGenerator useBondTypes=1 useChirality=0",
+  "fingerprints": [
+    {
+      "smiles": "CCO",
+      "num_bits": 2048,
+      "on_bits": [
+        80,
+        222,
+        294,
+        807,
+        1057,
+        1410
+      ]
+    },
+    {
+      "smiles": "CCN",
+      "num_bits": 2048,
+      "on_bits": [
+        80,
+        294,
+        789,
+        981,
+        1057,
+        1171
+      ]
+    },
+    {
+      "smiles": "c1ccccc1",
+      "num_bits": 2048,
+      "on_bits": [
+        389,
+        1088,
+        1873
+      ]
+    },
+    {
+      "smiles": "C[C@H](O)F",
+      "num_bits": 2048,
+      "on_bits": [
+        1,
+        227,
+        283,
+        807,
+        1050,
+        1057,
+        1319,
+        1928
+      ]
+    },
+    {
+      "smiles": "C[C@@H](O)F",
+      "num_bits": 2048,
+      "on_bits": [
+        1,
+        227,
+        283,
+        807,
+        1050,
+        1057,
+        1319,
+        1928
+      ]
+    },
+    {
+      "smiles": "F/C=C/F",
+      "num_bits": 2048,
+      "on_bits": [
+        182,
+        577,
+        694,
+        1649,
+        1928
+      ]
+    },
+    {
+      "smiles": "F/C=C\\F",
+      "num_bits": 2048,
+      "on_bits": [
+        182,
+        577,
+        694,
+        1649,
+        1928
+      ]
+    },
+    {
+      "smiles": "[13CH3]CO",
+      "num_bits": 2048,
+      "on_bits": [
+        80,
+        222,
+        294,
+        807,
+        1057,
+        1410
+      ]
+    },
+    {
+      "smiles": "[NH4+]",
+      "num_bits": 2048,
+      "on_bits": [
+        657
+      ]
+    },
+    {
+      "smiles": "[CH3:7][OH:9]",
+      "num_bits": 2048,
+      "on_bits": [
+        807,
+        1057,
+        1155
+      ]
+    }
+  ],
+  "similarities": [
+    {
+      "a": "CCO",
+      "b": "CCN",
+      "value": 0.3333333333333333
+    },
+    {
+      "a": "OCC",
+      "b": "CCO",
+      "value": 1.0
+    },
+    {
+      "a": "c1ccccc1",
+      "b": "C1=CC=CC=C1",
+      "value": 1.0
+    },
+    {
+      "a": "C[C@H](O)F",
+      "b": "C[C@@H](O)F",
+      "value": 1.0
+    },
+    {
+      "a": "F/C=C/F",
+      "b": "F/C=C\\F",
+      "value": 1.0
+    },
+    {
+      "a": "[13CH3]CO",
+      "b": "CCO",
+      "value": 1.0
+    },
+    {
+      "a": "[NH4+]",
+      "b": "N",
+      "value": 0.0
+    },
+    {
+      "a": "[CH3:7][OH:9]",
+      "b": "CO",
+      "value": 1.0
+    },
+    {
+      "a": "[2H]OC",
+      "b": "CO",
+      "value": 0.2857142857142857
+    },
+    {
+      "a": "[Na+].CC",
+      "b": "CC",
+      "value": 0.6666666666666666
+    },
+    {
+      "a": "",
+      "b": "",
+      "value": 0.0
+    },
+    {
+      "a": "",
+      "b": "CCO",
+      "value": 0.0
+    },
+    {
+      "a": " ",
+      "b": "CCO",
+      "error": "ValueError",
+      "message": "Invalid SMILES"
+    },
+    {
+      "a": "not_smiles",
+      "b": "CCO",
+      "error": "ValueError",
+      "message": "Invalid SMILES"
+    },
+    {
+      "a": "not_smiles",
+      "b": null,
+      "error": "TypeError"
+    },
+    {
+      "a": null,
+      "b": "CCO",
+      "error": "TypeError"
+    },
+    {
+      "a": "CCO",
+      "b": null,
+      "error": "TypeError"
+    },
+    {
+      "a": {
+        "bytes": "CCO"
+      },
+      "b": "CCO",
+      "value": 1.0
+    },
+    {
+      "a": 12,
+      "b": "CCO",
+      "error": "TypeError"
+    }
+  ]
+}

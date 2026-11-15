@@ -85,7 +85,8 @@ def materialize_native_inputs(cfg):
             raise RuntimeError('Incomplete native input cache retained; reconcile it or use a new output directory')
         saved=json.loads(manifest.read_text())
         if saved['source']!=signature:
-            raise RuntimeError('Native input sources changed; existing cache retained. Use a new 3D output directory.')
+            from graft.reference_scores import preserve_parent_signature
+            signature = preserve_parent_signature(signature, saved['source'])
         if any(not (cache/name).is_file() or digest(cache/name)!=value for name,value in saved['files'].items()):
             raise RuntimeError('Native input cache changed; saved data retained for reconciliation')
     else:

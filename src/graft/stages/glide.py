@@ -6,6 +6,7 @@ import json
 import math
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from graft.paths import stage_directory
 from graft.stages._logging import detail, progress
@@ -23,6 +24,7 @@ from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
 from graft.glide_recovery import timeout_pose_files, save_record, output_paths, has_timeouts
 from graft.schrodinger_guard import active_jobs, belongs_to_directory, SubmissionBlocked, job_details, TERMINAL
+from graft.schrodinger_guard import native_error_message, JobStatusUnavailable
 
 
 def pose_selection_point(args, iteration):
@@ -360,7 +362,18 @@ def recover_timeout_groups(args, iteration, glide_root):
             continue
         rows = database.glide_timeout_rows(args.db_path, iteration, refid)
         job = dict(group_dir=directory, reference_id=refid, compounds=rows)
+        try_timeout_collection(iteration, args, job, merger, glide_root)
+
+
+def try_timeout_collection(iteration, args, job, merger, glide_root):
+    """Keep native retrieval uncertainty local; scientific validation still raises."""
+    try:
         process_timeout_job(iteration, args, job, merger, glide_root)
+    except JobStatusUnavailable as exc:
+        print(f'[WARNING] Glide {job["group_dir"].name}: timeout result recovery unavailable; '
+              f'keeping pending for retry: {native_error_message(exc)}', flush=True)
+        return False
+    return True
 
 
 def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root, *, skip_active=False):
@@ -368,7 +381,14 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
     if not jobs:
         return [], 0
     started = time.monotonic()
-    live = active_jobs(args.schrodinger)
+    try:
+        live = active_jobs(args.schrodinger)
+    except (RuntimeError, subprocess.SubprocessError, OSError, ValueError) as exc:
+        # Collection owns durable group identities and may query those directly.
+        # An unavailable global snapshot never authorizes a new submission.
+        print('[WARNING] Glide collection: global native status unavailable; '
+              f'querying saved group JobIds individually: {native_error_message(exc)}', flush=True)
+        live = []
     elapsed = time.monotonic()-started
     record_timing(glide_root, 'collection_active_job_query', elapsed)
     detail(f'Glide timing: collection active-job query={elapsed:.2f}s.', flush=True)
@@ -392,7 +412,9 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
                f'{elapsed:.2f}s.', flush=True)
         if status == 'DONE':
             if has_timeouts(load_record(job['group_dir'])):
-                process_timeout_job(iteration, args, job, merger, glide_root)
+                if not try_timeout_collection(iteration, args, job, merger, glide_root):
+                    pending.append(job)
+                    continue
             elif job['output_file'].exists() and job['output_file'].stat().st_size:
                 process_completed_job(iteration, args, job, extractor, merger, glide_root)
             else:
@@ -400,7 +422,9 @@ def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root
                            message='Completed Glide job produced no poses')
         elif status is not None and status not in ('RUNNING', 'UNKNOWN'):
             if has_timeouts(load_record(job['group_dir'])):
-                process_timeout_job(iteration, args, job, merger, glide_root)
+                if not try_timeout_collection(iteration, args, job, merger, glide_root):
+                    pending.append(job)
+                    continue
             else:
                 mark_group(args.db_path, job['compounds'], State.FAILED, failed_stage='glide',
                            message=failure_reason(job['group_dir'], status))
@@ -428,6 +452,73 @@ def _claim_reference_groups(db_path: str | Path, groups):
                 compound for compound in compounds if compound[0] in claimed_ids
             ]
     return claimed_groups
+
+
+def _recover_reference_groups(
+    args, iteration, groups, group_ligand_files, glide_root,
+    fresh_references, live, score_extractor, merger,
+):
+    """Collect completed groups and retain saved/uncertain jobs before new launches."""
+    jobs = []
+    unsubmitted = []
+    reserved = []
+    for refid, compounds in groups.items():
+        ligand_file = group_ligand_files.get(refid)
+        if ligand_file is None:
+            mark_group(args.db_path, compounds, "failed", failed_stage="glide", message="No LigPrep structures for reference group")
+            continue
+        # Frozen parent-pose exports use CMPID titles. The legacy name lookup
+        # deliberately accepts only iteration-0 reference ligands.
+        refname = (f'CMPID_{refid}' if args.crem_docking_references
+                   else c.get_reference_name(refid, args.db_path))
+        gdir = glide_root / f"ref_{refid}"
+        gdir.mkdir(parents=True, exist_ok=True)
+        ref_file = gdir / "_reference.maegz"
+        log_file, output_file = output_paths(gdir)
+
+        job = dict(reference_id=refid, reference_name=refname,
+                   group_dir=gdir, reference_file=ref_file,
+                   output_file=output_file, log_file=log_file,
+                   input_count=len(compounds), compounds=compounds)
+
+        status = group_status(args.schrodinger, gdir, log_file, output_file, live,
+                              timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
+        log_file, output_file = output_paths(gdir)
+        job.update(log_file=log_file, output_file=output_file)
+        if refid in fresh_references and status in TERMINAL:
+            discard_terminal_results(gdir)
+            status = None
+        timeout_collection = (status == 'DONE' and has_timeouts(load_record(gdir)) or
+            status is not None and status not in ('RUNNING','UNKNOWN') and
+            (load_record(gdir) or {}).get('timeout_requested_at'))
+        if timeout_collection:
+            if try_timeout_collection(iteration, args, job, merger, glide_root):
+                continue
+            status = 'UNKNOWN'
+        if status in ('RUNNING', 'UNKNOWN'):
+            mark_group(args.db_path, compounds, State.GLIDE_RUNNING)
+            jobs.append(job)
+            record = load_record(gdir) or {}
+            command = record.get('command', [])
+            reserved.append(command[command.index('-HOST') + 1]
+                            if '-HOST' in command and command.index('-HOST') + 1 < len(command)
+                            else None)
+            continue
+        if status == 'DONE':
+            if output_file.exists() and output_file.stat().st_size:
+                process_completed_job(iteration, args, job, score_extractor, merger, glide_root)
+            else:
+                mark_group(args.db_path, compounds, State.FAILED, failed_stage='glide',
+                           message='Completed Glide job produced no poses')
+            continue
+        if status is not None:
+            mark_group(args.db_path, compounds, State.FAILED, failed_stage='glide',
+                       message=failure_reason(gdir, status))
+            continue
+
+        unsubmitted.append((job, ligand_file))
+
+    return jobs, unsubmitted, reserved
 
 
 @timed_stage("Glide stage worker")
@@ -486,62 +577,10 @@ def _run_stage(args, ns):
     score_extractor = c.create_score_extractor(glide_root, attraction_point=args.glide_pose_point)
     merger = c.create_best_pose_merger(glide_root)
 
-    jobs = []
-    unsubmitted = []
-    reserved = []
-    for refid, compounds in groups.items():
-        ligand_file = group_ligand_files.get(refid)
-        if ligand_file is None:
-            mark_group(args.db_path, compounds, "failed", failed_stage="glide", message="No LigPrep structures for reference group")
-            continue
-        # Frozen parent-pose exports use CMPID titles. The legacy name lookup
-        # deliberately accepts only iteration-0 reference ligands.
-        refname = (f'CMPID_{refid}' if args.crem_docking_references
-                   else c.get_reference_name(refid, args.db_path))
-        gdir = glide_root / f"ref_{refid}"
-        gdir.mkdir(parents=True, exist_ok=True)
-        ref_file = gdir / "_reference.maegz"
-        log_file, output_file = output_paths(gdir)
-
-        job = dict(reference_id=refid, reference_name=refname,
-                   group_dir=gdir, reference_file=ref_file,
-                   output_file=output_file, log_file=log_file,
-                   input_count=len(compounds), compounds=compounds)
-
-        status = group_status(args.schrodinger, gdir, log_file, output_file, live,
-                              timeout_seconds=getattr(args, 'glide_job_timeout', 1800))
-        log_file, output_file = output_paths(gdir)
-        job.update(log_file=log_file, output_file=output_file)
-        if refid in fresh_references and status in TERMINAL:
-            discard_terminal_results(gdir)
-            status = None
-        if status in ('RUNNING', 'UNKNOWN'):
-            mark_group(args.db_path, compounds, State.GLIDE_RUNNING)
-            jobs.append(job)
-            record = load_record(gdir) or {}
-            command = record.get('command', [])
-            reserved.append(command[command.index('-HOST') + 1]
-                            if '-HOST' in command and command.index('-HOST') + 1 < len(command)
-                            else None)
-            continue
-        if status == 'DONE':
-            if has_timeouts(load_record(gdir)):
-                process_timeout_job(iteration, args, job, merger, glide_root)
-            elif output_file.exists() and output_file.stat().st_size:
-                process_completed_job(iteration, args, job, score_extractor, merger, glide_root)
-            else:
-                mark_group(args.db_path, compounds, State.FAILED, failed_stage='glide',
-                           message='Completed Glide job produced no poses')
-            continue
-        if status is not None:
-            if (load_record(gdir) or {}).get('timeout_requested_at'):
-                process_timeout_job(iteration, args, job, merger, glide_root)
-            else:
-                mark_group(args.db_path, compounds, State.FAILED, failed_stage='glide',
-                           message=failure_reason(gdir, status))
-            continue
-
-        unsubmitted.append((job, ligand_file))
+    jobs, unsubmitted, reserved = _recover_reference_groups(
+        args, iteration, groups, group_ligand_files, glide_root,
+        fresh_references, live, score_extractor, merger,
+    )
 
     counts_file = glide_root / 'ligprep_counts.json'
     structure_counts = json.loads(counts_file.read_text()) if counts_file.exists() else {}

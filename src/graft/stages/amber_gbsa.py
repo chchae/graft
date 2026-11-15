@@ -49,8 +49,9 @@ def _run_stage(args, iteration):
             print(f'Amber GBSA waiting for another saved iteration: {other_records[0]}')
             return
         database.reset_unsubmitted_amber(args.db_path, iteration)
-        if iteration == 0:
-            amber_gbsa.prepare_reference_receptor(args)
+        # Cached reference scores can skip iteration 0, leaving its derived
+        # receptor absent. Rebuild that input from the grid without rescoring.
+        amber_gbsa.prepare_reference_receptor(args)
         if not args.amber_receptor.is_file():
             raise FileNotFoundError(f'Amber receptor not found: {args.amber_receptor}')
         from graft.attraction_point import prepare

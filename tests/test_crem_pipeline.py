@@ -120,6 +120,11 @@ def test_next_iteration_uses_md_ranked_elites_and_only_one_addition(project, mon
     assert saved['state']==Growth.DONE
     assert saved['plan']['protocol']=='crem_parent_docking_mcs_v1'
     assert [r['compound_id'] for r in saved['plan']['parents']]==expected
+    elite_folder = args.output/'iter01/19-elite'
+    assert [line.split('\t')[1] for line in (elite_folder/'elites.smi').read_text().splitlines()] == [
+        f'CMPID_{cid}' for cid in expected]
+    assert [m.GetProp('_Name') for m in Chem.SDMolSupplier(str(elite_folder/'elites.sdf'))] == [
+        f'CMPID_{cid}' for cid in expected]
     scratch=Path(args.output)/'iter02/02-generate/crem/combichem3d.sqlite'
     poses=database.growth_rows(scratch,'combichem3d_pose')
     assert {p['iteration'] for p in poses}<={1,2}
@@ -141,7 +146,9 @@ def test_next_iteration_uses_md_ranked_elites_and_only_one_addition(project, mon
     # A completed retry cannot rebind poses or alter parent/group ownership.
     from graft.stages import crem_parent_pose
     monkeypatch.setattr(crem_parent_pose,'bind_parents',lambda *a:pytest.fail('rebound frozen references'))
+    (elite_folder/'elites.sdf').unlink()
     generate._run_stage(args,2)
+    assert (elite_folder/'elites.sdf').is_file()
     assert database.crem_generation(args.db_path,2)==saved
 
 

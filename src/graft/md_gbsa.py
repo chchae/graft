@@ -247,47 +247,65 @@ def persist_ready_compound(args, iteration, cid, settings, progress, directory):
     return False
 
 
+def _md_upstream_ready(args, iteration: int) -> bool:
+    """Keep new MD selections behind saved native work and upstream workers."""
+    # Retire native upstream work before freezing any final score ranking.
+    from graft.prime_gbsa_async import load_job
+    from graft.driver import external_completion_reason
+    if load_job(stage_directory(args.output,iteration,'prime_gbsa')) is not None:
+        print('MD-GBSA waiting for Prime submission recovery.'); return False
+    for stage in ('ligprep', 'glide', 'amber-gbsa', 'prime_gbsa'):
+        reason=external_completion_reason(args,iteration,stage)
+        if reason:
+            print('MD-GBSA waiting: '+reason); return False
+    for worker in ('generate', 'druglike', 'synthetic_feasibility', 'ligprep', 'glide', 'amber_gbsa', 'prime_gbsa', 'fep'):
+        if database.stage_is_running(args.db_path, worker):
+            print(f'MD-GBSA waiting: {worker} worker is still running'); return False
+    return True
+
+
+def _freeze_new_md_selection(args, iteration: int, prime_enabled: bool):
+    """Prepare/check new native inputs before the existing atomic selection claim."""
+    from graft.attraction_point import prepare as prepare_priority
+    prepare_priority(args, iteration, 'md_gbsa')
+    ranking = database.md_gbsa_candidates(args.db_path, iteration,
+                count=getattr(args, 'md_gbsa_input_count', None),
+                ratio=getattr(args, 'md_gbsa_input_ratio', .5), prime_enabled=prime_enabled)
+    proposed=settings_for(args,iteration,ranking)
+    # Read-only compatibility check precedes SQLite claims and job launch.
+    ssh(proposed['ssh_host'],'mkdir -p '+shlex.quote(proposed['root']))
+    upload(proposed['ssh_host'],Path(__file__).with_name('md_gbsa_native.py'),proposed['helper'])
+    response(remote_call(proposed,'check',proposed['root'],'--ids',json.dumps(proposed)))
+    if proposed.get('local_compute'):
+        from graft import md_gbsa_local
+        md_gbsa_local.prepare(proposed)
+    return database.freeze_md_gbsa_selection(args.db_path,iteration,proposed,
+                count=args.md_gbsa_input_count,ratio=args.md_gbsa_input_ratio,
+                target_count=args.target_count,prime_count=args.prime_gbsa_input_count,
+                amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
+
+
 def run(args, iteration):
     saved=database.md_gbsa_selection(args.db_path,iteration)
+    if saved is not None and saved['settings'].get('reference_score_cache'):
+        reason = database.md_gbsa_completion_reason(args.db_path, iteration)
+        if reason:
+            raise RuntimeError('Imported reference MD cache is incomplete: '+reason)
+        print(f'MD-GBSA reference cache reused: {len(saved["ids"])} compounds; no native jobs required.')
+        return
     if saved is None and not getattr(args,'md_gbsa_enabled',False):
         print('MD-GBSA disabled; no saved work to recover.')
         return
     if saved is None:
-        # Retire native upstream work before freezing any final score ranking.
-        from graft.prime_gbsa_async import load_job
-        from graft.driver import external_completion_reason
-        if load_job(stage_directory(args.output,iteration,'prime_gbsa')) is not None:
-            print('MD-GBSA waiting for Prime submission recovery.'); return
-        for stage in ('ligprep', 'glide', 'amber-gbsa', 'prime_gbsa'):
-            reason=external_completion_reason(args,iteration,stage)
-            if reason:
-                print('MD-GBSA waiting: '+reason); return
-        for worker in ('generate', 'druglike', 'synthetic_feasibility', 'ligprep', 'glide', 'amber_gbsa', 'prime_gbsa', 'fep'):
-            if database.stage_is_running(args.db_path, worker):
-                print(f'MD-GBSA waiting: {worker} worker is still running'); return
+        if not _md_upstream_ready(args, iteration):
+            return
         prime_enabled = getattr(args, 'prime_gbsa_enabled', True)
         reason=database.md_gbsa_readiness_reason(args.db_path,iteration,
                     target_count=args.target_count,prime_count=args.prime_gbsa_input_count,
                     amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
         if reason:
             print(reason); return
-        from graft.attraction_point import prepare as prepare_priority
-        prepare_priority(args, iteration, 'md_gbsa')
-        ranking = database.md_gbsa_candidates(args.db_path, iteration,
-                    count=getattr(args, 'md_gbsa_input_count', None),
-                    ratio=getattr(args, 'md_gbsa_input_ratio', .5), prime_enabled=prime_enabled)
-        proposed=settings_for(args,iteration,ranking)
-        # Read-only compatibility check precedes SQLite claims and job launch.
-        ssh(proposed['ssh_host'],'mkdir -p '+shlex.quote(proposed['root']))
-        upload(proposed['ssh_host'],Path(__file__).with_name('md_gbsa_native.py'),proposed['helper'])
-        response(remote_call(proposed,'check',proposed['root'],'--ids',json.dumps(proposed)))
-        if proposed.get('local_compute'):
-            from graft import md_gbsa_local
-            md_gbsa_local.prepare(proposed)
-        saved=database.freeze_md_gbsa_selection(args.db_path,iteration,proposed,
-                    count=args.md_gbsa_input_count,ratio=args.md_gbsa_input_ratio,
-                    target_count=args.target_count,prime_count=args.prime_gbsa_input_count,
-                    amber_keep_count=database.amber_keep_count(args), prime_enabled=prime_enabled)
+        saved = _freeze_new_md_selection(args, iteration, prime_enabled)
     settings=saved['settings']
     directory=stage_directory(args.output,iteration,'md_gbsa')
     if settings.get('local_compute'):

@@ -246,6 +246,95 @@ def completed_md_ids(path, iteration):
         return _completed_md_ids(conn,iteration)
 
 
+def reference_score_records(path):
+    """Original reference identities and committed ensembles for file export."""
+    import json
+    with connect(path) as conn:
+        rows = conn.execute('SELECT id,name,smiles,amber_gbsa_score,prime_gbsa_score,md_gbsa_score '
+                            'FROM compound WHERE iteration=0 ORDER BY id').fetchall()
+        results = (dict(conn.execute('SELECT r.compound_id,r.result FROM compound_md_gbsa_result r '
+                                     'JOIN compound c ON c.id=r.compound_id WHERE c.iteration=0'))
+                   if conn.execute("SELECT 1 FROM sqlite_master WHERE name='compound_md_gbsa_result'").fetchone() else {})
+    fields = ('id','name','smiles','amber_gbsa_score','prime_gbsa_score','md_gbsa_score')
+    return [dict(zip(fields,r), result=json.loads(results[r[0]]) if r[0] in results else None) for r in rows]
+
+
+def mark_reference_cache_import(conn):
+    """A failed initialization must retry cache restoration before any claims."""
+    conn.execute('CREATE TABLE IF NOT EXISTS reference_score_cache_import ('
+                 'id INTEGER PRIMARY KEY CHECK(id=1),pending INTEGER NOT NULL)')
+    conn.execute('INSERT OR IGNORE INTO reference_score_cache_import VALUES (1,1)')
+
+
+def reference_cache_import_pending(path):
+    with connect(path) as conn:
+        return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='reference_score_cache_import'").fetchone()
+                    and conn.execute('SELECT 1 FROM reference_score_cache_import WHERE id=1 AND pending=1').fetchone())
+
+
+def _finish_reference_cache_import(conn):
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reference_score_cache_import'").fetchone():
+        conn.execute('UPDATE reference_score_cache_import SET pending=0 WHERE id=1')
+
+
+def finish_reference_cache_import(path):
+    with connect(path) as conn:
+        _finish_reference_cache_import(conn)
+
+
+def restore_reference_score_records(path, updates, md):
+    """Atomically seed only fresh reference rows; never alter live scientific work."""
+    import json
+    from graft.reference_scores import validate_result
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        rows = {r[1]:r for r in conn.execute('SELECT id,name,smiles,state,iteration FROM compound')}
+        if any(r[3:] != (State.REFERENCE,0) for r in rows.values()):
+            raise RuntimeError('Reference cache import requires a fresh, unclaimed reference database')
+        if md_gbsa_selection(path,0) is not None:
+            raise RuntimeError('Reference cache cannot replace an existing MD selection')
+        updated_names = set()
+        for name, item in updates.items():
+            if name not in rows or rows[name][2] != item['smiles']:
+                raise ValueError('Cached reference identity does not match SQLite')
+            changed = False
+            for column, score in item['scores'].items():
+                if column not in ('amber_gbsa_score','prime_gbsa_score'):
+                    raise ValueError('Invalid reference score field')
+                if score is not None:
+                    if isinstance(score,bool) or not isinstance(score,(int,float)) or not math.isfinite(score):
+                        raise ValueError('Cached reference score must be finite')
+                    conn.execute(f'UPDATE compound SET {column}=? WHERE id=?', (score,rows[name][0]))
+                    changed = True
+            if changed:
+                updated_names.add(name)
+        if md is not None:
+            ensure_md_gbsa_schema(conn)
+            names = md['names']
+            if not names or len(set(names)) != len(names) or not set(names) <= set(rows):
+                raise ValueError('Invalid cached reference MD selection')
+            ids = [rows[name][0] for name in names]
+            updated_names.update(names)
+            settings = md['settings']
+            conn.execute('INSERT INTO iteration_md_gbsa_selection VALUES (0,?,?)',
+                         (json.dumps(ids),json.dumps(settings,sort_keys=True)))
+            for name, cid in zip(names,ids):
+                result = dict(md['results'][name])
+                validate_result(result, settings)
+                # Retain energies and full frame provenance; old native JobIds
+                # do not own work or cleanup in this new project.
+                for key in ('native','remote_root','local_compute'):
+                    result.pop(key,None)
+                result.update(id=cid, source_reference_cache=settings['reference_score_cache'],
+                              reference_cache_original_id=result.get('id'))
+                conn.execute('INSERT INTO compound_md_gbsa_result VALUES (?,?)',
+                             (cid,json.dumps(result,sort_keys=True)))
+                conn.execute('UPDATE compound SET md_gbsa_score=?,md_gbsa_std=?,md_gbsa_snapshots=?,state=? WHERE id=?',
+                             (result['mean'],result['std'],len(result['snapshots']),State.MD_GBSA_DONE,cid))
+        _finish_reference_cache_import(conn)
+        return len(updated_names)
+
+
 def restart_calculation_stage(path, iteration):
     """The latest cycle resumes at its last entered GBSA stage, never by folder alone."""
     with connect(path) as conn:
@@ -308,7 +397,8 @@ def request_latest_score_retries(args, requested=None):
             conn.execute("UPDATE score_restart_retry SET pending=0 WHERE iteration=? AND stage='prime_gbsa'",(latest,))
         elif getattr(args,'prime_gbsa_enabled',True):
             ranked = _prime_ranked_rows(conn,latest,_iteration_rows(conn,latest),amber_keep_count(args))
-            selected['prime_gbsa'] = list(rows) if latest == 0 else [r[0] for r in ranked[:args.prime_gbsa_input_count]]
+            ranked = _stage_selected_rows(conn, latest, 'prime_gbsa', ranked, args.prime_gbsa_input_count)
+            selected['prime_gbsa'] = list(rows) if latest == 0 else [r[0] for r in ranked]
         for cid in md_done:
             conn.execute("UPDATE score_restart_retry SET pending=0 WHERE iteration=? AND stage='prime_gbsa' AND compound_id=?",(latest,cid))
         for stage, ids in selected.items():
@@ -669,7 +759,9 @@ def crem_parent_selection(path, iteration, count):
             ranked = [r for r in ranked if r[0] in selected]
         if not ranked:
             continue
-        ranked = sorted(ranked, key=lambda r: (r[column], r[0]))[:count]
+        ranked = sorted(ranked, key=lambda r: (r[column], r[0]))
+        with connect(path) as conn:
+            ranked = _score_diverse_rows(conn, iteration, 'crem_elites', ranked, count)
         if any(r[7] is None for r in ranked):
             raise RuntimeError(f'Selected {source} elite is missing CReM pose provenance; no replacement parent selected')
         return source, [dict(compound_id=r[0],smiles=r[1],score=r[column],molblock=r[7],
@@ -904,6 +996,10 @@ def attraction_input_rows(path, iteration):
 
 
 def _attraction_stage_started(conn, iteration, stage):
+    if (conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_score_selection'").fetchone()
+            and conn.execute('SELECT 1 FROM iteration_score_selection WHERE iteration=? AND stage=?',
+                             (iteration, stage)).fetchone()):
+        return True
     column, state = {'amber_gbsa':('amber_gbsa_score',State.AMBER_RUNNING),
                      'prime_gbsa':('prime_gbsa_score',State.PRIME_GBSA_RUNNING),
                      'md_gbsa':('md_gbsa_score',State.MD_GBSA_RUNNING),
@@ -968,6 +1064,60 @@ def attraction_order_ids(path, iteration, stage, ids):
         return [r[0] for r in _attraction_order(conn,iteration,stage,[(cid,) for cid in ids])]
 
 
+def _score_diverse_rows(conn, iteration, stage, ranked, count):
+    """Preserve contact tiers and score-source order while diversifying each tier."""
+    from graft.chemistry.selection import score_diverse_ids
+    if iteration == 0:
+        return ranked[:count]
+    policy = _attraction_policy(conn, iteration, stage)
+    tiers = [ranked]
+    if policy is not None and policy['point'] is not None:
+        distances = policy['distances']
+        if any(str(r[0]) not in distances for r in ranked):
+            raise RuntimeError('Missing frozen attraction-point measurement; selection blocked')
+        tiers = [[r for r in ranked if distances[str(r[0])] <= 2.0],
+                 [r for r in ranked if distances[str(r[0])] > 2.0]]
+    smiles = dict(conn.execute('SELECT id,smiles FROM compound WHERE iteration=?', (iteration,)))
+    selected = []
+    for tier in tiers:
+        remaining = count - len(selected)
+        if remaining <= 0:
+            break
+        ids = set(score_diverse_ids([(r[0], smiles[r[0]]) for r in tier], remaining))
+        selected.extend(r for r in tier if r[0] in ids)
+    return selected
+
+
+def _stage_selected_rows(conn, iteration, stage, ranked, count, *, freeze=False):
+    """Amber/Prime shortlist ownership, independent of claims and partial results."""
+    import json
+    from graft.chemistry.selection import POLICY
+    if iteration == 0:
+        return ranked[:count]
+    saved = None
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_score_selection'").fetchone():
+        saved = conn.execute('SELECT candidates FROM iteration_score_selection '
+                             'WHERE iteration=? AND stage=?', (iteration, stage)).fetchone()
+    if saved:
+        ids = json.loads(saved[0])
+        by_id = {r[0]: r for r in ranked}
+        if any(cid not in by_id for cid in ids):
+            raise RuntimeError('Frozen stage candidate is missing from its scoring population; no refill')
+        return [by_id[cid] for cid in ids]
+    legacy = _attraction_stage_started(conn, iteration, stage)
+    selected = ranked[:count] if legacy else _score_diverse_rows(conn, iteration, stage, ranked, count)
+    if freeze and selected:
+        conn.execute('CREATE TABLE IF NOT EXISTS iteration_score_selection ('
+                     'iteration INTEGER NOT NULL,stage TEXT NOT NULL,requested_count INTEGER NOT NULL,'
+                     'policy TEXT NOT NULL,candidates TEXT NOT NULL,PRIMARY KEY(iteration,stage))')
+        conn.execute('INSERT INTO iteration_score_selection VALUES (?,?,?,?,?)',
+                     (iteration, stage, count, 'legacy_score_order' if legacy else POLICY,
+                      json.dumps([r[0] for r in selected])))
+        print(f'Iteration {iteration}: {stage} selection frozen; candidates={len(ranked)}, '
+              f'selected={len(selected)}; policy={"legacy_score_order" if legacy else POLICY}.', flush=True)
+    return selected
+
+
 def amber_keep_count(args):
     return getattr(args, 'amber_keep_count', 500) if getattr(args, 'amber_gbsa_enabled', False) else None
 
@@ -983,7 +1133,7 @@ def generation_completion_reason(args, iteration, elite_count):
                                        args.prime_gbsa_input_count, elite_count, amber_keep_count(args), **options)
 
 
-def _amber_rows(conn, iteration, keep_count=None):
+def _amber_rows(conn, iteration, keep_count=None, *, freeze=False):
     rows = conn.execute(
         'SELECT id,name,state,docking_score,amber_gbsa_score,prime_gbsa_score,fep_score,failed_stage '
         'FROM compound WHERE iteration=? AND (iteration=0 OR docking_score IS NOT NULL) ORDER BY id',
@@ -996,7 +1146,8 @@ def _amber_rows(conn, iteration, keep_count=None):
     # Rank the final Glide population before excluding scored/failed/claimed
     # rows: they retain their positions and cannot trigger lower-ranked refill.
     ranked = sorted((r for r in rows if math.isfinite(r[3])), key=lambda r: (r[3],r[0]))
-    return _attraction_order(conn,iteration,'amber_gbsa',ranked)[:keep_count]
+    ranked = _attraction_order(conn,iteration,'amber_gbsa',ranked)
+    return _stage_selected_rows(conn, iteration, 'amber_gbsa', ranked, keep_count, freeze=freeze)
 
 
 def _remember_amber_failure(conn, cid, message):
@@ -1054,8 +1205,9 @@ def _prime_ranked_rows(conn, iteration, rows, amber_keep_count):
 def prime_selection_rows(path, iteration, count, amber_keep_count=None):
     with connect(path) as conn:
         ranked = _prime_ranked_rows(conn, iteration, _iteration_rows(conn, iteration), amber_keep_count)
+        ranked = _stage_selected_rows(conn, iteration, 'prime_gbsa', ranked, count)
         names = dict(conn.execute('SELECT id,name FROM compound WHERE iteration=?', (iteration,)))
-        return [(r[0], names[r[0]], r[2]) for r in ranked[:count]]
+        return [(r[0], names[r[0]], r[2]) for r in ranked]
 
 
 def claim_amber_candidates(path, iteration, target_count, keep_count=500):
@@ -1065,7 +1217,7 @@ def claim_amber_candidates(path, iteration, target_count, keep_count=500):
         if iteration > 0 and _docking_completion_reason(_iteration_rows(conn, iteration), target_count, conn, iteration):
             return []
         failed_ids = _amber_failure_ids(conn, iteration)
-        rows = [r for r in _amber_rows(conn, iteration, keep_count)
+        rows = [r for r in _amber_rows(conn, iteration, keep_count, freeze=True)
                 if r[2] in ((State.REFERENCE, State.DOCKED, State.PRIME_GBSA_DONE, State.FEP_DONE) if iteration == 0
                             else (State.DOCKED, State.PRIME_GBSA_DONE, State.FEP_DONE)) and r[4] is None
                 and r[0] not in failed_ids]
@@ -1091,7 +1243,8 @@ def amber_rankings(path, iteration, keep_count=None):
         rows = [(r[0], r[1], r[3], r[4], r[5])
                 for r in _amber_rows(conn, iteration, keep_count)
                 if r[4] is not None and math.isfinite(r[4])]
-        return sorted(rows, key=lambda r: (r[3], r[2] if r[2] is not None else float('-inf'), r[0]))
+        ranked = sorted(rows, key=lambda r: (r[3], r[2] if r[2] is not None else float('-inf'), r[0]))
+        return ranked[:keep_count] if keep_count is not None else ranked
 
 
 def amber_identity_rows(path, iteration, ids):
@@ -1175,7 +1328,7 @@ def store_amber_results(path, iteration, results, allowed_ids, *, retry_run_id=N
         return updated
 
 
-def _prime_gbsa_candidates(conn, iteration, count, target_count, amber_keep_count=None):
+def _prime_gbsa_candidates(conn, iteration, count, target_count, amber_keep_count=None, *, freeze=False):
     rows = _iteration_rows(conn, iteration)
     md_done = _completed_md_ids(conn,iteration)
     if md_done:
@@ -1192,10 +1345,11 @@ def _prime_gbsa_candidates(conn, iteration, count, target_count, amber_keep_coun
     if amber_keep_count is not None and _amber_completion_reason(conn, iteration, target_count, amber_keep_count):
         return []
     docked = _prime_ranked_rows(conn, iteration, rows, amber_keep_count)
+    docked = _stage_selected_rows(conn, iteration, 'prime_gbsa', docked, count, freeze=freeze)
     amber_failed = {row[0] for row in conn.execute(
         "SELECT id FROM compound WHERE iteration=? AND state=? AND failed_stage='amber_gbsa'",
         (iteration, State.FAILED))}
-    return [cid for cid, state, _, score in docked[:count]
+    return [cid for cid, state, _, score in docked
             if cid not in md_done and score is None and (state == State.DOCKED or cid in amber_failed)]
 
 
@@ -1210,7 +1364,7 @@ def claim_prime_gbsa_candidates(path, iteration, count, target_count, amber_keep
     """Check completion, rank and claim in one SQLite write transaction."""
     with connect(path) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        ids = _prime_gbsa_candidates(conn, iteration, count, target_count, amber_keep_count)
+        ids = _prime_gbsa_candidates(conn, iteration, count, target_count, amber_keep_count, freeze=True)
         for start in range(0, len(ids), 500):
             batch = ids[start:start + 500]
             marks = ",".join("?" for _ in batch)
@@ -1244,6 +1398,7 @@ def iteration_completion_reason(path, iteration, target_count, input_count, elit
                 return reason
         reason = _docking_completion_reason(rows, target_count, conn, iteration)
         docked = _prime_ranked_rows(conn, iteration, rows, amber_keep_count)
+        docked = _stage_selected_rows(conn, iteration, 'prime_gbsa', docked, input_count)
         md_done = _completed_md_ids(conn,iteration)
         amber_failed = {row[0] for row in conn.execute(
             "SELECT id FROM compound WHERE iteration=? AND state=? AND failed_stage='amber_gbsa'",
@@ -1260,7 +1415,7 @@ def iteration_completion_reason(path, iteration, target_count, input_count, elit
         return f'only {valid}/{elite_count} finite Glide scores for elite selection' if valid < elite_count else None
     pending = sum(
         not md_done and (state != State.FAILED or cid in amber_failed) and (score is None or not math.isfinite(score))
-        for cid, state, _, score in docked[:input_count]
+        for cid, state, _, score in docked
     )
     if pending:
         ranking = 'Amber' if amber_keep_count is not None else 'docking'
@@ -1327,7 +1482,7 @@ def iteration_has_saved_work(path, iteration):
     with connect(path) as conn:
         for table in ('compound', 'iteration_scaffold', 'iteration_combichem',
                       'iteration_combichem_history', 'iteration_sa_selection', 'combichem_batch',
-                      'iteration_crem', 'iteration_workspace', 'iteration_druglike_selection', 'iteration_druglike_priority', 'glide_timeout_collection', 'iteration_fep_selection', 'iteration_md_gbsa_selection', 'iteration_attraction_point'):
+                      'iteration_crem', 'iteration_workspace', 'iteration_druglike_selection', 'iteration_druglike_priority', 'glide_timeout_collection', 'iteration_fep_selection', 'iteration_md_gbsa_selection', 'iteration_attraction_point', 'iteration_score_selection'):
             if (conn.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?',
                              ('table', table)).fetchone()
                     and conn.execute(f'SELECT 1 FROM {table} WHERE iteration=? LIMIT 1',
@@ -1425,7 +1580,8 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if crem_ids:
             for table in ('iteration_crem', 'iteration_scaffold', 'iteration_md_gbsa_selection', 'iteration_fep_selection',
-                          'iteration_workspace', 'iteration_druglike_selection', 'glide_timeout_collection'):
+                          'iteration_workspace', 'iteration_druglike_selection', 'glide_timeout_collection',
+                          'iteration_score_selection'):
                 if table in tables and conn.execute(f'SELECT 1 FROM {table} WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
                     raise RuntimeError('Later saved iteration work depends on this iteration; reset blocked')
         if 'iteration_md_gbsa_selection' in tables:
@@ -1499,7 +1655,7 @@ def reset_deleted_iteration(path, iteration, backup, report_ids=(), *, allow_del
                     conn.execute(f'DELETE FROM {table} WHERE iteration=?', (iteration,))
         for table in ('combichem_compound_origin', 'combichem_batch', 'iteration_combichem_history',
                       'iteration_combichem', 'iteration_druglike_selection', 'iteration_druglike_priority', 'glide_timeout_collection', 'iteration_sa_selection',
-                      'iteration_fep_selection', 'iteration_scaffold', 'iteration_workspace', 'iteration_attraction_point'):
+                      'iteration_fep_selection', 'iteration_scaffold', 'iteration_workspace', 'iteration_attraction_point', 'iteration_score_selection'):
             if table in tables:
                 conn.execute(f'DELETE FROM {table} WHERE iteration=?', (iteration,))
         # The supervising driver already owns timing rows; restart their clocks
@@ -1560,7 +1716,7 @@ def reset_deleted_crem_iterations(path, iterations, backup):
                     raise RuntimeError('Deleted iteration has unresolved MD results; recovery blocked')
             ids.update(owned)
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        iteration_tables = ('iteration_crem', 'iteration_workspace', 'iteration_scaffold', 'iteration_attraction_point',
+        iteration_tables = ('iteration_crem', 'iteration_workspace', 'iteration_scaffold', 'iteration_attraction_point', 'iteration_score_selection',
                             'iteration_druglike_selection', 'iteration_druglike_priority', 'iteration_sa_selection', 'iteration_fep_selection',
                             'iteration_md_gbsa_selection', 'md_gbsa_run_cleanup', 'glide_timeout_collection', 'iteration_md_retry_policy', 'iteration_timing',
                             'stage_timing', 'score_completion_history')
@@ -1696,12 +1852,13 @@ def _validate_unstarted_druglike_conversion(conn, iteration):
         raise RuntimeError('Cannot reprioritize an iteration with downstream work or failure records')
     if conn.execute('SELECT 1 FROM compound WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
         raise RuntimeError('Cannot reprioritize an iteration with later compounds')
-    for table in ('iteration_crem', 'iteration_scaffold', 'iteration_workspace', 'iteration_attraction_point',
+    for table in ('iteration_crem', 'iteration_scaffold', 'iteration_workspace', 'iteration_attraction_point', 'iteration_score_selection',
                   'iteration_fep_selection', 'iteration_md_gbsa_selection',
                   'iteration_sa_selection', 'iteration_combichem', 'iteration_combichem_history'):
         if conn.execute('SELECT 1 FROM sqlite_master WHERE name=?', (table,)).fetchone():
             condition = 'iteration>=?' if table in {
-                'iteration_fep_selection', 'iteration_md_gbsa_selection', 'iteration_sa_selection'} else 'iteration>?'
+                'iteration_fep_selection', 'iteration_md_gbsa_selection', 'iteration_sa_selection',
+                'iteration_score_selection'} else 'iteration>?'
             if conn.execute(f'SELECT 1 FROM {table} WHERE {condition} LIMIT 1', (iteration,)).fetchone():
                 raise RuntimeError('Cannot reprioritize saved downstream or later iteration work')
 
@@ -2513,6 +2670,28 @@ def stage_summary_results(path, iteration, stage):
     return successes, failures - successes
 
 
+def stage_timeout_failed_ids(path, iteration, stage):
+    """Count only persisted stage failures with explicit calculation deadlines."""
+    import re
+    if stage == 'glide':
+        return glide_timeout_failed_ids(path, iteration)
+    failure_stage = {'amber-gbsa': 'amber_gbsa', 'md-gbsa': 'md_gbsa'}.get(stage, stage)
+    with connect(path) as conn:
+        rows = conn.execute(
+            'SELECT id,failure_message FROM compound WHERE iteration=? AND failed_stage=?',
+            (iteration, failure_stage),
+        ).fetchall()
+    # Poll/transport deadlines are not evidence that a scientific calculation
+    # exhausted its runtime. Valid checkpoint scores are excluded by the caller.
+    communication = re.compile(r'\b(?:ssh|connection|socket|polling|poll|status query)\b|'
+                               r'timed out waiting|TimeoutExpired', re.I)
+    deadline = re.compile(r'\bTIMEOUT\b|\btime[ -]limit\b|\bwall[ -]?time\b.*\bexceed|'
+                          r'\b(?:calculation|job|charge generation|minimization|runtime)\b'
+                          r'.*\b(?:timed out|exceeded)\b', re.I)
+    return {cid for cid, message in rows if message and deadline.search(message)
+            and not communication.search(message)}
+
+
 def start_stage_timer(path, iteration, stage):
     """Keep the first supervised stage start across polls and driver restarts."""
     with connect(path) as conn:
@@ -2648,7 +2827,7 @@ def fep_selection_pending(path, iteration, count):
                             key=lambda row: (row[1], row[0]))
             ranked = _attraction_order(conn, iteration, 'fep', ranked)
             if ranked:
-                return any(row[2] is None for row in ranked[:count])
+                return any(row[2] is None for row in _score_diverse_rows(conn, iteration, 'fep', ranked, count))
     return False
 
 
@@ -2723,7 +2902,9 @@ def fep_candidates(path, iteration, count, *, target_count=1, prime_count=None,
                     eligible.sort(key=lambda row: (row[column], row[0]))
                     eligible = _attraction_order(conn,iteration,'fep',eligible)
                     source = name
-                    selected = [dict(id=row[0], ranking_score=row[column]) for row in eligible[:count]]
+                    # Saved selections return above; imports retain legacy score-only behavior.
+                    chosen = eligible[:count] if for_import else _score_diverse_rows(conn, iteration, 'fep', eligible, count)
+                    selected = [dict(id=row[0], ranking_score=row[column]) for row in chosen]
                     break
             conn.execute('INSERT INTO iteration_fep_selection VALUES (?,?,?) '
                          'ON CONFLICT(iteration) DO UPDATE SET '
@@ -2845,8 +3026,9 @@ def _md_gbsa_upstream_reason(conn, iteration, target_count, prime_count, amber_k
             if _prime_gbsa_candidates(conn, iteration, prime_count, target_count, amber_keep_count):
                 return 'final Prime candidates are unfinished'
             ranked = _prime_ranked_rows(conn, iteration, _iteration_rows(conn, iteration), amber_keep_count)
+            ranked = _stage_selected_rows(conn, iteration, 'prime_gbsa', ranked, prime_count)
             if any(state != State.FAILED and (score is None or not math.isfinite(score))
-                   for _, state, _, score in ranked[:prime_count]):
+                   for _, state, _, score in ranked):
                 return 'finite final Prime results are required'
     return None
 
@@ -2867,15 +3049,21 @@ def md_gbsa_readiness_reason(path, iteration, *, target_count=1, prime_count=1,
     return None
 
 
-def _md_gbsa_candidate_ids(rows, count, ratio):
-    return [r[0] for r in rows[:count if count is not None else max(1, math.ceil(len(rows)*ratio))]]
+def _md_gbsa_candidate_ids(conn, iteration, rows, count, ratio):
+    count = count if count is not None else max(1, math.ceil(len(rows)*ratio))
+    return [r[0] for r in _score_diverse_rows(conn, iteration, 'md_gbsa', rows, count)]
 
 
 def md_gbsa_candidates(path, iteration, *, count=None, ratio=.5, prime_enabled=True):
     """Preview inputs; the freeze transaction rechecks this exact source and order."""
     with connect(path) as conn:
         source, rows = _md_gbsa_ranked_rows(conn, iteration, prime_enabled)
-        ids = _md_gbsa_candidate_ids(rows, count, ratio)
+        saved = md_gbsa_selection(path, iteration)
+        if saved:
+            source = saved['settings'].get('ranking_source', source)
+            ids = saved['ids']
+        else:
+            ids = _md_gbsa_candidate_ids(conn, iteration, rows, count, ratio)
         selected = set(ids)
         names = {name: cid for cid, name in conn.execute(
             'SELECT id,name FROM compound WHERE iteration=?', (iteration,)) if cid in selected}
@@ -2901,7 +3089,7 @@ def freeze_md_gbsa_selection(path, iteration, settings, *, count=None, ratio=.5,
         source, rows = _md_gbsa_ranked_rows(conn, iteration, prime_enabled)
         if not rows:
             raise RuntimeError('MD-GBSA requires finite completed scoring results')
-        ids = _md_gbsa_candidate_ids(rows, count, ratio)
+        ids = _md_gbsa_candidate_ids(conn, iteration, rows, count, ratio)
         if ('ranking_source' in settings and (settings['ranking_source'] != source
                 or settings.get('ranking_ids') != ids)):
             raise RuntimeError('MD-GBSA ranking changed during input preparation; no compounds claimed')
@@ -3871,3 +4059,338 @@ def growth_analysis_snapshot(path):
                     optimization=optimization,properties=properties,errors=errors,expansion=expansion)
     finally:
         conn.close()
+
+
+def status_rows(conn):
+    """Return aggregates using the caller-owned connection and transaction."""
+    rows = conn.execute(
+        """
+        SELECT iteration, state, COUNT(*)
+        FROM compound
+        GROUP BY iteration, state
+        ORDER BY iteration, state
+        """
+    ).fetchall()
+    scores = conn.execute(
+        """
+        SELECT iteration,
+               COUNT(docking_score), COUNT(prime_gbsa_score), COUNT(fep_score), COUNT(amber_gbsa_score),
+               COUNT(synthetic_feasibility), SUM(synthetic_feasibility),
+               MIN(docking_score), MIN(prime_gbsa_score), MIN(fep_score), MIN(amber_gbsa_score),
+               COUNT(md_gbsa_score), MIN(md_gbsa_score)
+        FROM compound
+        GROUP BY iteration
+        ORDER BY iteration
+        """
+    ).fetchall()
+    return rows, scores
+
+
+def open_sqlite(path):
+    """Open SQLite for concurrent stage workers."""
+    conn = sqlite3.connect(path, timeout=30)
+    try:
+        conn.execute("PRAGMA busy_timeout=30000")
+        # Concurrent first connections can race the rollback-to-WAL change;
+        # SQLite may return BUSY here without invoking its busy handler.
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError as exc:
+                if (getattr(exc, 'sqlite_errorcode', 0) & 255 not in
+                        {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+                        or time.monotonic() >= deadline):
+                    raise
+                time.sleep(0.05)
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
+
+def create_sqlite_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS compound (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            smiles TEXT NOT NULL,
+            iteration INTEGER NOT NULL DEFAULT 0,
+            dG_exp REAL,
+            docking_score REAL,
+            prime_gbsa_score REAL,
+            amber_gbsa_score REAL,
+            fep_score REAL,
+            sa_score REAL,
+            synthetic_feasibility INTEGER
+                CHECK (synthetic_feasibility IN (0, 1)),
+            state TEXT NOT NULL DEFAULT 'generated',
+            failed_stage TEXT,
+            failure_message TEXT,
+            similar_to INTEGER REFERENCES compound(id),
+            similarity REAL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            modified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_compound_iteration "
+        "ON compound(iteration)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_compound_similar_to "
+        "ON compound(similar_to)"
+    )
+    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
+    ensure_rdkit_descriptor_columns(conn)
+    ensure_druglike_selection_ownership(conn)
+    from graft.database import ensure_md_gbsa_schema
+    ensure_md_gbsa_schema(conn)
+
+
+
+def ensure_schema_columns(conn: sqlite3.Connection) -> None:
+    """Upgrade an existing project DB in place to the single-state model.
+
+    New code uses only ``state`` plus optional ``failed_stage`` / ``failure_message``.
+    Legacy per-stage status columns are intentionally left in existing databases but
+    are no longer read or written by the modular workers.
+    """
+    cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(compound)")
+    }
+    state_added = "state" not in cols
+
+    additions = {
+        "amber_gbsa_score": "REAL",
+        "prime_gbsa_score": "REAL",
+        "fep_score": "REAL",
+        "sa_score": "REAL",
+        "synthetic_feasibility": "INTEGER CHECK (synthetic_feasibility IN (0, 1))",
+        "state": "TEXT NOT NULL DEFAULT 'generated'",
+        "failed_stage": "TEXT",
+        "failure_message": "TEXT",
+    }
+
+    for name, sql_type in additions.items():
+        if name not in cols:
+            conn.execute(
+                f"ALTER TABLE compound ADD COLUMN {name} {sql_type}"
+            )
+
+    from graft.database import ensure_rdkit_descriptor_columns, ensure_druglike_selection_ownership
+    ensure_rdkit_descriptor_columns(conn)
+    ensure_druglike_selection_ownership(conn)
+    from graft.database import ensure_md_gbsa_schema
+    ensure_md_gbsa_schema(conn)
+
+    # Refresh columns after migration so legacy status columns can be used once
+    # to infer the new single state.
+    cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(compound)")
+    }
+
+    # Infer states only while adding the single-state column. Re-running
+    # project setup must not overwrite active or terminal worker states.
+    if state_added:
+        conn.execute(
+            "UPDATE compound SET state='reference' WHERE iteration=0"
+        )
+        conn.execute(
+            "UPDATE compound SET state='fep_done' "
+            "WHERE iteration>0 AND fep_score IS NOT NULL"
+        )
+        conn.execute(
+            "UPDATE compound SET state='prime_gbsa_done' "
+            "WHERE iteration>0 AND fep_score IS NULL "
+            "AND prime_gbsa_score IS NOT NULL"
+        )
+        conn.execute(
+            "UPDATE compound SET state='docked' "
+            "WHERE iteration>0 AND prime_gbsa_score IS NULL "
+            "AND docking_score IS NOT NULL"
+        )
+
+        # One-time best-effort migration from the old multi-status model.
+        if "docking_status" in cols:
+            conn.execute(
+                "UPDATE compound SET state='glide_running' "
+                "WHERE iteration>0 AND docking_score IS NULL "
+                "AND docking_status='running'"
+            )
+        if "ligprep_status" in cols:
+            conn.execute(
+                "UPDATE compound SET state='ligprepped' "
+                "WHERE iteration>0 AND docking_score IS NULL "
+                "AND ligprep_status='done' "
+                "AND state NOT IN ('glide_running','failed')"
+            )
+            conn.execute(
+                "UPDATE compound SET state='ligprep_running' "
+                "WHERE iteration>0 AND docking_score IS NULL "
+                "AND ligprep_status='running' "
+                "AND state NOT IN ('ligprepped','glide_running','failed')"
+            )
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_compound_state ON compound(state)"
+    )
+    conn.commit()
+
+
+
+def set_compound_state(
+    ids: Iterable[int],
+    state: str,
+    failed_stage: str | None = None,
+    failure_message: str | None = None,
+    db_path: str | Path | None = None,
+) -> None:
+    """Set the single pipeline state for a list of compound IDs."""
+    ids = list(ids)
+    if not ids:
+        return
+    if db_path is None:
+        raise ValueError("db_path is required to update compound states")
+    marks = ",".join("?" for _ in ids)
+    with _core.open_sqlite(db_path) as conn:
+        conn.execute(
+            f"""
+            UPDATE compound
+            SET state=?, failed_stage=?, failure_message=?,
+                modified_at=CURRENT_TIMESTAMP
+            WHERE id IN ({marks})
+            """,
+            [state, failed_stage, failure_message, *ids],
+        )
+        conn.commit()
+
+
+
+def find_iteration_for_state(stage: str, db_path: str | Path) -> int | None:
+    conditions = {
+        "ligprep": "iteration>0 AND state IN ('generated','ligprep_running')",
+        "glide": "iteration>0 AND state IN ('ligprepped','glide_running') AND docking_score IS NULL",
+        "prime_gbsa": "iteration>0 AND docking_score IS NOT NULL AND prime_gbsa_score IS NULL AND state IN ('docked','prime_gbsa_running')",
+        "fep": "iteration>0 AND prime_gbsa_score IS NOT NULL AND fep_score IS NULL AND state IN ('prime_gbsa_done','fep_running')",
+        "synthetic_feasibility": "iteration>0 AND synthetic_feasibility IS NULL AND state IN ('generated','synthetic_running')",
+    }
+    if stage not in conditions:
+        raise ValueError(stage)
+    with _core.open_sqlite(db_path) as conn:
+        row = conn.execute(
+            f"SELECT MIN(iteration) FROM compound WHERE {conditions[stage]}"
+        ).fetchone()
+    return row[0] if row and row[0] is not None else None
+
+
+
+def get_max_iteration(db_path: str | Path) -> int:
+    with _core.db_connect(db_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(MAX(iteration), 0) FROM compound"
+            )
+            return cur.fetchone()[0]
+
+
+
+def get_iteration_counts(
+    iteration: int, db_path: str | Path
+) -> tuple[int, int]:
+    with _core.db_connect(db_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                '''
+                SELECT COUNT(*), COUNT(docking_score)
+                FROM compound
+                WHERE iteration = %s
+                ''',
+                (iteration,),
+            )
+            return cur.fetchone()
+
+
+
+def get_existing_canonical_smiles(cur):
+    cur.execute(
+        "SELECT smiles FROM compound"
+    )
+
+    existing = set()
+
+    for (smiles,) in cur:
+        canonical = _core.canonicalize_smiles(smiles)
+        if canonical is not None:
+            existing.add(canonical)
+
+    return existing
+
+
+
+def get_reference_name(reference_id, db_path):
+    with _core.db_connect(db_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                '''
+                SELECT name
+                FROM compound
+                WHERE id = %s
+                  AND iteration = 0
+                ''',
+                (reference_id,),
+            )
+
+            row = cur.fetchone()
+
+    if row is None:
+        raise RuntimeError(
+            f"Reference id={reference_id} not found."
+        )
+
+    return row[0]
+
+
+
+def state_counts(iteration, db_path):
+    with _core.open_sqlite(db_path) as conn:
+        return conn.execute(
+            """
+            SELECT state, COUNT(*)
+            FROM compound
+            WHERE iteration=?
+            GROUP BY state
+            ORDER BY state
+            """,
+            (iteration,),
+        ).fetchall()
+
+
+
+def list_iteration_compounds(iteration, db_path, where="1=1"):
+    with _core.open_sqlite(db_path) as conn:
+        return conn.execute(
+            f"SELECT id,name,smiles,similar_to,similarity FROM compound WHERE iteration=? AND {where} ORDER BY id",
+            (iteration,),
+        ).fetchall()
+
+
+
+def latest_compound_iteration(conn) -> int | None:
+    """Read the latest compound iteration in the caller's connection context."""
+    return conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0]
+
+
+def generated_iterations(conn) -> list[int]:
+    """Read positive compound iterations without changing connection ownership."""
+    return [row[0] for row in conn.execute(
+        "SELECT DISTINCT iteration FROM compound WHERE iteration>0 ORDER BY iteration"
+    )]

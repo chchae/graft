@@ -43,6 +43,16 @@ def scores(project):
         [{'id': cid, 'score': -10 * cid} for cid in ids], ids)
 
 
+def test_new_ssh_record_uses_thirty_minute_charge_deadline(project):
+    record = amber_gbsa.new_record(project, 1, project.output, [1])
+    assert record['charge_timeout_s'] == 1800
+    assert record['minimization_timeout_s'] == 600
+    # Recovery continues to use the persisted protocol rather than new defaults.
+    record['charge_timeout_s'] = 600
+    amber_gbsa.save(project.output / 'amber_job.json', record)
+    assert amber_gbsa.load_job(project.output)['charge_timeout_s'] == 600
+
+
 def test_explicit_retry_restores_failure_and_keeps_original_error_and_provenance(project):
     ids = database.claim_amber_candidates(project.db_path, 1, 4)
     database.store_amber_results(project.db_path, 1, [{'id':1,'error':'original TIMEOUT'}], ids)

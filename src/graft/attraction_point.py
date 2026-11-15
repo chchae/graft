@@ -56,7 +56,10 @@ def prepare(args, iteration, stage):
     if saved is not None:
         if saved['point'] is not None and saved['source']:
             if hashlib.sha256(Path(saved['source']).read_bytes()).hexdigest() != saved['source_sha256']:
-                raise RuntimeError('Published poses changed after attraction_point was frozen')
+                from graft.reference_scores import annotation_matches
+                if (iteration != 0 or Path(saved['source']).resolve() != args.reference_poses.resolve()
+                        or not annotation_matches(args, saved['source_sha256'])):
+                    raise RuntimeError('Published poses changed after attraction_point was frozen')
         if saved['point'] is not None and list(point) != saved['point']:
             print(f'Iteration {iteration}: {stage} retains its frozen attraction_point={saved["point"]}.',flush=True)
         return saved  # Existing stage choices are immutable, including legacy ones.

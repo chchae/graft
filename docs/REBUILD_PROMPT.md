@@ -1,5 +1,241 @@
 # Independent Graft reconstruction prompt
 
+## Isolate unavailable Glide JobServer status queries (2026-11-13)
+
+**Observed bug:** a nonzero `jsc info --json <JobId>` response during runtime
+reconciliation aborted the complete Glide worker and delayed collection of
+other completed reference groups. The traceback omitted captured stderr.
+A read-only repeat query for the reported JobId succeeded and showed its parent
+and live children still running; the historical stderr is unavailable, so the
+specific transient cause is not established.
+
+**Implementation repair:** failed/timeout/I/O/malformed or parentless native info
+queries raise a distinct `JobStatusUnavailable` with bounded native diagnostics.
+Glide status/recovery treats this and operational stop/download errors as UNKNOWN,
+prints a warning and retains the original JobId, claims, timeout intents and
+cached output without using that output as completion evidence. Subsequent polls
+retry the same identity; one uncertain group does not prevent verified peer
+pose/score publication. The same pending behavior covers native queries/downloads
+during timeout-result recovery, including startup reconciliation; its scientific
+pose/range/checksum validation errors still propagate. Reuse one successful authoritative parent/child query
+within a group's status pass instead of issuing duplicate info calls for timeout
+and terminal-state checks. Keep legacy whole-tree and newer child-only timeouts,
+actual running-time gates and exact saved submission commands unchanged.
+
+During collection only, an unavailable global active-job snapshot falls back to
+individual saved-JobId queries. This does not authorize input cleanup or new
+submission: the existing global submission guard still requires a fresh verified
+snapshot and fails closed on uncertainty. Corrupt scientific results, persistence
+failures and unrelated validation errors still propagate; no native job is reset
+or resubmitted, and no query error becomes a scientific compound failure.
+
+**Evidence limits:** synthetic regressions cover nonzero exit/stderr, query timeout,
+I/O, invalid JSON, missing parents, unchanged durable records, same-JobId recovery,
+peer pose/SQLite score publication, global-query fallback and closed submission
+fences. These verify coordination/recovery rather than native docking accuracy.
+Only read-only JobServer diagnostics were performed on the reported production
+job; no scientific calculation, native stop or manual result import was run.
+
+**Verification:** 124 focused Glide/guard/recovery tests passed. Final full suite:
+2,644 passed, seven skipped and the same three documented baseline failures
+(fragment self-clash and two MD pending-log expectations). Compileall, package/CLI
+imports and whitespace checks passed. Existing jobs/results were not reset.
+
+## Reference MAEGZ score writeback and reuse (2026-11-13)
+
+**Confirmed user requirement:** after reference MD-GBSA finishes, record Amber,
+Prime and MD-GBSA values in the configured `reference-pose` file, then reuse
+compatible values in subsequent runs instead of recalculating the references.
+This authorizes score-property additions to the original input file; preserve
+its original structure count/order, titles, atoms, bonds, coordinates, experimental
+values and every unrelated property. Generated compounds are not appended.
+
+**Implementation choices:** the independent iteration-0 MD worker publishes
+`r_graft_amber_gbsa_score`, `r_graft_prime_gbsa_score`, `r_graft_md_gbsa_score`,
+MD standard deviation/snapshot count and versioned `s_graft_reference_scores`
+JSON. Publish only after the selected reference ensembles have finite committed
+scores, complete frame records and resolved native/collection gates. Failed or
+missing MD ensembles never replace a successful file cache. Existing imported
+cache selections do not republish or claim native work.
+
+Use installed Schrödinger structure I/O, a per-file lock and a temporary file.
+Verify all non-cache structure/property signatures after writing, fsync and
+atomically replace; retain a checksum-named `.graft-backup-<SHA>.maegz` original.
+Check source checksums before/after inspection and before publication. Preserve
+existing Amber, attraction-point and extracted-parent cache guards: allow only
+score annotations with a checksum-verified original backup and identical
+non-cache content. Grid, helper, suite, structure or unrelated-property changes
+still stop reuse. Retain independent implementation fingerprint guards.
+
+Only fresh reference initialization imports file caches. Validate canonical
+isomeric SMILES/title mapping, exact pose/reference-set signatures, target grid
+and custom receptor checksums, charge method/environment/helper, Prime suite/
+flexibility and MD suite/helper/protocol/replicates/selection settings. Certify
+upstream score settings from completed submission records rather than attaching
+new TOML settings to old scores. New native Prime queues pin their installation;
+legacy queues without that field retain their existing recovery behavior.
+
+Atomically remap cached selected identities to the new DB IDs and import full
+MD frames/mean/std into the usual result schema. Cache selections carry source
+checksums/context, without native JobIds or remote cleanup ownership. The worker
+recognizes this explicit completed-cache mode and performs no native preparation,
+submission or polling. Plain scalar MD properties alone never imply completion.
+Restore Amber independently; with MD enabled, reuse Prime only with a complete
+compatible MD selection, since scalar Prime values contain no optimized complexes
+for a different MD run. Invalid/incompatible caches cannot establish completion.
+A durable initialization marker retries interrupted cache reads/imports before
+claims. Do not change existing DB results, failure records, selections or jobs.
+If cached reference stages were skipped, lazily extract the default Amber receptor
+from the grid when generated compounds first need it, without reference rescoring.
+
+**Evidence limits:** native 2026-1 property-only MAEGZ roundtrips preserved all
+24 actual reference structures/properties. An isolated copy/new SQLite project
+reused all 24 actual complete reference ensembles with exact Amber/Prime/MD
+values and no pending reference calculations. Synthetic tests cover missing/
+duplicate/nonfinite frames, changed targets/protocols, ID remapping, atomic import,
+restart markers, frozen-source annotation checks and no native work on cache reuse.
+These checks validate storage/reuse, not the scientific accuracy of the energies.
+
+**Verification:** final full suite: 2,629 passed, seven skipped and the same
+three documented baseline failures (one fragment self-clash expectation and two
+MD pending-log expectations). All 20 dedicated reference-cache tests passed,
+including native structure I/O and fresh-DB roundtrip. Compileall, imports and
+whitespace checks passed. Existing successful iteration-0 results from the verified
+`egfr-crem-2/output-06-iter08` project were written to the configured reference
+MAEGZ for all 24 original references; its original byte checksum backup was retained.
+No scientific calculation was submitted and no existing project DB was modified
+by that writeback.
+
+## Score-gated chemical diversity for new pipeline selections (2026-11-13)
+
+**Confirmed user requirement:** when selecting N compounds and at least 2N
+candidates are available, retain the score-ranked best half and choose a chemically
+diverse N from that pool. **Confirmed follow-up:** retain the attraction-point
+contact preference and apply score/diversity inside each priority tier.
+
+**Implementation choices:** for new Amber, Prime, MD-GBSA and FEP candidate
+selections in generated iterations, fill the contact (<=2 A) tier before the
+noncontact tier. Within each tier, let R be the remaining quota. If its population
+M is >=2R, retain ceil(M/2) in the existing ascending scientific score and tie-break
+order, then use deterministic MaxMin with Morgan radius 2, 2048-bit fingerprints
+and Tanimoto distance. Seed MaxMin with the tier's best-scoring molecule and
+fixed random seed 0. Return picks in the original tier/score order. If M<2R,
+retain the existing best-R rule. Exactly 2R candidates reduce to R score winners;
+there is then no additional freedom for diversity. Invalid SMILES in a diversity
+pool stop selection without silently dropping/replacing compounds. Preserve the
+existing score-source precedence; never mix Amber/Prime/MD/FEP/Glide energies.
+
+Use the same score/diversity rule for new scored-pipeline CReM elite-parent
+choices; preserve their existing score sources, pose ancestry and immutable
+following-iteration generation plan. Initial reference calculations, all-compound
+LigPrep/Glide processing, standalone growth protocols and legacy LibInvent elite
+reader APIs remain under their existing rules. This changes which compounds are
+selected for downstream work, not scientific calculation settings or pose choice.
+
+Before new Amber/Prime claims, freeze the complete ordered shortlist and policy
+in `iteration_score_selection` in the same BEGIN IMMEDIATE transaction. Readiness,
+previews, result ranking and claims use the same saved membership; scored, failed
+and claimed members retain positions and never trigger lower-ranked refill.
+Existing Amber/Prime work without this table retains its legacy score-based
+selection when a stage has already started. Keep existing saved MD/FEP selections,
+submitted manifests and CReM plans unchanged on restart. Preview/readiness queries
+do not create selection records or claim work. Include the new table in existing
+saved-work guards, backed-up explicit reset paths and downstream ownership checks.
+The driver performs no chemistry, selection or native submission calculations.
+
+Regression checks cover 2N/odd/below-threshold pools, structural diversity, best
+score retention, deterministic ties, invalid chemistry, independent contact tiers,
+atomic claims, frozen membership, source isolation, readiness and saved MD/FEP
+recovery. Synthetic tests do not establish affinity improvement or native runtime.
+No production selections, scores, jobs or elite files are reset by validation.
+
+**Verification:** 395 affected tests passed. Full suite: 2,609 passed, seven
+skipped, with the same three documented baseline failures (one real-fragment
+self-clash expectation and two MD pending-log expectations). Compileall, package/
+CLI/selection imports and diff whitespace checks passed. No native scientific
+program or production submission was run for this selection change.
+
+## Glide core RMSD tolerance of one Angstrom (2026-11-13)
+
+**Confirmed user requirement:** relax the Glide docking core constraint to 1 A.
+New constrained SP inputs explicitly set `CORE_POS_MAX_RMSD 1.0`, defining the
+maximum RMSD of core atom positions rather than a per-atom displacement cap.
+Apply this shared writer setting to explicit SMARTS and legacy mcssmarts inputs.
+Keep reference identity, core mapping, `CORE_RESTRAIN True`,
+`CORECONS_FALLBACK False`, pose selection, scoring and generation constraints.
+Use Glide's automatic core algorithm choice (installed 2026-1 selects
+`CORE_SNAP False` at RMSD 1.0). Do not rewrite submitted/recovering inputs,
+reset results or redock completed compounds; only newly prepared inputs change.
+
+**Verification and evidence limits:** 86 relevant docking, pipeline, job-name,
+pose-selection and recovery tests passed. Installed 2026-1 Dock keyword validation
+accepted both core definitions with RMSD 1.0; explicit SMARTS also passed native
+conflict checks. The legacy mcssmarts conflict checker still reports its existing
+MAXATOMS/default incompatibility, outside this change. No native docking job was
+submitted; input acceptance does not validate affinity or docking success.
+
+## Warn when calculation deadlines lose at least half a stage (2026-11-13)
+
+**Confirmed user requirement:** display a warning when calculation time limits
+cause at least half of the compounds in Glide, Amber, Prime, MD or another
+calculation stage to be lost.
+
+**Implementation choices:** after SQLite and external completion checks resolve
+a supervised LigPrep/Glide/Amber/Prime/MD stage, print a visible `[WARNING]` with
+iteration, stage, timeout-failed original-compound count, resolved stage count
+and percentage when the fraction is >=50%, including exactly half and 100%.
+The denominator is that stage's successful plus failed compounds, not the whole
+generated or upstream population. Count only current unscored stage failures
+with explicit runtime/deadline diagnostics; preserve Glide's existing recorded
+runtime-timeout attribution. Exclude other failure types, transport/poll/wait
+timeouts and successful checkpoint/recovered scores. Count a compound once even
+when multiple replicas fail. Unknown failure causes remain unclassified; do not
+infer runtime failure from a missing score, zero exit or wall-clock duration.
+Warn before the existing zero-score MD progression block too. Pending or uncertain
+native work does not trigger the completion warning. This read-only reporting
+change never changes deadlines, claims, scientific results or retry/completion
+policies, and never submits or cancels a calculation.
+
+## Amber charge generation default of 1800 seconds (2026-11-13)
+
+**Confirmed user requirement:** raise the default charge-generation deadline
+from 600 to 1800 seconds. New direct-SSH and Slurm Amber records pin
+`charge_timeout_s=1800`. This supersedes the 600-second default documented below.
+Keep the minimization deadline at 600 seconds and preserve Slurm allocation
+limits. Saved records, uploaded workers and existing jobs retain their recorded
+protocol, including a 600-second charge deadline or the legacy absence of one.
+Do not reset failures or automatically rerun historical calculations. Timeout
+process-group cleanup and rejection of incomplete charges remain unchanged.
+Regression checks cover both new-record paths and persisted legacy deadlines;
+no native Amber calculation or throughput improvement is claimed.
+
+## Export frozen CReM elites per selected cycle (2026-11-13)
+
+**Confirmed user requirement:** automatically save the selected elites as separate
+SMILES and SDF files for each CReM cycle.
+
+**Implementation choices:** after the N+1 generation plan is frozen, publish
+`iterNN/19-elite/elites.smi` and `elites.sdf` for selected cycle N.
+The selected-cycle `19-elite` directory separates post-selection exports from
+generation inputs/products. Remove identical legacy exports under
+`02-generate/crem` only after publishing both new files; retain differing files.
+Use the saved parent order, compound IDs, SMILES, selection scores and score source;
+never rerank from mutable current scores. SDF coordinates come from the saved
+parent molblock (generation geometry, not an MD-final or independently exported
+Glide pose). Include rank, selected cycle, destination generation iteration and
+coordinate source in SDF properties. SMILES columns are SMILES, CMPID, rank,
+score source and selection score, without a header. The iteration-1 initial
+frame is not an elite selection. No selection is inferred for the last cycle
+until a following generation plan exists.
+
+Build complete files before atomic replacement of each file. Completed-generation
+retries restore missing exports from the frozen plan without new calculations.
+Exports do not change selections, scientific results or completion gates; retain
+existing frozen-source fingerprint guards on incomplete generation. Historical
+exports can be reconstructed from saved plans without database writes. Regression
+checks validate IDs/order, coordinates/stereo, score metadata, invalid-structure
+publication failure and missing-file recovery; they do not validate affinity.
+
 ## Preserve ring stereochemistry in parent docking queries (2026-11-12)
 
 **Bug fix within confirmed parent-pose requirements:** remove chiral H-count

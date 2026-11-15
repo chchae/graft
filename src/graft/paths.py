@@ -15,6 +15,7 @@ STAGE_DIRECTORIES = {
     'prime_gbsa': '08-prime_gbsa',
     'md_gbsa': '09-md_gbsa',
     'fep': '09-fep',
+    'elite': '19-elite',
 }
 
 
