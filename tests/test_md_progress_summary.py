@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from graft.stages import _logging
+
 from graft import _core, database, driver
 from graft.md_gbsa_native import save
 from graft.stages._summary import md_pending_summary
@@ -93,7 +95,10 @@ def test_legacy_selection_without_replica_settings_reports_unknown(project):
 
 
 @pytest.mark.parametrize('rc', [0, 1])
-def test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error(project, monkeypatch, capsys, rc):
+def test_driver_pending_line_includes_progress_and_elapsed_even_on_worker_error(project, monkeypatch, capsys, rc, request):
+    # This test inspects verbose progress content; quiet-mode policy has its own tests.
+    token = _logging.set_log_level(2)
+    request.addfinalizer(lambda: _logging._log_level.reset(token))
     args, _, _ = project
     monkeypatch.setattr(driver, 'stream_process', lambda *a: rc)
     assert not driver.supervise_iteration(args, args.output/'project.toml', 1,

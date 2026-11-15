@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from graft import _core, database, driver, cli, schrodinger_guard as guard
+from graft.stages import _logging
 from graft.states import CompoundState as State
 
 
@@ -92,7 +93,10 @@ def test_retry_failure_cannot_advance_stage(tmp_path, monkeypatch):
     ('amber-gbsa', '493 compounds still running Amber GBSA screening'),
     ('md-gbsa', 'MD-GBSA still pending for compound 624598'),
 ])
-def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatch, capsys, stage, reason):
+def test_pending_log_uses_persisted_iteration_stage_elapsed(tmp_path, monkeypatch, capsys, stage, reason, request):
+    # This test inspects verbose progress content; quiet-mode policy has its own tests.
+    token = _logging.set_log_level(2)
+    request.addfinalizer(lambda: _logging._log_level.reset(token))
     args = project(tmp_path, State.DOCKED, iteration=60)
     monkeypatch.setattr(driver, 'current_time', lambda: '2026-11-10 14:15:03 KST')
     args.md_gbsa_enabled = True

@@ -335,14 +335,37 @@ def test_one_two_and_one_three_excluded_but_remote_internal_collision_detected(i
     assert any({p['atom_i'],p['atom_j']}=={0,4} for p in result['internal_examples'])
 
 
-def test_real_probes_pass_but_actual_fragment_combination_collides_with_itself(inputs):
+def test_real_probes_pass_but_actual_fragment_combination_collides_with_itself(inputs, monkeypatch):
     _,cfg,mol,h = inputs
     cfg['overlap-tolerance'] = 0.0  # deliberately strict model for this regression
     checker = BumpChecker(load_receptor(cfg['receptor'],cfg),cfg)
     sites = growth_sites(mol,h)
     assert all(conformations.methyl_probe(mol,h,uid,checker,cfg,37)['status']==PoseVerdict.PASS for uid in sites)
     product,ph = assemble(mol,h,sites,['*c1ccccc1']*2,'two-real-fragments')
-    result = conformations.search(product,ph,checker,cfg,37)
+    # Freeze a deliberately clashing pose. Free optimization can legitimately move
+    # these fragments apart, so it cannot guarantee this regression's premise.
+    pose = Chem.Mol(product)
+    conformer = Chem.Conformer(pose.GetNumAtoms())
+    for atom in pose.GetAtoms():
+        index = atom.GetIdx()
+        conformer.SetAtomPosition(index, (100. + 10.*index, 0., 0.))
+    for row in ph['core']:
+        atom = next(a for a in pose.GetAtoms() if a.GetProp('_mn_uid') == row['uid'])
+        conformer.SetAtomPosition(atom.GetIdx(), row['xyz'])
+    added = [a for a in pose.GetAtoms() if a.GetProp('_mn_added_iteration') == '2']
+    first = added[0]
+    second = next(a for a in added if a.GetProp('_mn_fragment') != first.GetProp('_mn_fragment')
+                  and len(Chem.GetShortestPath(pose, first.GetIdx(), a.GetIdx())) > 4)
+    for atom in (first, second):
+        conformer.SetAtomPosition(atom.GetIdx(), (1000., 0., 0.))
+    pose.RemoveAllConformers()
+    pose.AddConformer(conformer)
+    assert not checker.check(pose)['passed']
+    def keep_coordinates(candidate, fixed, config, **options):
+        assert np.array_equal(candidate.GetConformer().GetPositions(), pose.GetConformer().GetPositions())
+        return 'fixed-test-pose', 0., dict(status='converged', converged=True, return_code=0)
+    monkeypatch.setattr(conformations, 'optimize', keep_coordinates)
+    result = conformations.search(product,ph,checker,cfg,37,starts=[pose])
     assert result['status'] == PoseVerdict.CLASH_REJECT
     assert result['valid_poses'] >= 1 and not result['errors']
     assert result['clashes']['receptor_clashes'] == 0
