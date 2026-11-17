@@ -13,6 +13,11 @@ from graft.paths import stage_directory
 SCHEMA = 'graft_reference_scores_v1'
 
 
+def prime_settings(value):
+    """Execution enablement does not change an already calculated energy."""
+    return {key: item for key, item in value.items() if key != 'enabled'} if isinstance(value, dict) else value
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -210,37 +215,43 @@ def restore(args):
     # the whole requested MD selection, since cached scores contain no optimized
     # Prime complexes from which to start a different MD protocol.
     md = None
-    if getattr(args, 'md_gbsa_enabled', False):
+    md_enabled = getattr(args, 'md_gbsa_enabled', False)
+    if records:
         first = next(iter(records.values()))
+        # Disabled MD imports historical ensembles under their saved protocol.
+        # Enabled MD still requires the requested protocol and selection exactly.
+        reuse_context = expected if md_enabled else first['context']
         names = first.get('md_selection',[])
         population = [r['name'] for r in source['records'] if r['smiles'] is not None]
         requested = args.md_gbsa_input_count
         quota = min(len(population), requested if requested is not None else max(1,math.ceil(len(population)*args.md_gbsa_input_ratio)))
-        chain_complete = all(name in records and records[name]['context'] == expected and
-            all(not getattr(args,key+'_enabled',True) or
+        chain_complete = all(name in records and
+            all(records[name]['context'][key] == reuse_context[key] for key in ('target','amber','md')) and
+            prime_settings(records[name]['context']['prime']) == prime_settings(reuse_context['prime']) and
+            all(not md_enabled or not getattr(args,key+'_enabled',True) or
                 (isinstance(records[name]['scores'].get(key),(int,float))
                  and not isinstance(records[name]['scores'].get(key),bool)
                  and math.isfinite(records[name]['scores'][key]))
                 for key in ('amber_gbsa','prime_gbsa')) for name in population)
         if (isinstance(names,list) and names and all(isinstance(n,str) for n in names)
-                and len(names)==quota and len(set(names))==len(names) and chain_complete):
+                and (not md_enabled or len(names)==quota) and len(set(names))==len(names) and chain_complete):
             try:
                 for name in names:
                     item = records[name]
-                    if (item['context'] != expected or item['md_selection'] != names
+                    if (item['md_selection'] != names
                             or item['scores']['md_gbsa'] != item['md_result']['mean']):
                         raise ValueError('Reference cache calculation settings differ')
-                    validate_result(item['md_result'], expected['md'])
+                    validate_result(item['md_result'], reuse_context['md'])
                     native_record = next(r for r in source['records'] if r['name']==name)
                     if (native_record['md_std'] != item['md_result']['std']
                             or native_record['md_snapshots'] != len(item['md_result']['snapshots'])):
                         raise ValueError('Cached MD properties disagree with ensemble')
                 md = dict(names=names, settings=dict(reference_score_cache=True,
-                    protocol=expected['md']['protocol'], replicates=expected['md']['replicates'],
+                    protocol=reuse_context['md']['protocol'], replicates=reuse_context['md']['replicates'],
                     ranking_source='reference_score_cache'), results={n:records[n]['md_result'] for n in names})
                 md['settings']['reference_score_cache'] = dict(schema=SCHEMA,
                     source=str(args.reference_poses.resolve()), source_sha256=source['sha256'],
-                    source_signature=source['signature'], context=expected)
+                    source_signature=source['signature'], context=reuse_context)
             except (ValueError, KeyError, TypeError):
                 md = None
     updates = {}
@@ -248,7 +259,7 @@ def restore(args):
         scores = {}
         if item['context']['amber'] == expected['amber']:
             scores['amber_gbsa_score'] = item['scores']['amber_gbsa']
-        if (item['context']['prime'] == expected['prime']
+        if (prime_settings(item['context']['prime']) == prime_settings(expected['prime'])
                 and (not getattr(args,'md_gbsa_enabled',False) or md is not None)):
             scores['prime_gbsa_score'] = item['scores']['prime_gbsa']
         updates[name] = dict(smiles=item['smiles'], scores=scores)

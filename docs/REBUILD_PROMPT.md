@@ -1,5 +1,31 @@
 # Independent Graft reconstruction prompt
 
+## Import reference scores when calculation stages are disabled (2026-11-17)
+
+**Reported bug:** iteration-0 reference MAEGZ contains Prime and MD scores,
+but a new project with Prime/MD disabled imported only Amber. Prime context
+equality included the execution toggle, and MD import was gated on enablement.
+
+**Repair:** Prime's enabled flag does not identify a scientific protocol.
+For fresh initialization, import verified complete MD caches even when MD is
+disabled, preserving the cache's original protocol, selection, frames and source
+context. In this historical import mode, inactive TOML snapshot/count settings
+do not relabel or invalidate the original ensemble. When MD is enabled, retain
+the requested protocol, implementation, selection and upstream compatibility
+checks. Retain target/pose/signature, frame/statistics and identity validation,
+atomic fresh-only import, and no native submission/cleanup ownership.
+
+Existing projects and live jobs are not backfilled, reset or overwritten.
+Scalar MD properties alone still cannot establish completion. These changes
+verify storage/reuse and do not validate scientific energies.
+
+**Verification:** 2,941 tests passed, seven skipped; compileall, package/CLI
+imports and whitespace checks passed. An isolated fresh DB using the actual
+EGFR MAEGZ and disabled-stage TOML imported all 24 references' 72 energies
+exactly, preserving the original ten-frame ensembles despite the inactive
+five-snapshot setting. No production DB or native job was changed.
+
+
 ## Fail closed on unmatched or displaced Glide cores (2026-11-17)
 
 **Confirmed user request:** prevent LigPrep states without the selected reference

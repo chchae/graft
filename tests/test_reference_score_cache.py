@@ -128,6 +128,46 @@ def test_changed_grid_or_pose_never_reuses_cache(args,native_file,tmp_path):
     assert database.md_gbsa_selection(new.db_path,0) is None
 
 
+def test_disabled_stages_import_scores_with_saved_md_protocol(args,native_file,tmp_path,monkeypatch):
+    saved = completed(args)
+    cache.publish(args)
+    new = new_project(args,tmp_path)
+    new.amber_gbsa_enabled = new.prime_gbsa_enabled = new.md_gbsa_enabled = False
+    new.md_gbsa_snapshots = 5
+    new.md_gbsa_input_count = 250
+    assert cache.restore(new) == 2
+    with database.connect(new.db_path) as conn:
+        assert conn.execute('SELECT amber_gbsa_score,prime_gbsa_score,md_gbsa_score,md_gbsa_snapshots FROM compound').fetchall() == [(-20.,-30.,-41.,2)]*2
+    selection = database.md_gbsa_selection(new.db_path,0)
+    assert selection['settings']['protocol'] == saved['md']['protocol']
+    assert selection['settings']['reference_score_cache']['context'] == saved
+    assert not driver.reference_work_pending(new)
+    monkeypatch.setattr(md_gbsa,'prepare',lambda *a:pytest.fail('Historical cache prepared MD'))
+    monkeypatch.setattr(md_gbsa,'ssh',lambda *a,**kw:pytest.fail('Historical cache contacted MD host'))
+    md_gbsa.run(new,0)
+
+
+def test_disabled_md_still_rejects_invalid_ensemble(args,native_file,tmp_path):
+    completed(args);cache.publish(args)
+    new = new_project(args,tmp_path)
+    new.prime_gbsa_enabled = new.md_gbsa_enabled = False
+    value = json.loads(native_file['records'][0]['cache'])
+    value['md_result']['snapshots'].pop()
+    native_file['records'][0]['cache'] = json.dumps(value)
+    cache.restore(new)
+    assert database.md_gbsa_selection(new.db_path,0) is None
+    assert all(r['md_gbsa_score'] is None for r in database.reference_score_records(new.db_path))
+
+
+def test_prime_execution_toggle_does_not_invalidate_complete_md_cache(args,native_file,tmp_path):
+    completed(args);cache.publish(args)
+    new = new_project(args,tmp_path)
+    new.prime_gbsa_enabled = False
+    assert cache.restore(new) == 2
+    assert database.md_gbsa_selection(new.db_path,0)['ids'] == [11,7]
+    assert not driver.reference_work_pending(new)
+
+
 @pytest.mark.parametrize('change',['protocol','missing','duplicate','statistics','nonfinite'])
 def test_incompatible_or_incomplete_md_never_establishes_completion(args,native_file,tmp_path,change):
     completed(args);cache.publish(args)
