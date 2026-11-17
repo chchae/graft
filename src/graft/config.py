@@ -10,6 +10,7 @@ import tomllib
 
 
 SCHRODINGER_LICENSE_SERVERS = 'virusgpu1:53000;atlas:53000'
+GLIDE_SLURM_MEMORY_MB = 2048
 
 
 def schrodinger_environment():

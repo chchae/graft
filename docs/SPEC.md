@@ -1,5 +1,27 @@
 # Graft specification
 
+## Per-job memory for new Slurm Glide submissions (2026-11-17)
+
+**Confirmed user request:** reserve/limit each newly submitted Slurm Glide job
+to 2 GiB. Pass native JobControl `-QARGS --mem=2048M` from the Glide stage,
+with the resource constant centralized in config.py. Use per-job memory rather
+than per-CPU memory, so SMT allocation does not double the request on cpu2.
+The installed Maestro command builder documents/emits the same -QARGS mechanism.
+Keep non-Slurm Glide, LigPrep, Prime, global Slurm defaults and host settings
+unchanged. Preserve exact commands and identities of already submitted parents
+and children, including pending work; apply this only to new parent submissions.
+Do not cancel/resubmit saved jobs or infer native completion from cached files.
+An allocation limit can cause a future job exceeding 2 GiB to fail; current
+sampled usage does not guarantee a maximum for all molecules.
+
+**Verification:** 124 focused tests and the full suite (2,992 passed, eight
+skipped) pass. Compileall, package/CLI imports and diff whitespace checks pass.
+Native isolated two-structure Glide parent 320549 allocated 2G; its separate
+child 320556 requested 2G, and both child native launch records inherited
+--mem=2048M. At inspection the parent was running and child queued; scientific
+completion is not established. See docs/diagnostics/glide-memory/verification.json.
+
+
 ## Keep Slurm calculators alive when a disconnected socket flushes on close (2026-11-17)
 
 **Observed incident:** iter3 reached 50,000 unique molecules and stopped local

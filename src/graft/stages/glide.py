@@ -19,7 +19,8 @@ from threading import Event
 from graft import _core as c
 from graft import database
 from graft.glide_timing import record as record_timing
-from graft.config import glide_group_resources, glide_job_options, glide_molecules_per_job
+from graft.config import (GLIDE_SLURM_MEMORY_MB, glide_group_resources,
+                          glide_job_options, glide_molecules_per_job)
 from graft.stages._logging import work_started, timed_stage, format_elapsed, current_time
 from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
@@ -753,7 +754,8 @@ def _run_stage(args, ns):
                         submission_verified = True
                     submitted = c.submit_glide(
                         args.schrodinger, inputs[refid], job['group_dir'], host,
-                        ligand_count=counts[refid], molecules_per_job=molecules_per_job)
+                        ligand_count=counts[refid], molecules_per_job=molecules_per_job,
+                        memory_mb=GLIDE_SLURM_MEMORY_MB if getattr(args, 'use_slurm', False) else None)
                 except SubmissionBlocked as exc:
                     print(f'Iteration {iteration}: Glide submissions waiting: {exc}.')
                     return

@@ -1,0 +1,31 @@
+{
+  "native_parent": "46fff5e5-e28c-11f1-b536-ece7a713a41c",
+  "slurm_parent": "320549",
+  "slurm_child": "320556",
+  "memory": "2G per job",
+  "native_jobs": [
+    {
+      "jobId": "46fff5e5-e28c-11f1-b536-ece7a713a41c",
+      "status": "RUNNING",
+      "name": "memory_smoke",
+      "jobQueueArgs": "--mem=2048M"
+    },
+    {
+      "jobId": "5598ed85-e28c-11f1-9369-3ceceffec53a",
+      "status": "SUBMITTED",
+      "name": "memory_smoke-0002",
+      "jobQueueArgs": "--mem=2048M"
+    },
+    {
+      "jobId": "55847c98-e28c-11f1-a98b-3ceceffec53a",
+      "status": "RUNNING",
+      "name": "memory_smoke-0001",
+      "jobQueueArgs": "--mem=2048M"
+    }
+  ],
+  "observed": "Slurm parent AllocTRES mem=2G; queued child ReqTRES mem=2G. Native scientific completion not yet established. Production jobs unchanged.",
+  "tests": {
+    "passed": 2992,
+    "skipped": 8
+  }
+}

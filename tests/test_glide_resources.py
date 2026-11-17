@@ -86,6 +86,8 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
                            reference_poses=Path('refs.maegz'), grid=Path('grid.zip'))
     if stage_host is not None:
         args.glide_host = stage_host
+    args.use_slurm = stage_host == 'slurm-cpu'
+    monkeypatch.setattr('graft.schrodinger_guard.verify_submission_host', lambda *a: None)
     prepared = tmp_path / 'iter1/ligprep/ligprep.maegz'
     prepared.parent.mkdir(parents=True)
     prepared.write_text('input')
@@ -125,6 +127,7 @@ def test_stage_uses_prepared_counts_reserves_live_jobs_and_keeps_native_commands
         # Original-compound mean is 12 even with unequal prepared-state counts,
         # and includes the reserved legacy group's original compound.
         assert kwargs['molecules_per_job'] == 45
+        assert kwargs['memory_mb'] == (2048 if args.use_slurm else None)
         options = glide_job_options(host, count, molecules_per_job=kwargs['molecules_per_job'])
         njobs = int(options[options.index('-NJOBS') + 1])
         assert njobs == (count + 44) // 45
