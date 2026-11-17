@@ -1,5 +1,45 @@
 # Graft Development Handoff
 
+## Prefer virusgpu1 licensing inside Graft calculations only (2026-11-17)
+
+**Confirmed user request:** Graft-owned internal calculations prefer
+`virusgpu1:53000` before `atlas:53000`; do not change system/global Schrödinger
+configuration or unrelated programs. Installed Schrödinger 2026-1 SLM code
+recognizes `SCHRODINGER_LICENSE_SERVERS` as a semicolon-separated ordered list
+and places these entries before discovered server-identifier files. A read-only
+Slurm query originally found atlas before virusgpu1.
+
+**Implementation:** centralize the ordered value and child-environment builder
+in config.py. Copy the inherited environment, overriding this variable only for
+Graft supervised workers, common command/reference-matcher/native-export helpers,
+new Glide/LigPrep launches and Prime launch/retry clients. Export the same quoted
+value only within each MD/Prime SSH session, including frozen native helpers and
+streamed read-only helpers. Preserve SSH stdin, other environment variables,
+command argv, durable launch records, JobIds, recovery and scientific parameters.
+No import-time/global os.environ mutation, shell startup edits, host-file/license
+file changes, service restart or native cancellation/resubmission. Already-running
+processes/jobs retain their original environment; newly started Graft workers and
+launch clients use the new policy. This adjusts licensing preference, not the
+scientific protocol or completion requirements.
+
+**Evidence:** native JobServer probe
+`35c37bd7-e274-11f1-a22e-ece7a713a41c` ran on cpu2 and ended DONE. Its registered
+native runtime environment and actual backend both contained
+`virusgpu1:53000;atlas:53000`, with server discovery in that order and no source
+errors. The isolated probe requested no license features and did not validate
+checkout capacity, exhaustion fallback or scientific calculations. The Graft SSH
+wrapper likewise reported virusgpu1 first; a subsequent independent SSH query
+still reported atlas first. Production jobs/results were retained.
+
+Nine new subprocess/shell regressions verify conflicting-parent-env isolation,
+both log modes, supervised workers, exact Glide/LigPrep command journals and
+saved-job recovery, Prime JobId checkpoints, SSH quoting and streamed stdin.
+106 focused launch/recovery/logging tests pass. See
+`docs/diagnostics/license-priority/verification.json` for native probe evidence.
+
+**Full verification:** 2,976 tests passed, eight skipped; compileall, package/CLI
+imports and diff whitespace checks passed.
+
 ## Prime diversity selection starts at one times the requested count (2026-11-17)
 
 **Confirmed user correction:** Prime's diversity-selection threshold is N rather

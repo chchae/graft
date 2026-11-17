@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-17",
+  "job_id": "35c37bd7-e274-11f1-a22e-ece7a713a41c",
+  "status": "DONE",
+  "backend": {
+    "host": "cpu2.camd.krict.re.kr",
+    "priority": "virusgpu1:53000;atlas:53000",
+    "order": [
+      "virusgpu1:53000",
+      "atlas:53000"
+    ],
+    "errors": []
+  },
+  "registered_license_environment": "virusgpu1:53000;atlas:53000",
+  "independent_ssh_order": [
+    "atlas:53000",
+    "virusgpu1:53000"
+  ],
+  "graft_ssh_order": [
+    "virusgpu1:53000",
+    "atlas:53000"
+  ],
+  "license_features_requested": {},
+  "scientific_calculation": false,
+  "production_jobs_modified": false,
+  "focused_tests": "106 passed",
+  "limitations": "Verifies process environment/server discovery, not actual checkout capacity or exhaustion fallback",
+  "full_suite": "2976 passed, 8 skipped",
+  "checks": [
+    "compileall src tests",
+    "import graft; import graft.cli",
+    "git diff --check"
+  ]
+}

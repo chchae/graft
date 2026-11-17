@@ -383,6 +383,8 @@ def run_command(
     *, log_message: str | None = None, log_dir: str | Path | None = None,
 ) -> None:
     cmd = [str(x) for x in cmd]
+    from graft.config import schrodinger_environment
+    env = schrodinger_environment()
     from graft.stages._logging import command_display, detail, enabled
     if log_message is None:
         detail("$", command_display(cmd))
@@ -391,7 +393,7 @@ def run_command(
     # Keep output on disk even when console verbosity is low. Native logs
     # remain untouched, and failed commands replay their diagnostics.
     if enabled(3):
-        subprocess.run(cmd, cwd=cwd, check=True)
+        subprocess.run(cmd, cwd=cwd, check=True, env=env)
         return
     log_path = Path(log_dir or cwd or '.') / 'graft_commands.log'
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -400,7 +402,7 @@ def run_command(
         log.flush()
         offset = log.tell()
         try:
-            subprocess.run(cmd, cwd=cwd, check=True, stdout=log, stderr=subprocess.STDOUT)
+            subprocess.run(cmd, cwd=cwd, check=True, stdout=log, stderr=subprocess.STDOUT, env=env)
         except subprocess.CalledProcessError:
             log.seek(offset)
             print(log.read(), end='', flush=True)
@@ -2798,6 +2800,7 @@ def get_core_atoms_from_reference(
     mcs_smarts,
     cwd,
 ):
+    from graft.config import schrodinger_environment
     result = subprocess.run(
         [
             str(schrodinger / "run"),
@@ -2809,6 +2812,7 @@ def get_core_atoms_from_reference(
         check=True,
         capture_output=True,
         text=True,
+        env=schrodinger_environment(),
     )
 
     lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]

@@ -50,7 +50,8 @@ def build_stages(synthetic_feasibility_enabled, fep_enabled, amber_gbsa_enabled=
 
 def stream_process(stage, cmd, cwd, stop_event):
     """Stream actual work and failures; summarize each successful idle poll."""
-    env = os.environ.copy()
+    from graft.config import schrodinger_environment
+    env = schrodinger_environment()
     env["GRAFT_SUPERVISED"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(

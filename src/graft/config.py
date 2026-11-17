@@ -9,6 +9,15 @@ from graft.paths import stage_directory
 import tomllib
 
 
+SCHRODINGER_LICENSE_SERVERS = 'virusgpu1:53000;atlas:53000'
+
+
+def schrodinger_environment():
+    """License priority for Graft children only; never change the caller's env."""
+    import os
+    return dict(os.environ, SCHRODINGER_LICENSE_SERVERS=SCHRODINGER_LICENSE_SERVERS)
+
+
 def _merge_combichem_project_keys(raw, section, base_output: Path):
     """Apply existing shared-key aliases and section overrides in their order."""
     aliases = {'receptor':('dock-grid','receptor','prime-gbsa-receptor','amber-receptor'),

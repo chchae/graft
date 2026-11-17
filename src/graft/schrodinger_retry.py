@@ -21,9 +21,11 @@ def _logs(directory):
 
 
 def _run_attempt(command, cwd, on_line=None):
+    from graft.config import schrodinger_environment
     lines = []
     with (Path(cwd) / 'prime_launch.log').open('a') as log, subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, text=True, bufsize=1) as proc:
+                          stderr=subprocess.STDOUT, text=True, bufsize=1,
+                          env=schrodinger_environment()) as proc:
         for line in proc.stdout:
             if on_line is not None:
                 on_line(line)

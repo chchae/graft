@@ -24,6 +24,9 @@ def report_pending(reason):
 
 
 def ssh(host, command, *, input=None, timeout=240):
+    from graft.config import SCHRODINGER_LICENSE_SERVERS
+    # Export in this SSH session only, including descendants of frozen helpers.
+    command = 'export SCHRODINGER_LICENSE_SERVERS='+shlex.quote(SCHRODINGER_LICENSE_SERVERS)+'; '+command
     result = subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=15',host,command],
                             input=input,capture_output=True,text=True,timeout=timeout)
     if result.returncode:

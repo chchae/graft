@@ -314,8 +314,9 @@ def submit(suite, command, directory):
                   'submitted_at': time.time(), 'downloaded': False}
         save_record(directory, record)
         verified = time.monotonic()
+        from graft.config import schrodinger_environment
         result = subprocess.run(record['command'], cwd=directory, check=True,
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, env=schrodinger_environment())
         with (directory / 'glide_launch.log').open('a') as log:
             log.write(result.stdout)
             log.write(result.stderr or '')

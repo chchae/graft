@@ -117,8 +117,10 @@ def run_or_recover(command, directory, compound_ids, output):
         output.unlink(missing_ok=True)
         from graft.stages._logging import command_display
         print('$', command_display(command), flush=True)
+        from graft.config import schrodinger_environment
         with subprocess.Popen(command, cwd=directory, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True, bufsize=1) as proc:
+                              stderr=subprocess.STDOUT, text=True, bufsize=1,
+                              env=schrodinger_environment()) as proc:
             for line in proc.stdout:
                 print(line, end='', flush=True)
                 match = re.search(r'^JobId:\s*(\S+)', line, re.IGNORECASE)

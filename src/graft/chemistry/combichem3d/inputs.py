@@ -100,7 +100,9 @@ def materialize_native_inputs(cfg):
             command=[str(runner),str(helper),'--output',str(temporary)]
             for key,value in sources.items():
                 command.extend(['--'+key,str(value)])
-            result=subprocess.run(command,capture_output=True,text=True,timeout=180)
+            from graft.config import schrodinger_environment
+            result=subprocess.run(command,capture_output=True,text=True,timeout=180,
+                                  env=schrodinger_environment())
             if result.returncode:
                 raise RuntimeError('Native input extraction failed: '+result.stderr[-4000:]+result.stdout[-1000:])
             audit=json.loads((temporary/'atom_source_map.json').read_text())
