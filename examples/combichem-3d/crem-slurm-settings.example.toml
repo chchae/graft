@@ -1,0 +1,17 @@
+# Add these execution keys to the existing [combichem-3d] section of a
+# scored CReM project. Keep its scientific inputs and generation settings.
+# Start a new iteration or an isolated test output; do not rewrite a saved plan.
+[combichem-3d]
+execution-backend = "slurm"
+remote-env-script = "/absolute/shared/path/graft-generate-env.sh"
+slurm-host = "slurm"
+slurm-partition = "cpu"
+slurm-nodes = 1
+slurm-cpus-per-node = 2
+coordinator-processes = 1
+slurm-memory-mb = 4096
+slurm-time-limit = 900
+slurm-poll-seconds = 5.0
+# After validation, increase physical cores per node (maximum 192), node count,
+# memory and walltime. The allocation must also cover preparation and shutdown.
+# Do not set execution-host. use-slurm is independent of CReM generation.

@@ -1,5 +1,92 @@
 # Graft Development Handoff
 
+## Prime diversity selection starts at one times the requested count (2026-11-17)
+
+**Confirmed user correction:** Prime's diversity-selection threshold is N rather
+than 2N. **Confirmed clarification:** when choosing N from M candidates with
+N <= M < 2N, use the entire score-ranked population for diversity; do not take
+a half-pool too small to supply N or silently reduce the requested count. At
+M >= 2N retain the original score-ranked ceil(M/2) pool. At M <= N all available
+members are retained; exactly 2N still reduces to the best N with no additional
+diversity freedom. This narrowly supersedes the Prime branch of the 2026-11-13
+shared policy; Amber, MD-GBSA, FEP and CReM parent selection retain v1.
+
+Apply the new rule within each existing attraction-point priority tier using its
+remaining quota. Preserve score-source precedence, the tier's best molecule,
+Morgan radius 2/2048-bit MaxMin/Tanimoto selection, random seed 0 and returned
+score order. New Prime shortlist records use
+`prime_score_half_or_full_morgan2_2048_maxmin_v2`. Existing frozen shortlist IDs
+and policy labels, scores, failures, submitted jobs and legacy-started selection
+remain unchanged. Readiness/preview and atomic claims use the same rule. A failed
+member does not authorize replacement. Iteration-0 reference processing retains
+its original all-reference behavior. Invalid chemistry in a newly considered
+MaxMin pool fails closed rather than silently dropping a candidate.
+
+**Verification:** 31 focused selection regressions pass, covering N-1/N/N+1/2N,
+odd half-pool rounding, deterministic best-score retention, new-pool validation,
+contact/noncontact quotas, simultaneous claims, no refill, unchanged Amber and
+saved v1 Prime ownership. These are molecular-selection/storage checks, not
+scientific energy or affinity validation. No production selections were rewritten.
+
+**Full verification:** 2,967 tests passed, eight skipped; compileall, package/CLI
+imports and diff whitespace checks passed.
+
+## Integrated CReM generation on Slurm pools (2026-11-17)
+
+**Confirmed user request:** connect the scored CReM generation stage to existing
+Slurm calculator pools and validate a small actual allocation. Keep coordination,
+SQLite claims, candidate planning, result journals and project import on t41;
+compute nodes perform pure probe/product calculations. This supersedes CReM's
+previous local/SSH-only execution restriction for Slurm, not the workflow's
+single-iteration sequential supervision or scientific generation protocol.
+
+**Implementation:** reuse the saved-JobId allocation/controller and bounded local
+claim owners. The integrated stage initializes its frozen generation DB, publishes
+a checksummed snapshot of that DB's excluded project SMILES, acquires/reconciles
+an allocation, supervises the selected iteration, and requires successful native
+shutdown before importing the population into the project DB. Completed iterations
+return before new allocation/fingerprint checks. Never reset old populations,
+rewrite saved plans, bypass source guards or convert live local work to Slurm.
+CReM Slurm plans skip ordinary SMI-library loading, enumerate their fragment DB
+locally, and inject the remote methyl-probe callable. Product assembly/search uses
+the existing CReM ordinal plan, seeds and full-precision history. Nodes read the
+checksummed exclusion snapshot rather than workflow SQLite; both parent and product
+evaluations retain the local already-in-project policy. Require exact native
+runtime versions including CReM before calculator readiness. Allocation endpoint
+identity/version checks and legacy non-CReM behavior remain intact.
+
+Freeze the Slurm adapter/helper sources and environment script in new integrated
+CReM fingerprints. Existing incomplete runs with changed source/settings fail
+closed and retain results. Missing completion replies, transport/persistence errors
+and failed native termination cannot import a population; durable results/claims
+remain available for the existing exclusive-lock recovery. No new scientific
+protocol, schema, driver calculations or per-molecule scheduler jobs.
+
+Use the same versioned Python environment on coordinator and nodes. See
+`examples/combichem-3d/graft-generate-env.example.sh` and
+`examples/combichem-3d/crem-slurm-settings.example.toml`; merge execution keys into
+the project's existing section. Do not replace scientific settings. Operational
+resource changes on incomplete integrated plans still encounter its frozen-plan
+checks. Production TOMLs were not switched by this implementation.
+
+**Evidence:** isolated real-RDKit subprocess tests compare full local/node CReM
+reports, coordinates and histories, including excluded products. Two integrated
+iterations retain preceding ranked parents and fixed docking constraints; nodes
+are forbidden from opening SQLite. Injected missing-completion and native-shutdown
+failures preserve results, block import and resume without duplicate identities.
+Version/exclusion mismatch fails before readiness; completed reruns submit nothing.
+An opt-in real Slurm smoke used a separate synthetic project on cpu1: allocation
+317758, two cores, 4 GiB, native parent/batch/step COMPLETED with exit 0:0. Two
+candidates produced two unique molecules, were imported only after termination,
+and a completed rerun allocated nothing. This validates execution and coordination,
+not target affinity or large-pool throughput. No production DB, selection or native
+job was reset, cancelled or manually imported.
+
+**Verification:** 170 focused tests passed (one native opt-in skip); full suite:
+2,957 passed, eight skipped. The native opt-in smoke passed separately. Compileall,
+package/CLI imports, environment-script syntax and diff whitespace checks passed.
+See `docs/diagnostics/crem-slurm/verification.json` for native accounting/evidence.
+
 ## Request complete JobServer trees during Prime admission checks (2026-11-17)
 
 **Observed bug:** on the Prime host, the pinned 2025-3 client returned 189

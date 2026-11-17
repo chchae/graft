@@ -95,8 +95,12 @@ def worker_loop(db, cfg, iteration):
         elif job['kind']=='frame':
             cycles.prepare_next_frame(db,iteration,cfg,context,deadline)
         elif job['kind']=='plan':
-            if library is None:library,_ = stage.load_library(cfg['sidechain-library'],cfg)
-            stage.plan_parent(db,job,cfg,library,context,deadline)
+            if cfg.get('generation-backend')=='crem':
+                from graft.chemistry.combichem3d.crem_growth import plan_parent
+                plan_parent(db,job,cfg,context,deadline,probe_fn=clients[0].probe)
+            else:
+                if library is None:library,_ = stage.load_library(cfg['sidechain-library'],cfg)
+                stage.plan_parent(db,job,cfg,library,context,deadline)
         else:
             raise ValueError(f'Unexpected planning job: {job["kind"]}')
 

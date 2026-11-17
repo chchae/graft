@@ -112,7 +112,7 @@ def site_candidates(parent, history, uid, cfg):
     return [choices[key] for key in sorted(choices)]
 
 
-def plan_parent(db, job, cfg, checker, deadline):
+def plan_parent(db, job, cfg, checker, deadline, *, probe_fn=None):
     """Journal probe decisions before generation; commit them in bounded groups."""
     row=database.growth_parent(db,job['parent_pose'])
     parent=Chem.MolFromMolBlock(row['molblock'],removeHs=False)
@@ -129,7 +129,7 @@ def plan_parent(db, job, cfg, checker, deadline):
             report=row['probes'].get(uid)
             if report is None or report.get('budget_interrupted'):
                 seed=int.from_bytes(hashlib.sha256(f'{cfg["seed"]}:probe:{history["lineage_id"]}:{uid}'.encode()).digest()[:4],'big')%2147483646
-                result=methyl_probe(parent,history,uid,checker,cfg,seed,deadline)
+                result=(probe_fn or methyl_probe)(parent,history,uid,checker,cfg,seed,deadline)
                 report={key:value for key,value in result.items() if key!='pose'}
                 report.update(root_attachment=root_for_site(history,uid),gates_enumeration=True,
                               budget_interrupted=time.time()>=deadline)

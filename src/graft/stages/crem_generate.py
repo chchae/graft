@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from rdkit import Chem
 
@@ -23,7 +24,7 @@ def settings(args, iteration, folder):
     if cfg['generation-backend'] != 'crem':
         raise ValueError('Set [combichem-3d].generation-backend="crem"')
     if cfg.get('execution-host'):
-        raise ValueError('Integrated CReM generation currently requires local workers; use local processes')
+        raise ValueError('Integrated CReM keeps coordination local; use local processes or execution-backend="slurm"')
     # Rebase all generated caches before native extraction. Never touch standalone output.
     cfg.update({'out-dir':str(folder), 'history':str(folder/'input-cache/history.json'),
                 'history-source':'pipeline', 'reference-smiles':str(folder/'input-cache/references.smi'),
@@ -46,6 +47,11 @@ def _fingerprint(cfg, parents):
     frozen['implementation'] = {p.name:growth.file_sha256(p) for p in sorted(source.glob('*.py'))}
     for filename in ('crem_generate.py','combichem_3d.py','combichem_product.py','combichem_buffer.py'):
         frozen['implementation'][filename] = growth.file_sha256(Path(__file__).with_name(filename))
+    if cfg.get('execution-backend')=='slurm':
+        for filename in ('combichem_slurm.py','combichem_slurm_control.py','combichem_slurm_pool.py',
+                         'combichem_slurm_worker.py','combichem_compute.py','combichem_distributed.py'):
+            frozen['implementation'][filename] = growth.file_sha256(Path(__file__).with_name(filename))
+        frozen['files']['remote-env-script'] = growth.file_sha256(cfg['remote-env-script'])
     return hashlib.sha256(json.dumps(dict(settings=frozen,parents=parents),sort_keys=True).encode()).hexdigest()
 
 
@@ -144,12 +150,25 @@ def run_stage(args, requested_iteration):
         excluded = [s for _,s in database.project_smiles(args.db_path)]
         database.growth_initialize(db, cfg, fingerprint, parents,
                                   external_iteration=iteration,excluded_smiles=excluded)
-        growth.supervise(cfg, db, iteration)
-        info = database.growth_run_info(db)
-        if info['stop_reason'] not in ('target_count','exhausted'):
-            raise RuntimeError(f'CReM generation remains incomplete ({info["stop_reason"]}); saved work retained')
-        if info['stop_reason']=='exhausted' and info['pending_plans']:
-            raise RuntimeError('CReM has unfinished plans; saved work retained')
+        from graft.stages.combichem_slurm import allocation, atomic_save
+        if cfg.get('execution-backend')=='slurm':
+            # Read the durable initialization snapshot, not a changing project
+            # DB, on every calculator. Nodes never open workflow SQLite files.
+            snapshot=folder/'input-cache/excluded-smiles.json'
+            atomic_save(snapshot,sorted(database.growth_excluded_smiles(db)))
+            cfg.update({'excluded-smiles-path':str(snapshot),
+                        'excluded-smiles-sha256':growth.file_sha256(snapshot)})
+        flags=SimpleNamespace(export_only=False,debug=False,trace=False)
+        with allocation(cfg,flags) as session:
+            growth.supervise(cfg, db, iteration)
+            info = database.growth_run_info(db)
+            if info['stop_reason'] not in ('target_count','exhausted'):
+                raise RuntimeError(f'CReM generation remains incomplete ({info["stop_reason"]}); saved work retained')
+            if info['stop_reason']=='exhausted' and info['pending_plans']:
+                raise RuntimeError('CReM has unfinished plans; saved work retained')
+            if session is not None:
+                session.result=info
+        # Native allocation success is required before project population import.
         records = database.growth_pipeline_results(db, iteration)
         count = database.import_crem_results(args.db_path, iteration, records, info['stop_reason'])
     print(f'Iteration {iteration}: CReM generation complete, {count}/{args.target_count} novel compounds; '

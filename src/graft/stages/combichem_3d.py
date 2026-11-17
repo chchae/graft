@@ -119,6 +119,9 @@ def evaluate_batch(db, job, cfg, checker, evaluator, deadline, references=None, 
 
 def worker_loop(db, cfg, iteration, result_writer=None):
     # Independent calculators inspect/claim SQLite; they never invoke each other.
+    if cfg.get('execution-backend')=='slurm':
+        from graft.stages.combichem_slurm_worker import worker_loop as slurm_worker
+        return slurm_worker(db,cfg,iteration)
     signal.signal(signal.SIGINT,signal.SIG_IGN)
     signal.signal(signal.SIGTERM,signal.SIG_DFL)
     os.environ['OMP_NUM_THREADS'] = '1'

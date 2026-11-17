@@ -143,3 +143,59 @@ def test_readiness_preview_does_not_create_selection_or_claims(db):
     with database.connect(db) as conn:
         assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name='iteration_score_selection'").fetchone()
         assert conn.execute("SELECT count(*) FROM compound WHERE state!='docked'").fetchone()[0]==0
+
+
+@pytest.mark.parametrize('size,expected',[
+    (0,[]),(1,[1]),(2,[1,2]),(3,[1,3]),(4,[1,2]),(5,[1,3]),
+])
+def test_prime_one_times_threshold_uses_full_pool_until_twice(size,expected):
+    ranked=list(enumerate(SMILES[:size],1))
+    assert score_diverse_ids(ranked,2,diversify_below_twice=True)==expected
+    assert score_diverse_ids(ranked,2,diversify_below_twice=True)==expected
+
+
+def test_prime_newly_diversified_pool_validates_chemistry():
+    ranked=[(1,'CC'),(2,'CCC'),(3,'invalid')]
+    assert score_diverse_ids(ranked,2)==[1,2]  # Other stages retain the old policy.
+    with pytest.raises(ValueError,match='CMPID_3'):
+        score_diverse_ids(ranked,2,diversify_below_twice=True)
+
+
+def test_prime_lower_threshold_is_atomic_frozen_and_does_not_change_amber(db):
+    from graft.chemistry.selection import PRIME_POLICY
+    with database.connect(db) as conn:
+        conn.execute('DELETE FROM compound WHERE id>3')
+        rows=conn.execute('SELECT id FROM compound ORDER BY docking_score,id').fetchall()
+        assert [r[0] for r in database._score_diverse_rows(conn,1,'amber_gbsa',rows,2)]==[1,2]
+    assert [r[0] for r in database.prime_selection_rows(db,1,2)]==[1,3]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims=list(pool.map(lambda _:database.claim_prime_gbsa_candidates(db,1,2,3),range(2)))
+    assert sorted(claims,key=len)==[[],[1,3]]
+    with database.connect(db) as conn:
+        policy,ids=conn.execute("SELECT policy,candidates FROM iteration_score_selection WHERE stage='prime_gbsa'").fetchone()
+        assert policy==PRIME_POLICY and json.loads(ids)==[1,3]
+        conn.execute("UPDATE compound SET state='failed',failed_stage='prime_gbsa' WHERE id IN (1,3)")
+    assert database.claim_prime_gbsa_candidates(db,1,3,3)==[]
+
+
+def test_prime_lower_threshold_applies_within_remaining_contact_tier(db):
+    # One contact is retained; diversify two from three noncontacts, including
+    # the lower-scoring but different third molecule rather than the near-copy.
+    with database.connect(db) as conn:
+        conn.execute('DELETE FROM compound WHERE id NOT IN (1,2,3,8)')
+    database.freeze_attraction_policy(db,1,'prime_gbsa',[0,0,0],
+                                     {'1':3.,'2':3.,'3':3.,'8':2.})
+    assert [r[0] for r in database.prime_selection_rows(db,1,3)]==[8,1,3]
+
+
+def test_saved_v1_prime_membership_survives_one_times_threshold(db):
+    with database.connect(db) as conn:
+        conn.execute('DELETE FROM compound WHERE id>3')
+        conn.execute('CREATE TABLE iteration_score_selection(iteration INTEGER,stage TEXT,requested_count INTEGER,'
+                     'policy TEXT,candidates TEXT,PRIMARY KEY(iteration,stage))')
+        conn.execute('INSERT INTO iteration_score_selection VALUES (1,\'prime_gbsa\',2,?,?)',
+                     (POLICY,json.dumps([1,2])))
+    assert [r[0] for r in database.prime_selection_rows(db,1,2)]==[1,2]
+    assert database.claim_prime_gbsa_candidates(db,1,2,3)==[1,2]
+    with database.connect(db) as conn:
+        assert conn.execute('SELECT policy,candidates FROM iteration_score_selection').fetchone()==(POLICY,'[1, 2]')

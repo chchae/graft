@@ -1,0 +1,41 @@
+{
+  "date": "2026-11-17",
+  "scope": "isolated synthetic integrated CReM generation; no production resets or submissions",
+  "job_id": "317758",
+  "coordinator": "t41.camd.krict.re.kr",
+  "nodes": {
+    "cpu1": 2
+  },
+  "memory_mb_per_node": 4096,
+  "attempted": 2,
+  "unique_count": 2,
+  "stop_reason": "exhausted",
+  "runtime_versions": {
+    "graft": "0.1.0",
+    "numpy": "2.5.4",
+    "python": "3.15.2",
+    "rdkit": "2026.09.1",
+    "scipy": "1.18.1"
+  },
+  "native_accounting": [
+    "317758|combichem-898985204dd4453483227c2b995d9a75|COMPLETED|0:0|00:00:32|cpu1",
+    "317758.batch|batch|COMPLETED|0:0|00:00:32|cpu1",
+    "317758.0|python|COMPLETED|0:0|00:00:31|cpu1"
+  ],
+  "completed_rerun": "same population retained without a new allocation",
+  "native_smoke": "1 passed",
+  "focused_tests": "170 passed, 1 skipped",
+  "full_suite": "2957 passed, 8 skipped",
+  "checks": [
+    "compileall src tests",
+    "import graft; import graft.cli",
+    "bash -n environment example",
+    "git diff --check"
+  ],
+  "limitations": [
+    "Synthetic geometry does not validate affinity",
+    "Large-pool throughput not measured",
+    "Production TOML remains local"
+  ],
+  "reproduction": "GRAFT_TEST_SLURM=1 python -m pytest -q -s tests/test_crem_slurm.py::test_native_allocation_smoke --basetemp=<new shared temporary directory>"
+}

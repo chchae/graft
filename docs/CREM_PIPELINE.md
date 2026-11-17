@@ -70,9 +70,16 @@ core-constraint = "fixed"
 
 The complete example also supplies the required grid/reference, Amber, Prime,
 MD and host settings. Local paths resolve relative to the TOML; remote compute
-paths retain their original interpretation. CReM calculators run locally, while
-the downstream stages keep their existing local/SSH/Slurm settings. This backend
-does not require a REINVENT prior/runtime or transfer learning.
+paths retain their original interpretation. CReM calculators run locally by
+default. For Slurm, add the execution keys from
+[`crem-slurm-settings.example.toml`](../examples/combichem-3d/crem-slurm-settings.example.toml)
+to the existing section and use the same Python environment on coordinator/nodes.
+See [Slurm setup and native smoke verification](COMBICHEM_3D.md#scored-crem-generation-with-slurm-calculators).
+SQLite, CReM fragment planning and result persistence stay on the invoking host;
+pure node pools calculate probes and candidates. Apply this to new iteration
+plans or an isolated test output, preserving frozen incomplete work. Downstream
+local/SSH/Slurm settings remain independent. This backend does not require a
+REINVENT prior/runtime or transfer learning.
 
 Do not put `max-iteration`, `elite-count`, `elite-rank-by`, `target-count`,
 `stop-mode` or `out-dir` in `[combichem-3d]` for this mode. There are no inner CReM

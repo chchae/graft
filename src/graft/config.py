@@ -174,8 +174,8 @@ def combichem_3d_settings(filename):
             raise ValueError('CReM fixed-frame requires core-constraint="fixed"')
         if cfg['site-candidates'] or cfg['sidechain-include-h']:
             raise ValueError('CReM uses database candidates and one non-H addition per step')
-        if cfg.get('execution-backend')=='slurm' or cfg.get('worker-hosts'):
-            raise ValueError('CReM supports local multiprocessing or execution-host SSH; omit Slurm/worker-hosts')
+        if cfg.get('worker-hosts') and cfg.get('execution-backend')!='slurm':
+            raise ValueError('CReM worker-hosts requires execution-backend="slurm"')
     elif cfg['growth-mode']=='fixed-frame':
         raise ValueError('fixed-frame requires generation-backend="crem"')
     limits=cfg['initial-attachment-max-cycles']

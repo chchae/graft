@@ -942,3 +942,54 @@ recovery rules remain active. Only local workflow completion plus verified nativ
 termination produces a session completion marker. Calculator/native failures
 retain results and journals. `--export-only` does not allocate Slurm resources.
 Legacy direct SSH remains available; Glide settings are unchanged.
+
+
+## Scored CReM generation with Slurm calculators
+
+The integrated `graft run project.toml` CReM path can now use the Slurm pools.
+Keep the coordinator and workflow databases on the invoking host. Add the
+execution keys from `examples/combichem-3d/crem-slurm-settings.example.toml` to
+the existing `[combichem-3d]` section, retaining all scientific settings. Adapt
+`graft-generate-env.example.sh` to the shared Python environment, and invoke
+Graft from that same environment. Python/RDKit/NumPy/SciPy/Graft and CReM versions
+must match. `use-slurm` alone does not select Slurm generation.
+
+Start with one node, two physical cores, one local claim owner and 4 GiB memory.
+The allocation's walltime must cover preparation, the configured calculation
+budget and pool shutdown. Raise resources only after a measured small run.
+CReM fragment queries and durable planning stay local. Methyl probes, product
+assembly, constrained search, clash checks and descriptors run on pure node
+calculators; compute nodes never open workflow SQLite databases. A checksummed
+shared snapshot preserves the project's excluded-SMILES policy.
+
+The stage recovers saved allocation JobIds, persists received results and requires
+both complete local work and successful native termination before project import.
+Completed generations do not allocate again. Source/environment/input changes on
+incomplete runs retain their existing fingerprint rejection; do not delete or
+relabel saved work to change execution mode. Apply to new iteration plans or a
+separate test project. Integrated CReM must continue through `graft run`; the
+standalone COMBICHEM CLI is not a replacement for the scored pipeline.
+
+Run regressions from the repository root:
+
+```bash
+python -m pytest -q tests/test_crem_slurm.py tests/test_combichem_crem.py \
+  tests/test_crem_pipeline.py tests/test_combichem_slurm.py \
+  tests/test_combichem_slurm_pipeline.py
+```
+
+The opt-in native smoke submits a one-node/two-core/4-GiB job through SSH alias
+`slurm`, partition `cpu`, using `/home1/conda/envs/graft`. It builds synthetic
+inputs in pytest's temporary directory, so choose a new shared `--basetemp`
+visible at the same absolute path on all nodes. Pytest clears that directory;
+never point it at existing results or a production output.
+
+```bash
+GRAFT_TEST_SLURM=1 python -m pytest -q -s \
+  tests/test_crem_slurm.py::test_native_allocation_smoke \
+  --basetemp=/absolute/shared/path/new-crem-slurm-smoke
+```
+
+The smoke requires pytest and CReM on the invoking host. It checks actual native
+allocation completion, population import and completed-result reuse. Synthetic
+receptor geometry and scores do not establish scientific affinity or throughput.

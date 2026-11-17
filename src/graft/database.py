@@ -1083,7 +1083,8 @@ def _score_diverse_rows(conn, iteration, stage, ranked, count):
         remaining = count - len(selected)
         if remaining <= 0:
             break
-        ids = set(score_diverse_ids([(r[0], smiles[r[0]]) for r in tier], remaining))
+        ids = set(score_diverse_ids([(r[0], smiles[r[0]]) for r in tier], remaining,
+                                   diversify_below_twice=stage=='prime_gbsa'))
         selected.extend(r for r in tier if r[0] in ids)
     return selected
 
@@ -1091,7 +1092,7 @@ def _score_diverse_rows(conn, iteration, stage, ranked, count):
 def _stage_selected_rows(conn, iteration, stage, ranked, count, *, freeze=False):
     """Amber/Prime shortlist ownership, independent of claims and partial results."""
     import json
-    from graft.chemistry.selection import POLICY
+    from graft.chemistry.selection import POLICY, PRIME_POLICY
     if iteration == 0:
         return ranked[:count]
     saved = None
@@ -1106,15 +1107,16 @@ def _stage_selected_rows(conn, iteration, stage, ranked, count, *, freeze=False)
         return [by_id[cid] for cid in ids]
     legacy = _attraction_stage_started(conn, iteration, stage)
     selected = ranked[:count] if legacy else _score_diverse_rows(conn, iteration, stage, ranked, count)
+    selection_policy = 'legacy_score_order' if legacy else PRIME_POLICY if stage=='prime_gbsa' else POLICY
     if freeze and selected:
         conn.execute('CREATE TABLE IF NOT EXISTS iteration_score_selection ('
                      'iteration INTEGER NOT NULL,stage TEXT NOT NULL,requested_count INTEGER NOT NULL,'
                      'policy TEXT NOT NULL,candidates TEXT NOT NULL,PRIMARY KEY(iteration,stage))')
         conn.execute('INSERT INTO iteration_score_selection VALUES (?,?,?,?,?)',
-                     (iteration, stage, count, 'legacy_score_order' if legacy else POLICY,
+                     (iteration, stage, count, selection_policy,
                       json.dumps([r[0] for r in selected])))
         print(f'Iteration {iteration}: {stage} selection frozen; candidates={len(ranked)}, '
-              f'selected={len(selected)}; policy={"legacy_score_order" if legacy else POLICY}.', flush=True)
+              f'selected={len(selected)}; policy={selection_policy}.', flush=True)
     return selected
 
 

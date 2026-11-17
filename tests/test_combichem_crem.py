@@ -90,7 +90,8 @@ def test_existing_project_inputs_and_crem_defaults(project):
     ('initial-attachment-max-cycles = {"1"=2}','budgets'),
     ('crem-min-freq = -1','crem-min-freq'),
     ('crem-radius = true','crem-radius'),
-    ('execution-backend = "slurm"','local multiprocessing'),
+    ('execution-backend = "slurm"','remote-env-script'),
+    ('worker-hosts = { cpu1 = 2 }','requires execution-backend'),
     ('sidechain-include-h = true','one non-H'),
 ])
 def test_incompatible_protocols_rejected(project,setting,message):

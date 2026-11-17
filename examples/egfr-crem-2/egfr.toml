@@ -1,0 +1,150 @@
+# EGFR / CReM pipeline
+# 실행: graft run examples/egfr-crem-2/egfr.toml
+# 순서: CReM → Drug likeness → (합성 가능성) → LigPrep → Glide
+#       → Amber GBSA → Prime GBSA → MD-GBSA → FEP 후보 내보내기
+# Iteration 0은 reference 계산, 이후에는 직전 iteration의 MD-GBSA 결과로 부모를 선택합니다.
+# 로컬 상대 경로는 이 TOML 기준입니다. 기존 작업·선별은 저장된 설정을 따릅니다.
+
+# ── 1. 프로젝트 입력 / 공통 실행 환경 ────────────────────────────────
+out-dir = "./output"
+max-iteration = 10
+debug = false                     # true: 지원되는 개수 제한을 1/10로 축소; 계산 조건·CPU 수 유지
+dock-grid = "../egfr-crem/input/egfr-grid.zip"
+reference-pose = "../egfr-crem/input/egfr-ligands-docked.maegz"
+reference-mcs = "c1nc(N[*:3])c2cc(-c3ccc(C)cc3)[nH]c2n1"
+attraction-point = [-52.102367, 2.138612, -28.106731]  # Å; pose 선택 및 후속 선별 우선순위
+
+schrodinger = "/share/opt/schrodinger/2026-1"
+use-slurm = true                   # LigPrep/Glide: slurm-cpu; Amber: Slurm CPU array
+host = "t41-cpu:128"               # 필수 공통 키; 위 Slurm 경로가 우선 적용됨
+# use-slurm은 CReM 실행 위치나 MD의 호스트 설정을 바꾸지 않습니다.
+# tail-timeout = 300               # 기본값(초); native job을 취소하는 제한이 아님
+
+# ── 2. CReM 분자 생성 ────────────────────────────────────────────────
+generation-method = "crem"
+target-count = 50000               # 유효성·중복 제거 후 저장할 목표; 후보 소진 시 더 적을 수 있음
+elite-count = 1000                 # 직전 iteration의 유효 MD-GBSA 부모를 최대 이 수만큼 사용
+mcs-timeout = 300                  # 부모 pose의 MCS 제약 처리 제한(초)
+
+# TOML dotted key: [combichem-3d]와 동일한 설정입니다.
+# 생성 설정을 이 위치에 모으고, 뒤의 단계는 계속 최상위 키로 유지합니다.
+combichem-3d.generation-backend = "crem"
+combichem-3d.crem-db = "/home1/crem/database/chembl22_sa2_hac12.db"
+# combichem-3d.crem-radius = 3      # 기본값
+# combichem-3d.crem-min-freq = 0    # 기본값
+combichem-3d.sidechains-per-site = 50000  # 위치별 후보 상한; DB 문맥에 따라 더 적을 수 있음
+combichem-3d.sidechain-min-heavy-atoms = 2
+combichem-3d.sidechain-max-heavy-atoms = 8  # fragment의 non-H 원자 수; 결합용 * 제외
+combichem-3d.execution-backend = "slurm"
+combichem-3d.remote-env-script = "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/generate-env.sh"
+combichem-3d.slurm-host = "slurm"
+combichem-3d.slurm-partition = "cpu"
+combichem-3d.slurm-nodes = 2
+combichem-3d.slurm-cpus-per-node = 192  # cpu1 + cpu2: 총 384개 물리 코어
+combichem-3d.coordinator-processes = 16 # t41의 SQLite claim·결과 저장 프로세스
+combichem-3d.slurm-memory-mb = 0       # 각 계산 노드의 전체 메모리 예약
+combichem-3d.slurm-time-limit = 21600  # 6시간; 계산 예산 5시간 + 준비·종료 여유
+combichem-3d.slurm-poll-seconds = 5.0
+combichem-3d.max-seconds = 18000    # 생성 실행 시간 제한(초)
+combichem-3d.conformers = 4
+combichem-3d.torsion-trials = 4
+combichem-3d.receptor-repulsion-strength = 100.0
+combichem-3d.optimization-iterations = 50
+# combichem-3d.core-constraint = "fixed"  # 기본값; CReM은 fixed 필수
+# GRAFT iteration당 자식 하나에 fragment 하나를 추가하며 내부 CReM cycle은 사용하지 않습니다.
+
+# sidechain-max-heavy-atoms = 8    # 중복: 이 CReM 경로는 위 combichem-3d 설정을 사용
+# elite-mcs-fixed = false         # 기본값; CReM은 reference-mcs와 저장된 부모 제약 사용
+# elite-mcs = "..."               # CReM에서 사용 불가; LibInvent용 override
+
+# ── 3. Drug likeness / 처리 우선순위 ─────────────────────────────────
+# 전체 분자를 평가합니다. RO5 위반 수 오름차순 → QED 내림차순 → SA 오름차순 → compound ID 순서로 처리합니다.
+sa-score-cpus = 128
+# sa-accepted-ratio = 1.0          # 기본값; 현재 CReM priority 정책에서는 이 비율로 절삭하지 않음
+
+# ── 4. 합성 가능성 평가 (현재 비활성) ─────────────────────────────────
+synthetic-feasibility-enabled = false  # 명시적으로 비활성화; 생략하면 기본값은 true
+# 아래 항목은 활성화할 때만 필요합니다. 경로 평가는 분자 탈락 필터가 아닙니다.
+# aizynth-nproc = 8
+# aizynth-ssh-host = "tensor"
+# aizynth-remote-env = "/home1/astrazeneca/AiZynthFinder/env"
+# aizynth-remote-work-dir = "/home1/astrazeneca/AiZynthFinder/graft-runs"
+# aizynth-config = "/home1/astrazeneca/AiZynthFinder/policy_data/config.yml"
+
+# ── 5. LigPrep ───────────────────────────────────────────────────────
+ligprep-cpus = 128
+# ligprep-ph = 7.4                 # 기본값
+# ligprep-pht = 1.0                # 기본값
+# ligprep-max-states = 2           # 기본값; Epik states
+# ligprep-max-stereo = 1           # 기본값
+
+# ── 6. Constrained Glide SP docking ──────────────────────────────────
+# 전체 LigPrep 대상 처리 후 Amber 선별로 진행합니다.
+glide-cpus = 192
+# glide-job-timeout = 1800         # 기본값(초); 0이면 native Glide timeout 비활성화
+
+# ── 7. Amber GBSA ────────────────────────────────────────────────────
+# 모든 Glide 처리가 끝난 뒤 최종 도킹 결과에서 1,000개를 선별합니다.
+amber_gbsa = false
+amber-input-count = 1000
+amber-ssh-config = "/home1/chchae/.ssh/config"  # Slurm 제출 호스트 SSH에도 사용
+
+# use-slurm=true에서 적용되는 기본값; 변경할 때만 주석을 해제합니다.
+# amber-slurm-host = "slurm"
+# amber-slurm-partition = "cpu"
+# amber-slurm-cpus = 384            # 1-core array task의 최대 동시 실행 수
+# amber-slurm-env = "/share/opt/amber26/envs/AmberTools26"
+# amber-slurm-time-limit = 3600     # task 전체 walltime(초); 최소 3600, 큐 대기 제외
+# amber-slurm-work-dir는 기본적으로 <out-dir>/graft-amber-slurm-runs
+# amber-charge-method = "bcc"      # 기본값
+# amber-receptor = "./output/iter00/08-prime_gbsa/receptor.maegz"  # 기본 경로; 없으면 자동 준비
+
+# use-slurm=false로 전환할 때만 사용하는 일반 SSH 설정 예시입니다.
+# amber-cpus = 384
+# amber-ssh-host = "t41"
+# amber-conda-init = "/home1/amber26/miniforge3/etc/profile.d/conda.sh"
+# amber-remote-env = "/home1/amber26/envs/AmberTools26"
+# amber-remote-work-dir = "/home1/chchae/graft-amber-runs"
+
+# ── 8. Prime GBSA ────────────────────────────────────────────────────
+# 유효 Amber 결과에서 최대 500개 선별; 유효 결과가 0개일 때만 Glide 결과 사용.
+# 진행 중·복구·재시도 대상은 기다리며, 서로 다른 score tier로 부족분을 보충하지 않습니다.
+# Iteration 0은 개수 제한 대신 입력 reference 전체를 평가합니다.
+prime-gbsa = true
+prime-gbsa-input-count = 500
+prime-gbsa-flexdist = 6.0           # Å; ligand 주변 flexible receptor
+prime-gbsa-local-compute = true
+prime-gbsa-local-host = "prime"
+prime-gbsa-local-cpus = 192         # 화합물당 한 subjob; 준비된 작업 수 내에서 동시 실행
+# prime-gbsa-local-work-dir = "/home1/prime_share"  # 기본값
+# prime-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"  # 기본값
+# prime-gbsa-license-retry-seconds = 300  # 기본값
+# prime-gbsa-license-retries = 3     # 기본값
+
+# ── 9. MD-GBSA (Desmond MD → snapshot별 Prime GBSA) ───────────────────
+md-gbsa = false
+md-gbsa-input-count = 250           # Prime 결과에서 선별; input-ratio보다 우선
+md-gbsa-production-ns = 2.5
+md-gbsa-snapshots = 5              # 추출 목표; Prime NJOBS는 실제 프레임 수로 결정
+
+# MD 실행 환경은 use-slurm과 별도로 지정합니다. 아래는 기본값입니다.
+# md-gbsa-ssh-host = "slurm"
+# md-gbsa-gpu-host = "slurm-gpu"
+# md-gbsa-schrodinger = "/share/opt/schrodinger/2026-1"
+# md-gbsa-remote-work-dir는 기본적으로 <out-dir>/graft-md-gbsa-runs
+
+# MD snapshot의 Prime GBSA 실행 환경
+md-gbsa-local-compute = true
+md-gbsa-local-host = "prime"
+md-gbsa-local-cpus = 192            # 여러 분자의 프레임이 공유하는 CPU 예산
+# md-gbsa-local-work-dir = "/home1/prime_share"  # 기본값
+# md-gbsa-local-schrodinger = "/home/schrodinger/2025-3-IL"  # 기본값
+
+# ── 10. FEP 후보 내보내기 / 외부 점수 가져오기 ────────────────────────
+# 현재 MD-GBSA 결과에서 최대 250개를 내보냅니다. 실제 FEP 계산 실행 설정은 아닙니다.
+# 후보와 score source는 저장되어 재시작·점수 import 시 유지됩니다.
+fep-enabled = false
+fep-input-count = 250
+
+# ── 11. 보고서 / 보조 출력 ───────────────────────────────────────────
+# prime-gbsa-elite-count = 10       # 기본값; Prime elite 출력용, CReM 부모 수(elite-count)와 별개

@@ -1,6 +1,9 @@
 """Pure remote calculators; no SQLite connections or workflow task claims."""
 import json
+import hashlib
+from importlib.metadata import version
 import logging
+from pathlib import Path
 import sys
 import time
 from rdkit import Chem
@@ -30,8 +33,17 @@ def mcs(request, cfg, outgoing):
 
 def serve(incoming, outgoing):
     cfg=json.loads(incoming.readline())
-    if versions()!=cfg['runtime-versions']:
+    actual_versions=versions()
+    if cfg.get('generation-backend')=='crem':
+        actual_versions['crem']=version('crem')
+    if actual_versions!=cfg['runtime-versions']:
         raise RuntimeError('Remote calculator Python/RDKit/NumPy versions differ from coordinator')
+    excluded=()
+    if cfg.get('pipeline-generation'):
+        data=Path(cfg['excluded-smiles-path']).read_bytes()
+        if hashlib.sha256(data).hexdigest()!=cfg['excluded-smiles-sha256']:
+            raise RuntimeError('Frozen project exclusion snapshot changed')
+        excluded=json.loads(data)
     checker=BumpChecker(load_receptor(cfg['receptor'],cfg),cfg)
     print(json.dumps({'ready':True}),file=outgoing,flush=True)
     evaluator = references = None
@@ -41,7 +53,7 @@ def serve(incoming, outgoing):
         if kind in ('batch', 'properties', 'baseline'):
             if evaluator is None:
                 from graft.chemistry.combichem3d.evaluation import Evaluator
-                evaluator = Evaluator(cfg['reference-smiles'],cfg['filters'])
+                evaluator = Evaluator(cfg['reference-smiles'],cfg['filters'],excluded_smiles=excluded)
             if kind == 'batch':
                 from graft.stages.combichem_product import evaluate_product
                 if references is None and cfg.get('growth-mode')=='frame-cycles':
