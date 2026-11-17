@@ -80,7 +80,7 @@ ligprep-cpus = 128
 
 # ── 6. Constrained Glide SP docking ──────────────────────────────────
 # 전체 LigPrep 대상 처리 후 Amber 선별로 진행합니다.
-glide-cpus = 192
+glide-cpus = 384
 # glide-job-timeout = 1800         # 기본값(초); 0이면 native Glide timeout 비활성화
 
 # ── 7. Amber GBSA ────────────────────────────────────────────────────

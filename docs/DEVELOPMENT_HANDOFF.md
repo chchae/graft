@@ -1,5 +1,51 @@
 # Graft Development Handoff
 
+## Keep Slurm calculators alive when a disconnected socket flushes on close (2026-11-17)
+
+**Observed incident:** iter3 reached 50,000 unique molecules and stopped local
+claim owners at the target-count grace boundary. Node traces then showed
+BrokenPipeError inside `socket.py:write` while exiting the buffered stream
+context, outside the existing catch around `serve()`. Calculator processes exited
+nonzero, the pool failed, and native allocation 318012 ended FAILED/1:0. The
+stage correctly withheld project import rather than treating saved output as
+native completion. This was a transport cleanup failure, not evidence that all
+50,000 saved molecules had failed scientific calculations.
+
+**Repair:** close the stream explicitly in a finally block, handling only
+BrokenPipeError/ConnectionResetError separately from the serve/read path. This
+covers buffered close retrying a failed send and lets the calculator accept a
+new owner. A protocol/scientific exception remains in flight even if close also
+raises a disconnect error. Other errors, unexpected worker exits, native failure,
+shutdown limits, scientific calculations and frozen-input/source guards remain
+unchanged; never accept a FAILED allocation as completed.
+
+**Recovery evidence:** before editing fingerprinted sources, the existing driver
+reconciled the terminal failed allocation and started 318013, recovered durable
+result journals, verified native COMPLETED/0:0 and imported the original 50,000
+molecules. Iter3 advanced to LigPrep. No manual DB edits, regeneration, native
+cancellation or source-guard bypass occurred. Only future/new-source execution
+uses this repair; old native logs/JobIds and selection records remain retained.
+
+**Timing evidence:** project stage_timing records measure complete generate-stage
+wall time including preparation/persistence and retry/recovery: iter1 9.761064 s
+(367 molecules), iter2 954.189114 s (50,000), iter3 730.993933 s (50,000, including
+the failed first attempt and automatic recovery). The first iter3 worker reported
+528.7 s before failure. Growth DB calculation/session timers are narrower and
+must not be relabeled as complete stage durations or equal-work speedups.
+
+**Verification:** nine regression cases include buffered write+close disconnects,
+a new owner on the same calculator, preserved protocol exceptions when close
+also fails, and a real TCP reset during buffered close. Five pre-repair cases
+reproduced the incident's uncaught close error. 67 focused tests passed with one
+native opt-in skip. A separate native two-core/4-GiB synthetic CReM smoke, JobId
+318118 on cpu1, completed and reused its population without another allocation.
+That smoke verifies native startup/shutdown, while the real-socket regression
+exercises the specific disconnect; neither validates affinity or large-pool
+throughput. See `docs/diagnostics/slurm-pool-close/verification.json`.
+
+**Full verification:** 2,985 passed, eight skipped; compileall, package/CLI
+imports and diff whitespace checks passed.
+
 ## Prefer virusgpu1 licensing inside Graft calculations only (2026-11-17)
 
 **Confirmed user request:** Graft-owned internal calculations prefer

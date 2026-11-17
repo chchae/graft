@@ -20,15 +20,23 @@ def calculate(listener, root, token):
             continue
         with connection:
             connection.settimeout(30)
-            with connection.makefile('rw', encoding='utf-8') as stream:
+            stream = connection.makefile('rw', encoding='utf-8')
+            try:
                 identity = stream.readline(4096).strip()
                 if not hmac.compare_digest(identity, token):
                     continue
                 connection.settimeout(None)
+                serve(stream, stream)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # Disconnected claim owners retain their own journal/cursor.
+            finally:
+                # Buffered close may retry a failed write after serve returns
+                # or raises. Handle it separately so it cannot kill the pool
+                # or mask a scientific/protocol exception already in flight.
                 try:
-                    serve(stream, stream)
+                    stream.close()
                 except (BrokenPipeError, ConnectionResetError):
-                    pass  # Disconnected claim owners retain their own journal/cursor.
+                    pass
 
 
 def main(root, slots):

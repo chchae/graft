@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-17",
+  "issue": "Broken pipe during buffered stream close escaped the serve exception handler",
+  "original_failed_allocation": "318012",
+  "automatic_recovery_allocation": "318013",
+  "separate_smoke_allocation": "318118",
+  "native_accounting": [
+    "318012|FAILED|1:0|00:08:13|cpu[1-2]",
+    "318012.batch|FAILED|1:0|00:08:13|cpu1",
+    "318012.0|FAILED|1:0|00:08:12|cpu[1-2]",
+    "318013|COMPLETED|0:0|00:01:32|cpu[1-2]",
+    "318013.batch|COMPLETED|0:0|00:01:32|cpu1",
+    "318013.0|COMPLETED|0:0|00:01:31|cpu[1-2]",
+    "318118|COMPLETED|0:0|00:00:31|cpu1",
+    "318118.batch|COMPLETED|0:0|00:00:31|cpu1",
+    "318118.0|COMPLETED|0:0|00:00:30|cpu1"
+  ],
+  "generate_stage_timings": [
+    {
+      "iteration": 1,
+      "started_at": 1794905329.9397862,
+      "finished_at": 1794905339.7008502,
+      "elapsed_seconds": 9.761064052581787
+    },
+    {
+      "iteration": 2,
+      "started_at": 1794906431.9594107,
+      "finished_at": 1794907386.1485243,
+      "elapsed_seconds": 954.1891136169434
+    },
+    {
+      "iteration": 3,
+      "started_at": 1794913842.861489,
+      "finished_at": 1794914573.855422,
+      "elapsed_seconds": 730.9939329624176
+    }
+  ],
+  "iter3_generation": [
+    "done",
+    50000,
+    "target_count"
+  ],
+  "recovery": "Existing supervisor recovered before fingerprinted sources were edited; no manual DB/import/reset",
+  "focused_tests": "67 passed, 1 skipped",
+  "native_smoke": "1 passed",
+  "test_evidence": [
+    "5 failing pre-fix close-error regressions",
+    "9 passing post-fix cases including actual TCP reset",
+    "Protocol errors survive a second transport error during close"
+  ],
+  "limitations": [
+    "Native smoke uses synthetic small inputs",
+    "Large-pool disconnect verified from production logs and local real-socket reproduction, not a repeated 384-core production calculation"
+  ],
+  "full_suite": "2985 passed, 8 skipped",
+  "checks": [
+    "compileall src tests",
+    "import graft; import graft.cli",
+    "git diff --check"
+  ]
+}
