@@ -2846,10 +2846,12 @@ def write_constrained_glide_input(
 CORE_SMARTS \"{core_smarts}\"
 CORE_ATOMS {core_atoms}
 CORE_RESTRAIN True
+CORE_FILTER True
 CORECONS_FALLBACK False"""
     else:
         core_block = """CORE_DEFINITION mcssmarts
 CORE_RESTRAIN True
+CORE_FILTER True
 CORECONS_FALLBACK False"""
 
     text = f"""GRIDFILE {grid_file}
@@ -3087,12 +3089,12 @@ def write_timed_out_report(timed_out_jobs, output_file):
             ])
 
 
-def create_score_extractor(root_dir, attraction_point=None):
+def create_score_extractor(root_dir, attraction_point=None, *, core_validation=False):
     from graft.glide_pose_selection import validate_point
     point = validate_point(attraction_point)
     script_file = root_dir / "_extract_glide_scores.py"
     source = Path(__file__).with_name('glide_pose_selection.py').read_text()
-    script_file.write_text('ATTRACTION_POINT = '+repr(point)+'\n'+source, encoding='utf-8')
+    script_file.write_text('ATTRACTION_POINT = '+repr(point)+'\nREQUIRE_CORE_VALIDATION = '+repr(core_validation)+'\n'+source, encoding='utf-8')
     return script_file
 
 
@@ -3149,9 +3151,6 @@ def extract_scores_and_best_poses(
         / "best_poses.maegz"
     )
 
-    if best_pose_file.exists():
-        best_pose_file.unlink()
-
     run_command(
         [
             schrodinger / "run",
@@ -3169,9 +3168,10 @@ def extract_scores_and_best_poses(
         )
 
     if not best_pose_file.exists():
-        raise RuntimeError(
-            "Best-pose output was not created."
-        )
+        with score_file.open(newline="") as stream:
+            reader = csv.DictReader(stream, delimiter="\t")
+            if reader.fieldnames != ["id", "docking_score"] or next(reader, None) is not None:
+                raise RuntimeError("Best-pose output was not created.")
 
     return score_file, best_pose_file
 

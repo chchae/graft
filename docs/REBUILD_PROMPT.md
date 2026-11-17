@@ -1,5 +1,147 @@
 # Independent Graft reconstruction prompt
 
+## Fail closed on unmatched or displaced Glide cores (2026-11-17)
+
+**Confirmed user request:** prevent LigPrep states without the selected reference
+core, and final poses outside the 1 Å fixed-frame core RMSD, from being admitted
+as valid constrained docking results. Preserve existing job identities/results.
+
+**Observed incident:** iteration-8 CMPID_304082 originally matched its group's
+72-atom parent SMARTS, but neither prepared LigPrep state matched it. Native logs
+explicitly state docking proceeded without comparing to the core position.
+CORECONS_FALLBACK False did not prevent this separate nonmatching-core path;
+CORE_FILTER defaulted to False. The best-pose reducer checked contact and score
+but not core geometry. Its common 17-atom scaffold was 10.05 Å from its actual
+parent reference, without alignment. Native, group-best and merged coordinates
+were identical. All 19 candidate poses lacked the configured 72-atom core match.
+
+**Repair:** for new submissions, inspect actual LigPrep states against the frozen
+reference SMARTS and explicit reference atom order. Record per-state nonmatches
+in core_preflight.json; retain original input order/indices so native timeout
+subjob ranges remain correct. Write CORE_FILTER True in native inputs so those
+states are skipped before docking. Do not alter saved inputs of existing jobs.
+
+Before contact/score reduction, validate every candidate using all native SMARTS
+match permutations against the exact frozen reference atom mapping. Calculate
+RMSD directly in the receptor coordinate frame, with no alignment or recentering.
+Reject missing matches and RMSD above the frozen tolerance (maximum 1 Å). Among
+passing poses preserve the existing contact/score/tie policy. Store the measured
+r_graft_core_rmsd and core_validation.json rejection diagnostics. Apply the same
+validation during normal collection, changed-input recovery and timeout output
+collection. Timeout CLI requests must identify the original native core input.
+
+Unknown/ambiguous inputs, missing/invalid reference mappings, malformed geometry
+or matcher errors fail closed. Strict collection requires an explicit SMARTS
+core and reference atom list; implicit native MCS inputs without that evidence
+are held rather than silently assigning a smaller/different core. Standalone
+reference-export APIs and explicitly unguarded generic extraction remain
+compatible; production stage extractors always require the guard. The CLI also
+requires it for old generated headers that lack an explicit policy setting.
+
+Zero accepted poses publish an exact header-only score table and finish ordinary
+failure handling, rather than looping on a missing MAEGZ. Retain an earlier group
+pose as best_poses.rejected-<identity>.maegz audit, outside merger paths. Extraction
+errors preserve earlier published poses. Nonempty scores still require a pose
+file. Keep native completion verification, CMPID/state identity, database score
+ownership, source fingerprints, saved commands and recovery intact.
+
+**Verification:** full baseline 2,916 passed / 7 skipped; final candidate 2,938
+passed / 7 skipped. All existing node outcomes match; 22 new regressions pass.
+Installed Schrödinger 2026-1 preflight found 169 nonmatching states among 3,102
+inputs for ref_255869. Replay rejected all 19 CMPID_304082 poses through normal
+and timeout collection. CMPID_321545 remained accepted at 0.538 Å with unchanged
+score; translating that pose 3 Å produced 3.088 Å and was rejected. No new native
+calculation was submitted for testing. Tests cover symmetry, threshold boundary,
+fixed frame, contact/score precedence, invalid/missing data, archive preservation,
+empty-result DB retirement and old generated-header enforcement.
+
+**Existing data is not retroactively certified:** a hash-stable read-only audit of
+iteration-8 merged best poses found 554 passing and 127 nonmatching-core poses.
+Two rejected IDs, 304745 and 335071, are in the saved MD selection; they had no
+persisted MD score when inspected. Keep all old DB/native/manifest/selection data
+and jobs unchanged. Their quarantine/recalculation and any affected downstream
+ancestry require a separate reviewed recovery operation. The code repair guards
+subsequent collection; it does not rewrite previously committed scientific data.
+
+
+## Allow zero-pose Glide timeout collection with the native lazy writer (2026-11-16)
+
+**Observed bug:** iteration-7 ref_215952 had an empty pose-input list, with
+native subjob boundaries still required for timeout classification. Schrödinger
+2026-1 StructureWriter did not create a MAEGZ file when no structures were
+appended. The collector unconditionally renamed that absent file and repeatedly
+crashed before writing empty scores/report. The synthetic writer incorrectly
+created a file even for zero appends, concealing this failure.
+
+**Implementation repair:** create and publish a pose file only when poses were
+selected. A valid zero-pose collection still writes the header-only score TSV
+and complete report, including excluded native boundaries, source checksums and
+read diagnostics. Keep any earlier published poses intact; do not fabricate an
+empty MAEGZ file. Existing caller code publishes poses only for nonempty scores
+and applies the same timeout/no-pose classifications through its existing DB
+transaction. A missing writer output for a nonempty selection still fails closed.
+
+No change to docking, pose scoring/selection, native status/download verification,
+JobIds, timeout limits, retry policy, source fingerprint enforcement or manifest
+formats. The helper is read by each collection subprocess, so the next automatic
+worker retry uses the repair without native cancellation or resubmission.
+
+**Evidence:** the exact production request was replayed with an isolated output
+directory and the installed Schrödinger suite. Before: the reported missing-file
+traceback. After: zero exit, zero scores, valid report with 15 excluded compound
+IDs over 29 native prepared structures; production inputs were read only.
+The fake writer now models lazy file creation. Tests cover no inputs, empty
+readers, invalid scores, foreign IDs, unreadable streams, existing-pose retention,
+missing nonempty writer output, and zero-pose DB timeout classification.
+These checks verify file publication and recovery, not scientific affinity.
+
+
+## Keep MD GPU admission running during CPU postprocessing (2026-11-15)
+
+**Confirmed user request:** a 20-slot MD run must not wait for all members of a
+wave or for ready peers' Prime processing. Each completed native MD becomes
+eligible for frame extraction/Prime independently; admit the next frozen queued
+MD into its vacant GPU slot while CPU postprocessing continues.
+
+**Observed implementation gap:** admission ran once at worker entry. Serial
+frame extraction, checksummed transfers and native Prime polling could then
+occupy the worker without another MD-status/admission pass. Existing first-ready
+Prime submission did not remove this GPU refill delay.
+
+**Implementation:** keep the full startup native reconciliation before CPU work.
+During CPU processing a worker-local monitor repeats MD-only reconciliation and
+GPU admission, waiting five seconds between passes. Within this worker, already
+verified unstarted tasks need not be queried again before each capacity check;
+a new worker still reconciles every unresolved task. Running and uncertain MD
+jobs reserve slots, and submission intents remain durably saved before SSH.
+The main thread dynamically selects remaining ready replicas, so an MD completing
+after its original list position is processed in the same CPU pass. Process each
+replica at most once per pass; retain normal driver polling when only GPU work
+remains. There is no all-MD/all-frame preparation barrier.
+
+Only the main thread accesses SQLite, Prime guards, result validation/commit and
+cleanup. Serialize shared progress checkpoints with a short lock, held across
+neither SSH nor CPU work. Stop and join the monitor on normal/early/error exit;
+stop further admissions on controller shutdown. A lost or invalid admission
+response retains the durable reservation and propagates as a worker error.
+Native calls already in flight finish reconciliation before worker exit.
+
+Preserve configured GPU/CPU budgets, frozen selection, scientific protocol,
+JobIds, native completion verification, Prime batching/host reservations and
+cross-project exclusion. Change only the Python controller; native helpers,
+dispatch adapter, saved source hashes, manifests and DB schema stay unchanged.
+The current subprocess keeps its loaded code; subsequent driver-launched MD
+workers use the update without canceling native jobs. Frame extraction, SSH,
+resource availability and polling still impose latency; five seconds is the
+monitor interval, not a guaranteed job start delay.
+
+**Evidence limits:** deterministic mocked tests reproduce GPU starvation with a
+blocked CPU operation for both local and remote Prime paths. They verify refill
+before CPU returns, newly-ready earlier tasks, durable launch intent, preserved
+progress from both writers, uncertain ownership, error propagation and monitor
+shutdown. They do not measure real throughput or validate scientific results.
+
+
 ## Verify saved Glide inputs when the upstream LigPrep file changes (2026-11-15)
 
 **Observed incident:** a completed older LigPrep job's output/log occupied the

@@ -69,9 +69,9 @@ def prepare_new_inputs(args, entries, glide_root):
     groups = []
     refs = getattr(args, 'crem_docking_references', {})
     source = str(args.reference_poses.resolve())
-    for job, _ in entries:
+    for job, ligand_file in entries:
         group = dict(id=job['reference_id'], name=job['reference_name'],
-                     output=str(job['reference_file'].resolve()))
+                     output=str(job['reference_file'].resolve()), ligands=str(ligand_file.resolve()))
         if refs:
             ref = refs[job['reference_id']]
             path = Path(ref['source'])
@@ -238,13 +238,17 @@ def process_completed_job(iteration, args, job, extractor, merger, glide_root):
     ids = [x[0] for x in job["compounds"]]
     failed = [cid for cid in ids if cid not in scored]
     if failed:
-        c.set_compound_state(
-            failed,
-            "failed",
-            failed_stage="glide",
-            failure_message="No Glide pose",
-            db_path=args.db_path,
-        )
+        report_file = job['group_dir']/'core_validation.json'
+        rejected = json.loads(report_file.read_text()).get('rejected', {}) if report_file.exists() else {}
+        messages = {}
+        for cid in failed:
+            reasons = rejected.get(str(cid), {})
+            message = ('No Glide pose passed core validation: '+', '.join(sorted(reasons))
+                       if reasons else 'No Glide pose')
+            messages.setdefault(message, []).append(cid)
+        for message, ids in messages.items():
+            c.set_compound_state(ids, State.FAILED, failed_stage='glide',
+                                 failure_message=message, db_path=args.db_path)
     print(f"Reference {job['reference_id']} completed: DB updated={updated}, no-pose={len(failed)}", flush=True)
     committed = time.monotonic()
     for phase, seconds in [('extract', extracted-started), ('publish', published-extracted),
@@ -300,6 +304,7 @@ def process_timeout_job(iteration, args, job, merger, glide_root):
         if sources or extra:
             request = dict(inputs=[str(p.resolve()) for p in sources], ids=ids, output=str(folder.resolve()), **extra)
             request['attraction_point'] = pose_selection_point(args, iteration)
+            request['core_input'] = str((directory/(output_paths(directory)[0].stem+'.in')).resolve())
             request_file = folder / 'request.json'
             request_file.write_text(json.dumps(request))
             helper = Path(__file__).resolve().parents[1] / 'glide_timeout_results.py'
@@ -633,7 +638,7 @@ def _recover_changed_ligprep_input(args, iteration, glide_root):
     if not jobs:
         print('Glide: no saved jobs have verified inputs; changed source retained and new submissions blocked.', flush=True)
         return
-    extractor = c.create_score_extractor(glide_root, attraction_point=args.glide_pose_point)
+    extractor = c.create_score_extractor(glide_root, attraction_point=args.glide_pose_point, core_validation=True)
     merger = c.create_best_pose_merger(glide_root)
     pending, terminal = collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root)
     print(f'Glide verified recovery: {terminal} groups resolved, {len(pending)} still pending; new submissions blocked.', flush=True)
@@ -700,7 +705,7 @@ def _run_stage(args, ns):
     if not group_ligand_files:
         raise RuntimeError('LigPrep output contains no current compound IDs; '
                            'rerun LigPrep for this iteration. Glide claims remain retryable.')
-    score_extractor = c.create_score_extractor(glide_root, attraction_point=args.glide_pose_point)
+    score_extractor = c.create_score_extractor(glide_root, attraction_point=args.glide_pose_point, core_validation=True)
     merger = c.create_best_pose_merger(glide_root)
 
     jobs, unsubmitted, reserved = _recover_reference_groups(

@@ -17,10 +17,14 @@ def structures(monkeypatch):
     refs = [first, SimpleNamespace(title='REF', label='second'),
             SimpleNamespace(title='OTHER', label='other')]
     reads, matches, writes = [], [], []
+    for st in refs:
+        st.atom = {i: SimpleNamespace(atomic_number=6,x=float(i),y=0.,z=0.) for i in (1,2,3,4,7,9)}
 
     class Reader:
         def __init__(self, path):
             reads.append(path)
+        def __iter__(self):
+            return iter(refs)
         def __enter__(self):
             return iter(refs)
         def __exit__(self, *args):
@@ -69,7 +73,8 @@ def test_batch_uses_one_process_first_reference_and_native_atom_order(
     args = SimpleNamespace(schrodinger=Path('/suite'), reference_poses=tmp_path/'refs.maegz',
                            mcs_smarts=smarts, grid=tmp_path/'grid.zip', glide_pose_point=point)
     inputs = glide.prepare_new_inputs(args, entries, tmp_path)
-    assert len(calls) == len(reads) == 1
+    assert len(calls) == 1
+    assert len(reads) == (4 if smarts else 1)
     assert set(inputs) == {1, 2, 3}
     assert writes == ['first', 'other', 'first']
     for path in inputs.values():
@@ -81,7 +86,10 @@ def test_batch_uses_one_process_first_reference_and_native_atom_order(
             assert 'CORECONS_FALLBACK False' in text
         else:
             assert 'CORE_ATOMS' not in text
-    assert matches == ([(name, smarts, True) for name in writes] if smarts else [])
+    assert [m for m in matches if m[2]] == ([(name, smarts, True) for name in writes] if smarts else [])
+    assert len(matches) == (15 if smarts else 0)
+    if smarts:
+        assert all((p.parent/"core_preflight.json").exists() for p in inputs.values())
     assert 'prepare 3 reference inputs=' in capsys.readouterr().out
     timing = [json.loads(line) for line in (tmp_path/'glide_timing.jsonl').read_text().splitlines()]
     assert timing[0]['phase'] == 'prepare_reference_inputs' and timing[0]['seconds'] >= 0

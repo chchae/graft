@@ -1,10 +1,12 @@
 """Independent MD ensemble worker: durable SQLite ownership and remote journals."""
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 from pathlib import Path
 import shlex
 import statistics
 import subprocess
+import threading
 import uuid
 
 from graft import database
@@ -13,6 +15,7 @@ from graft.states import CompoundState as State
 from graft.stages._logging import progress as log_progress
 
 _dispatch_uploaded = set()
+_MD_ADMISSION_INTERVAL = 5.0
 
 
 def report_pending(reason):
@@ -72,10 +75,58 @@ def remote_call(settings, action, root, *extra):
     return ssh(settings['ssh_host'],shlex.join([settings['suite']+'/run',helper,action,root,*extra]))
 
 
-def admit_md(settings, tasks, progress, status_file):
-    """Reconcile GPU owners and fill vacancies before any CPU postprocessing."""
-    from graft.md_gbsa_native import save
+def _progress_snapshot(progress, lock=None):
+    with lock if lock is not None else nullcontext():
+        return dict(progress)
 
+
+def _record_progress(progress, key, result, status_file, lock=None):
+    from graft.md_gbsa_native import save
+    with lock if lock is not None else nullcontext():
+        progress[key] = result
+        save(status_file, progress)
+
+
+@contextmanager
+def _continuous_md_admission(settings, tasks, progress, status_file):
+    """Keep GPU admission independent of slow CPU extraction/Prime operations.
+
+    Only the main thread accesses SQLite or CPU postprocessing. The monitor owns
+    MD-phase updates; both writers serialize the complete progress checkpoint.
+    On any admission error stop submitting, retain reservations and propagate the
+    error after the in-flight CPU operation. Never leave a monitor behind.
+    """
+    stop = threading.Event()
+    lock = threading.Lock()
+    errors = []
+    tasks = tuple(tasks)
+
+    def monitor():
+        try:
+            while not stop.wait(_MD_ADMISSION_INTERVAL):
+                admit_md(settings, tasks, progress, status_file, lock=lock,
+                         reconcile_unstarted=False, stop=stop)
+        except BaseException as exc:
+            errors.append(exc)
+            stop.set()
+
+    thread = threading.Thread(target=monitor, name='graft-md-admission')
+    thread.start()
+    failed = False
+    try:
+        yield lock, errors
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        stop.set()
+        thread.join()
+        if errors and not failed:
+            raise errors[0]
+
+
+def admit_md(settings, tasks, progress, status_file, *, lock=None, reconcile_unstarted=True, stop=None):
+    """Reconcile native GPU ownership, then fill vacancies independently of CPU work."""
     def poll(action, root):
         result = response(remote_call(settings, action, root))
         valid = (result.get('phase') == 'frames' and result.get('status') == 'pending' or
@@ -87,36 +138,43 @@ def admit_md(settings, tasks, progress, status_file):
         return result
 
     for cid, replica, root in tasks:
+        if stop is not None and stop.is_set():
+            return
         key = str((cid, replica))
-        prior = progress.get(key, {})
+        prior = _progress_snapshot(progress, lock).get(key, {})
         if prior and (prior.get('phase') != 'md' or prior.get('status') == 'failed'):
             continue
+        if not reconcile_unstarted and prior.get('status') == 'unstarted':
+            continue
         result = poll('md-status', root)
-        progress[key] = result
-        save(status_file, progress)
+        _record_progress(progress, key, result, status_file, lock)
     # Unknown launch intents own capacity too. Reconcile them without admitting
     # another job into their slot; native journals prevent duplicate submission.
     for cid, replica, root in tasks:
+        if stop is not None and stop.is_set():
+            return
         key = str((cid, replica))
-        prior = progress.get(key, {})
+        prior = _progress_snapshot(progress, lock).get(key, {})
         if prior.get('phase') == 'md' and prior.get('status') == 'pending':
-            progress[key] = poll('md-start', root)
-            save(status_file, progress)
-    active = sum(progress[str((cid, replica))].get('phase') == 'md' and
-                 progress[str((cid, replica))].get('status') in ('running', 'pending')
+            _record_progress(progress, key, poll('md-start', root), status_file, lock)
+    snapshot = _progress_snapshot(progress, lock)
+    active = sum(snapshot[str((cid, replica))].get('phase') == 'md' and
+                 snapshot[str((cid, replica))].get('status') in ('running', 'pending')
                  for cid, replica, root in tasks)
     for cid, replica, root in tasks:
+        if stop is not None and stop.is_set():
+            return
         key = str((cid, replica))
-        prior = progress.get(key, {})
+        prior = _progress_snapshot(progress, lock).get(key, {})
         if prior.get('status') != 'unstarted' or active >= settings['gpus']:
             continue
         # An unstarted reservation is written before SSH. On a lost reply the
         # next poll consults the remote journal before freeing or reusing it.
-        progress[key] = dict(phase='md', status='pending', reason='MD admission in progress')
-        save(status_file, progress)
+        _record_progress(progress, key,
+                         dict(phase='md', status='pending', reason='MD admission in progress'),
+                         status_file, lock)
         result = poll('md-start', root)
-        progress[key] = result
-        save(status_file, progress)
+        _record_progress(progress, key, result, status_file, lock)
         if result.get('phase') == 'md' and result.get('status') in ('running', 'pending'):
             active += 1
         (print if result['status']=='failed' else log_progress)(
@@ -354,51 +412,62 @@ def run(args, iteration):
     # ready frames first delays the first Prime launch by every peer's extraction
     # and transfer. The native pool still includes other already prepared inputs,
     # and retains its host reservation while later molecules become ready.
-    for cid,replica,root in tasks:
-        if cid in resolved:
-            continue
-        key=str((cid,replica)); prior=progress.get(key)
-        # Running/uncertain MDs were already polled in the admission pass.
-        # Unstarted tasks stay queued; only terminal MD work enters GBSA.
-        if prior.get('phase') == 'md':
-            if prior.get('status') == 'failed':
+    remaining = list(tasks)
+    with _continuous_md_admission(settings, tasks, progress, status_file) as (progress_lock, admission_errors):
+        while remaining:
+            if admission_errors:
+                raise admission_errors[0]
+            snapshot = _progress_snapshot(progress, progress_lock)
+            ready = next((task for task in remaining
+                          if snapshot[str((task[0], task[1]))].get('phase') != 'md'
+                          or snapshot[str((task[0], task[1]))].get('status') == 'failed'), None)
+            if ready is None:
+                break  # Driver polling handles an entirely GPU-bound pass.
+            remaining.remove(ready)
+            cid, replica, root = ready
+            if cid in resolved:
+                continue
+            key=str((cid,replica)); prior=progress.get(key)
+            # Running/uncertain MDs were already polled in the admission pass.
+            # Unstarted tasks stay queued; only terminal MD work enters GBSA.
+            if prior.get('phase') == 'md':
+                if prior.get('status') == 'failed':
+                    terminal_replicas.add((cid,replica))
+                    if all((cid,r) in terminal_replicas for r in range(settings['replicates'])):
+                        if persist_ready_compound(args, iteration, cid, settings, _progress_snapshot(progress, progress_lock), directory):
+                            resolved.add(cid)
+                continue
+            # Local cross-project lock and registry bridge local/remote JobServers.
+            # Native Prime parents are serialized (legacy: 7 slots; local: up to 192).
+            try:
+                with guard.submission_guard(args.schrodinger,'prime_gbsa',md_controller=True):
+                    local=guard.active_jobs(args.schrodinger)
+                    if any(guard.job_kind(j)=='prime_gbsa' and (not j.get('graft_md_remote') or
+                           ((j.get('graft_md_local_compute') or j.get('graft_prime_local_compute'))
+                            and not settings.get('local_compute'))) for j in local):
+                        print('MD-GBSA waiting for other Prime work.'); return
+                    if settings.get('local_compute'):
+                        result=md_gbsa_local.poll(settings,cid,replica,root,directory/'adam-results',
+                            allow_submit=not any(guard.job_kind(j)=='prime_gbsa' and
+                                not j.get('graft_md_local_compute') for j in local))
+                    else:
+                        result=response(remote_call(settings,'poll',root))
+                    expected_protocol=dict(settings['protocol'],seed=1+(settings['protocol']['seed']+replica-1)%2147483647)
+                    if result.get('status')=='done' and (result.get('id')!=cid or result.get('protocol')!=expected_protocol):
+                        raise RuntimeError('Remote MD ensemble identity/protocol does not match the frozen task')
+            except guard.SubmissionBlocked as exc:
+                print(str(exc)); return
+            _record_progress(progress, key, result, status_file, progress_lock)
+            if result['status'] in ('done','failed'):
                 terminal_replicas.add((cid,replica))
-                if all((cid,r) in terminal_replicas for r in range(settings['replicates'])):
-                    if persist_ready_compound(args, iteration, cid, settings, progress, directory):
-                        resolved.add(cid)
-            continue
-        # Local cross-project lock and registry bridge local/remote JobServers.
-        # Native Prime parents are serialized (legacy: 7 slots; local: up to 192).
-        try:
-            with guard.submission_guard(args.schrodinger,'prime_gbsa',md_controller=True):
-                local=guard.active_jobs(args.schrodinger)
-                if any(guard.job_kind(j)=='prime_gbsa' and (not j.get('graft_md_remote') or
-                       ((j.get('graft_md_local_compute') or j.get('graft_prime_local_compute'))
-                        and not settings.get('local_compute'))) for j in local):
-                    print('MD-GBSA waiting for other Prime work.'); return
-                if settings.get('local_compute'):
-                    result=md_gbsa_local.poll(settings,cid,replica,root,directory/'adam-results',
-                        allow_submit=not any(guard.job_kind(j)=='prime_gbsa' and
-                            not j.get('graft_md_local_compute') for j in local))
-                else:
-                    result=response(remote_call(settings,'poll',root))
-                expected_protocol=dict(settings['protocol'],seed=1+(settings['protocol']['seed']+replica-1)%2147483647)
-                if result.get('status')=='done' and (result.get('id')!=cid or result.get('protocol')!=expected_protocol):
-                    raise RuntimeError('Remote MD ensemble identity/protocol does not match the frozen task')
-        except guard.SubmissionBlocked as exc:
-            print(str(exc)); return
-        progress[key]=result
-        save(status_file,progress)
-        if result['status'] in ('done','failed'):
-            terminal_replicas.add((cid,replica))
-        if all((cid,r) in terminal_replicas for r in range(settings['replicates'])):
-            if persist_ready_compound(args, iteration, cid, settings, progress, directory):
-                resolved.add(cid)
-        (print if result['status']=='failed' else log_progress)(
-            f"CMPID_{cid} replica {replica+1}: {result.get('phase','ensemble')} {result['status']}")
-        if result['status']=='failed':
-            # Keep the selected compound owned until every submitted replica retires.
-            continue
+            if all((cid,r) in terminal_replicas for r in range(settings['replicates'])):
+                if persist_ready_compound(args, iteration, cid, settings, _progress_snapshot(progress, progress_lock), directory):
+                    resolved.add(cid)
+            (print if result['status']=='failed' else log_progress)(
+                f"CMPID_{cid} replica {replica+1}: {result.get('phase','ensemble')} {result['status']}")
+            if result['status']=='failed':
+                # Keep the selected compound owned until every submitted replica retires.
+                continue
     database.request_md_cycle_retries(args.db_path,iteration)
     if settings.get('local_compute'):
         md_gbsa_local.cleanup_committed(args, iteration, settings, directory)

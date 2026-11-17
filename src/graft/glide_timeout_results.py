@@ -9,9 +9,9 @@ import sys
 import tarfile
 
 if __package__:
-    from .glide_pose_selection import PoseSelector, PoseGeometryError
+    from .glide_pose_selection import PoseSelector, PoseGeometryError, CoreValidator, archive_rejected_pose, write_core_report
 else:
-    from glide_pose_selection import PoseSelector, PoseGeometryError
+    from glide_pose_selection import PoseSelector, PoseGeometryError, CoreValidator, archive_rejected_pose, write_core_report
 
 
 def excluded_inputs(request, structure):
@@ -70,7 +70,8 @@ def collect(request, structure):
     """
     allowed = set(request['ids'])
     mapping, excluded, boundaries = excluded_inputs(request, structure)
-    selected = PoseSelector(request.get('attraction_point'))
+    core = CoreValidator.from_input(request['core_input']) if 'core_input' in request else None
+    selected = PoseSelector(request.get('attraction_point'), core=core)
     scores, poses, errors = selected.scores, selected.poses, []
     excluded_poses = 0
     for source in request['inputs']:
@@ -98,12 +99,20 @@ def collect(request, structure):
             errors.append(dict(path=source, error=str(exc)))
     folder = Path(request['output'])
     folder.mkdir(parents=True, exist_ok=True)
-    pending = folder / 'best_poses.pending.maegz'
-    with structure.StructureWriter(str(pending)) as writer:
-        for cid in sorted(poses):
-            poses[cid].property['i_user_compound_id'] = cid
-            writer.append(poses[cid])
-    pending.replace(folder / 'best_poses.maegz')
+    # StructureWriter creates its output only after the first append. A valid
+    # zero-pose collection publishes scores/report only; never synthesize a pose
+    # file or replace an earlier verified pose with an empty placeholder.
+    if poses:
+        pending = folder / 'best_poses.pending.maegz'
+        with structure.StructureWriter(str(pending)) as writer:
+            for cid in sorted(poses):
+                poses[cid].property['i_user_compound_id'] = cid
+                writer.append(poses[cid])
+        pending.replace(folder / 'best_poses.maegz')
+    elif core is not None:
+        archive_rejected_pose(folder/'best_poses.maegz')
+    if core is not None:
+        write_core_report(folder/'core_validation.json', selected)
     with (folder / 'docking_scores.pending.tsv').open('w', newline='') as stream:
         writer = csv.writer(stream, delimiter='\t')
         writer.writerow(['id', 'docking_score'])
@@ -111,6 +120,8 @@ def collect(request, structure):
     os.replace(folder / 'docking_scores.pending.tsv', folder / 'docking_scores.tsv')
     report = dict(scored=len(scores), skipped_invalid_scores=selected.skipped, read_errors=errors,
                   inputs=request['inputs'], ids=request['ids'])
+    if core is not None:
+        report['core_validation'] = dict(tolerance=core.tolerance, rejected=selected.core_rejections)
     if selected.point is not None:
         report['pose_selection'] = dict(policy='contact_then_score_v1', point=selected.point, radius=2.0)
     if 'exclude_subjobs' in request:
@@ -129,4 +140,7 @@ def collect(request, structure):
 
 if __name__ == '__main__':
     from schrodinger import structure
-    collect(json.loads(Path(sys.argv[1]).read_text()), structure)
+    request = json.loads(Path(sys.argv[1]).read_text())
+    if 'core_input' not in request:
+        raise PoseGeometryError('Saved Glide core input required for timeout collection')
+    collect(request, structure)

@@ -36,7 +36,9 @@ def structure_module(inputs):
         def append(self, pose):
             self.rows.append(dict(title=pose.title, properties=pose.property))
         def __exit__(self, *args):
-            self.path.write_text(json.dumps(self.rows))
+            # Schrödinger creates the file lazily on the first append.
+            if self.rows:
+                self.path.write_text(json.dumps(self.rows))
     return SimpleNamespace(StructureReader=reader, StructureWriter=Writer)
 
 
@@ -82,8 +84,17 @@ def test_timeout_download_waits_for_every_child_and_unknown_lookup(tmp_path, mon
         recovery.timeout_pose_files('/suite', tmp_path)
 
 
+class SyntheticCore:
+    tolerance = 1.0
+    smarts = 'synthetic'
+    atoms = [1]
+    def rmsd(self, st):
+        return 0.0
+
+
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
+    monkeypatch.setattr(native.CoreValidator, "from_input", lambda path: SyntheticCore())
     db = tmp_path/'project.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)
@@ -193,3 +204,40 @@ def test_partial_recovery_cannot_rerank_a_started_downstream_workflow(project, k
             conn.execute('INSERT INTO iteration_fep_selection(iteration) VALUES (1)')
     with pytest.raises(RuntimeError, match='downstream'):
         database.begin_glide_timeout_collection(args.db_path, 1, 1, 'parent')
+
+
+@pytest.mark.parametrize('case', ['no_inputs', 'empty_reader', 'invalid_score', 'foreign', 'read_error'])
+def test_no_selected_poses_publishes_empty_scores_and_report_without_pose_file(tmp_path, case):
+    values = {'no_inputs': [], 'empty_reader': [],
+              'invalid_score': [Pose(2, float('nan'), 'invalid')],
+              'foreign': [Pose(999, -9, 'foreign')],
+              'read_error': [OSError('unreadable stream')]}[case]
+    inputs = {} if case == 'no_inputs' else {'source': values}
+    request = dict(inputs=list(inputs), ids=[2], output=str(tmp_path))
+    report = native.collect(request, structure_module(inputs))
+    assert report['scored'] == 0
+    assert (tmp_path/'docking_scores.tsv').read_text() == 'id\tdocking_score\n'
+    assert json.loads((tmp_path/'report.json').read_text()) == report
+    assert not (tmp_path/'best_poses.maegz').exists()
+    assert not (tmp_path/'best_poses.pending.maegz').exists()
+    assert bool(report['read_errors']) == (case == 'read_error')
+
+
+def test_empty_recollection_preserves_previously_published_pose(tmp_path):
+    previous = tmp_path/'best_poses.maegz'
+    previous.write_bytes(b'previous verified poses')
+    report = native.collect(dict(inputs=[], ids=[2], output=str(tmp_path)), structure_module({}))
+    assert report['scored'] == 0
+    assert previous.read_bytes() == b'previous verified poses'
+
+
+def test_nonempty_writer_missing_output_still_fails_without_publishing_scores(tmp_path):
+    structure = structure_module({'source': [Pose(2, -7, 'valid')]})
+    class BrokenWriter(structure.StructureWriter):
+        def __exit__(self, *args):
+            pass
+    structure.StructureWriter = BrokenWriter
+    with pytest.raises(FileNotFoundError):
+        native.collect(dict(inputs=['source'], ids=[2], output=str(tmp_path)), structure)
+    assert not (tmp_path/'docking_scores.tsv').exists()
+    assert not (tmp_path/'report.json').exists()

@@ -1,0 +1,832 @@
+{
+  "counts": {
+    "passed": 554,
+    "no_core_match": 127
+  },
+  "invalid_poses": [
+    {
+      "id": 335071,
+      "reference": 252995,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330513,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330519,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330521,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330523,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330527,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330538,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330542,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330544,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330545,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330546,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330548,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330550,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330551,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330553,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330558,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330559,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330561,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 330567,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331408,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331411,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331412,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331415,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331423,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331442,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331443,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 331444,
+      "reference": 255479,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 318426,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 318428,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 318432,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 318436,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 318440,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 318450,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 319022,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 319035,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 319043,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 319063,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 319064,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 319066,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 320826,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 320828,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 325182,
+      "reference": 255484,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304061,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304077,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304078,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304080,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304081,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304082,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304083,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304084,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304086,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304087,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304088,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304090,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304091,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304092,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304093,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304094,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304107,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304109,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304110,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304111,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304112,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304113,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304114,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304115,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304116,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304117,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304118,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304120,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304121,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304122,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304123,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304124,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304125,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304126,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304128,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304129,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304130,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304131,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304132,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304133,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304134,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304135,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304136,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304137,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304138,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304139,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304140,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304143,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304144,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304145,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304146,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304147,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304148,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304149,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304150,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304151,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304152,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304153,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304154,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304155,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304156,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304157,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304158,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304159,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304160,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304161,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304162,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304163,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304167,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304168,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304170,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304733,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304734,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304736,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304737,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304738,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304739,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304740,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304741,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304742,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304743,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304744,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304745,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304746,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    },
+    {
+      "id": 304747,
+      "reference": 255869,
+      "rmsd": null,
+      "status": "no_core_match"
+    }
+  ],
+  "md_selected_invalid": [
+    304745,
+    335071
+  ],
+  "source_sha256": "2873be7465cfedbed202a8d3bf110d91056ae261d51c43ae1e6db334916fcf88",
+  "frozen_input_sha256": {
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252276/glide_252276.in": "f915d52c54522cd21938bb9af2a6ef2a2a42698519800a301d861d241ded159a",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252276/_reference.maegz": "f905e7ce19520adff8e10867c82b11305a32c661f17266422062f36378d3f16f",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252299/glide_252299.in": "e877e0b02da1ec2803e78116786824bd38ffc625b834a6368d7924969642ae59",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252299/_reference.maegz": "56efc8dbb41742b8db3a6793bb7822dbd3cad6aa66029df14b443fb032c3517d",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252831/glide_252831.in": "e9cbd12f2f3ba9c8967f4bb02f6c582331af57a443576a9a093990c612141ca7",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252831/_reference.maegz": "0bab39ae8af50558383fa6c33f8696fcd70226194bd465afd740a4e5cfc4e10a",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252841/glide_252841.in": "bcdb5ad9606d283c61f92fbe0af3ed54222c9f41f6680341fb6b8e725194d54a",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252841/_reference.maegz": "5e257cbaf456da702f9255b419c5d67b688807ff11580aebc98896b6d8dfa0f2",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252973/glide_252973.in": "5143b7e6721a55d1d3aa8a36bb84c4557488d7aa63601c531c38be06bdd360a9",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252973/_reference.maegz": "3ccb411264aaf22f8603d8d05501f9247126c01bca2cbd6cd4aed00416f8c063",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252975/glide_252975.in": "7d3d1da86f8a4a2e05f3ff40eaee08bfdccd298baf016fc2a8295dca6cf49bca",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252975/_reference.maegz": "d591bad971a526ccc6c397cc7b1640b80e621614ba40d32ea1ff7adc8e5da5eb",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252991/glide_252991.in": "c466252ea29055528d1275ff70ff41b1ebf227042ed0ab66cb722327855c52cf",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252991/_reference.maegz": "a179e32a99da9307880258573897fc09901d469825c2aaaf7537f5d8b83daafd",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252995/glide_252995.in": "ac83904669d000e2bec0ce7f9a669efab20aff5692eb44062ca8cf456fa13e86",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_252995/_reference.maegz": "351450216fd1d5cdd42c7c532ca9121ba588fc5dbdd7ef359ecf4172192fa496",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_253020/glide_253020.in": "95074d6d4720388d838dd21b6dda9b7e4514d404e3c48daafac4eb35be9474b0",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_253020/_reference.maegz": "bb80fe4ab78751e998e78932e87b3341aa1ec743dcae7c4bc604e5f0eadba6cd",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_253297/glide_253297.in": "dfafa825a3185d4ce9196e82591c2d7a0281ce7a4da9ddb1819baa74561db5f9",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_253297/_reference.maegz": "f1151cf713da27bbfa65ffae9ea7c0f70aa88c11001f31077b5f3540ebf0074a",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_253483/glide_253483.in": "b9179548cd4a9b0f77564827d323d29990bf9533b56796d76dd2978168adaaa8",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_253483/_reference.maegz": "cf2240b4cad737057525a8951a15209b1a62bc51d234713a7d15e4fa928c2e8f",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_255479/glide_255479.in": "ec368c93d7ff32f7229c878be8b46a3d2c748b15b334c287fde646e72d6f5fc7",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_255479/_reference.maegz": "af2037ee6582671ba7f2d3fa85e71dc7babcc5abf27318e4f4661a67b9a36b78",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_255484/glide_255484.in": "fc2299ba0fa4367a49721bb892661b336e7e17191ff7bf4ec9eae7fbbf004e10",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_255484/_reference.maegz": "9720c9585461060e87caafc862fd8b0f7be5b6e6b052b418fc80704075a9e5aa",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_255869/glide_255869.in": "5429a60e641ebd5c0e5e24f49148c6961c58191afa2d02744b5922a9d809cfb8",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_255869/_reference.maegz": "d7558617f6f08e3e2c21974958f09cb87f446163e90695ea7e1ae76ebaf48b83",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_257562/glide_257562.in": "ac1f3a3cf41a5f5f28f3efda6fce6dfc8e5609976a9dec0242fceb83e64ca4fd",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_257562/_reference.maegz": "7e7f8615ae9b3587b0a2eeec4fdd5a222511e58b02dd79440783fcb5a273ebbf",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_259317/glide_259317.in": "482557288ee26b797205dd2ef1de5c9d31e070928ab4c648fb260411ae17d03f",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_259317/_reference.maegz": "048c22e2520b3ecc3d760e6e690be6ae169f985bb87e74402b39792bf12a90fb",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_259335/glide_259335.in": "66d9248632b9c68048841628b9addc6ad6639ad9e2dca64c5954d9ca46f98846",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_259335/_reference.maegz": "745342898545dd044524ea84d7722039de71aff3b59da52d882a388b08ea74b9",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_269925/glide_269925.in": "06be094e0fcc6dd9c1f59ae3258b18fea8cca6c1354d52b70baed3c9010cce05",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_269925/_reference.maegz": "dec480e5102f7be1ecdb1a0cc7c9fd08801732f258b66ea1c8baf08ebab3656a",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271184/glide_271184.in": "4cde817c05d863055de3a3ba0fc1d8b9b21bd6552f71740fd4f8b5ddc7671e72",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271184/_reference.maegz": "e3be07dd2b91e1ff8266776d879b6b259ca02dea105a1c263bb88493fea0e7fc",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271725/glide_271725.in": "ab6e2be058b84169b254883c7cc4cba46850ef85e89d1bce55d7c77e0a6336b1",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271725/_reference.maegz": "b959330170d2de0a3b3412653bbb7afbeced7c401f96793c11f17f629644af37",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271736/glide_271736.in": "a83a333fad3a92a8bad13b5744c8a033c1bad94c6d9549f5af1895f467bfffbd",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271736/_reference.maegz": "189e146c86181d15e2462554c07db0ac052ec85deeec69cf03ce8f9726774a57",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271876/glide_271876.in": "d67afe7c251be80cef88bab533a5c28c8dff178d0fdca01387f5c68ddd60fc23",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_271876/_reference.maegz": "0ad58268a754da771dc84b06f930c9f9458b4a70bca9ebb63d05b25cddab5e39",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_273341/glide_273341.in": "f9418427c12090befea605bdb89c91dc97e51547cf64cbf5306ea70e9f8c0377",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_273341/_reference.maegz": "3c9c583789001ba419d937457d4aa5a1f4cfe42414abdb7b13a01ac3a136442d",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_274002/glide_274002.in": "a83c2c7214ea9d0b5eef2b36509c5bede1d162592ab42c889e52a78b3e91fee7",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_274002/_reference.maegz": "ed3797d8fc4ab88d8632c63ab551cdcd39fbec2b124de1ca3ce4d11dc8d44360",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_274263/glide_274263.in": "64e5cc0be9d735a0d60daea5248bb3dfd290bb194e7f5c55701e04adc9385223",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_274263/_reference.maegz": "5e35e91ebd6be8f34643fbc045e4d17d5b67afb84a2055eae2695d9b96c4c406",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_274672/glide_274672.in": "c38084f8f8b23bd813eb08109e116d6f2dd9efae3fd522b249f4b95f148a9816",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_274672/_reference.maegz": "f7d122855e678c67f95917e6d99fa8bdc583fccb8bc1b797ca0cf3d5092da0f0",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_285345/glide_285345.in": "36f4a7f42603a8f5e755fc6cadf3aec0690c9705f1ca19fdb20a6cc1a9e5db07",
+    "/homes1/chchae/work/GRAFT/graft/examples/egfr-crem-2/output/iter08/06-glide/ref_285345/_reference.maegz": "33e492b40a38fe16c4ec239e795af7dcf14c7020700cd88061c0a76350577bae"
+  },
+  "read_only": true
+}

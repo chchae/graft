@@ -10,7 +10,7 @@ import pytest
 from graft import _core, database, driver, glide_recovery as recovery
 from graft import glide_timeout_results as native
 from graft.stages import glide
-from test_glide_timeout_results import Pose, structure_module
+from test_glide_timeout_results import Pose, structure_module, SyntheticCore
 
 
 def timestamp(seconds):
@@ -149,7 +149,8 @@ def test_ambiguous_native_exclusion_does_not_publish_scores(tmp_path,problem):
 
 
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
+    monkeypatch.setattr(native.CoreValidator, "from_input", lambda path: SyntheticCore())
     db=tmp_path/'project.sqlite'
     with database.connect(db) as conn:
         _core.create_sqlite_schema(conn)
