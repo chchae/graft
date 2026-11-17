@@ -160,11 +160,11 @@ def preflight(suite, gpu_host, cpu_host):
     return dict(status='ready',hosts=hosts,servers=evidence)
 
 def native_rows(suite, job_id):
-    result = subprocess.run([str(suite/'jsc'), 'info', '--json', job_id], check=True,
+    result = subprocess.run([str(suite/'jsc'), 'info', '--json', '--tree', job_id], check=True,
                             capture_output=True, text=True, timeout=30)
     rows = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
     if not any(row.get('jobId') == job_id for row in rows):
-        raise RuntimeError('JobServer did not return the saved parent')
+        raise RuntimeError(f'JobServer did not return the saved parent {job_id} in the complete tree')
     return rows
 
 

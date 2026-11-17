@@ -57,7 +57,7 @@ def verify_submission_host(suite, host):
 
 def job_details(suite, job_id, directory=None):
     try:
-        result = subprocess.run([str(Path(suite) / 'jsc'), 'info', '--json', job_id],
+        result = subprocess.run([str(Path(suite) / 'jsc'), 'info', '--json', '--tree', job_id],
                                 cwd=directory, check=True, capture_output=True, text=True, timeout=30)
         rows = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
     except (subprocess.SubprocessError, OSError, ValueError) as exc:

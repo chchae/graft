@@ -1,5 +1,42 @@
 # Graft Development Handoff
 
+## Request complete JobServer trees during Prime admission checks (2026-11-17)
+
+**Observed bug:** on the Prime host, the pinned 2025-3 client returned 189
+LigPrep child records for `jsc info --json <listed-parent>` but omitted the
+parent itself. The strict parent check repeatedly blocked the global admission
+snapshot and consequently delayed collection of the existing legacy Prime batch.
+A read-only repeat with the documented `--tree` flag returned 190 records,
+including that parent with status RUNNING. The server-side reason for the
+non-tree response is not established.
+
+**Implementation repair:** request `jsc info --json --tree` for native MD/Prime
+status queries and the local cross-project submission guard. Still require the
+exact requested parent; missing parents and unavailable queries remain errors,
+not completion or evidence of an empty queue. Include the requested identity
+in the standalone helper's missing-parent diagnostic.
+
+For existing frozen standalone Prime batches, stream the current native module
+into a separate non-main namespace for the read-only `jobs` action and install
+only its tree-query function in the original helper. Keep the original global
+listing, legacy JobControl adapter and journal/uncertain-reservation inspection.
+Poll, verify, check and retry continue through their exact saved entrypoint.
+Do not overwrite frozen sources, hashes, owner records, commands, inputs or
+journals, or remove registrations to bypass the fence. New batches freeze the
+updated query normally. No database/schema or scientific protocol changes.
+
+**Evidence:** isolated subprocess regression replays the children-only response,
+including a running grandchild and uncertain pool reservation, while preserving
+all frozen helper/journal bytes. Tests retain missing-parent rejection and exact
+scientific-action routing. A production read-only jobs call succeeded and hash
+checks confirmed unchanged helper, owner and journal files. The existing
+supervisor subsequently resumed per-child Prime score persistence without a
+manual restart, database edit, cancellation or resubmission. These checks verify
+coordination and recovery, not scientific energy accuracy.
+
+**Verification:** 189 focused tests passed; full suite: 2,950 passed, seven
+skipped. Compileall, package/CLI imports and diff whitespace checks passed.
+
 ## Import reference scores when calculation stages are disabled (2026-11-17)
 
 **Reported bug:** iteration-0 reference MAEGZ contains Prime and MD scores,

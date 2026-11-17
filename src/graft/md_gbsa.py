@@ -51,6 +51,23 @@ def response(text):
 
 def remote_call(settings, action, root, *extra):
     helper = settings['helper']
+    if action == 'jobs' and Path(helper).name == 'prime_gbsa_local_native.py':
+        # Apply only the current read-only tree query to a frozen Prime helper.
+        # Its legacy adapter and journal inspection still run as saved. Never
+        # replace pinned scientific sources or route poll/verify through this.
+        source = Path(__file__).with_name('md_gbsa_native.py')
+        script = (
+            'import importlib, sys\n'
+            "scope = {'__name__': 'graft_readonly_query'}\n"
+            f'exec(compile({source.read_text()!r}, "<graft-readonly-query>", "exec"), scope)\n'
+            f'sys.path.insert(0, {str(Path(helper).parent)!r})\n'
+            "helper = importlib.import_module('prime_gbsa_local_native')\n"
+            "helper.native.native_rows = scope['native_rows']\n"
+            'helper.main()\n'
+        )
+        return ssh(settings['ssh_host'], shlex.join([
+            settings['suite']+'/run', 'python3', '-', 'jobs', root, *extra]),
+            input=script)
     if action == 'jobs' and Path(helper).name == 'native.py':
         # Queue inspection must survive removal of an old run directory.
         # Stream only the read-only jobs action through the registered suite;
