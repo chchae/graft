@@ -44,11 +44,20 @@ def bind_parents(args, iteration, folder, parents):
         row['docking_reference'].update(source=str(output.resolve()), sha256=checksum,
             source_glide_sha256=source_hash, docking_score=scores[parent['compound_id']])
         row['history']['constraint_reference'] = dict(row['docking_reference'])
+        if 'partial_mapping' in row['docking_reference']:
+            proof = row['docking_reference']['partial_mapping']
+            print(f"Elite CMPID_{parent['compound_id']}: exact partial pose mapping; "
+                  f"matched atoms={proof['matched_atoms']}/{proof['original_atoms']}; "
+                  f"policy={proof['policy']}; declared reference core retained.")
         if 'tautomer_mapping' in row['docking_reference']:
             proof = row['docking_reference']['tautomer_mapping']
             print(f"Elite CMPID_{parent['compound_id']}: verified keto/enol pose mapping; "
                   f"charge {proof['original_charge']} -> {proof['pose_charge']}; "
                   f"full atoms={len(proof['parent_atom_indices'])}; "
                   f"unchanged constrained atoms={len(row['docking_reference']['parent_atom_indices'])}.")
+            if proof.get('protonated_amine_parent_atom_indices'):
+                print(f"Elite CMPID_{parent['compound_id']}: verified paired alpha-amine protonation; "
+                      f"parent atom indices={proof['protonated_amine_parent_atom_indices']}; "
+                      f"policy={proof['policy']}.")
         bound.append(row)
     return bound

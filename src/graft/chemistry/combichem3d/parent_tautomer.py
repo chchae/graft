@@ -10,6 +10,7 @@ from rdkit import Chem
 
 MATCH_LIMIT = 4097
 POLICY = 'local_keto_enol_shared_core_v1'
+AMINE_POLICY = 'local_keto_enol_alpha_amine_shared_core_v1'
 
 
 def _state(mol, oxygen, carbon, alpha):
@@ -71,9 +72,51 @@ def _signature(atom):
             atom.GetTotalNumHs(), atom.GetIsAromatic(), atom.GetNumRadicalElectrons())
 
 
-def _verify(original, target, mapping, sites):
-    reactive = {i for site in sites for i in site}
-    # Only oxygen charge/H and alpha H changes are authorized by the local rule.
+def _protonated_amines(original, target, mapping, sites):
+    """Recognize only the adjacent secondary-amine/enolate zwitterion pair."""
+    allowed = []
+    for oxygen, carbon, alpha in sites:
+        keto, enol = (original, target) if _state(original, oxygen, carbon, alpha) == 'keto' else (target, original)
+        ko, eo = (oxygen, mapping[oxygen]) if keto is original else (mapping[oxygen], oxygen)
+        if enol.GetAtomWithIdx(eo).GetFormalCharge() != -1 or keto.GetAtomWithIdx(ko).GetFormalCharge() != 0:
+            continue
+        candidates = []
+        for atom in original.GetAtomWithIdx(alpha).GetNeighbors():
+            i = atom.GetIdx()
+            if atom.GetAtomicNum() != 7:
+                continue
+            k, e = (atom, target.GetAtomWithIdx(mapping[i])) if keto is original else (target.GetAtomWithIdx(mapping[i]), atom)
+            if ((k.GetFormalCharge(), k.GetTotalNumHs()) != (0, 1)
+                    or (e.GetFormalCharge(), e.GetTotalNumHs()) != (1, 2)):
+                continue
+            # Restrict this exception to an acyclic aliphatic secondary amine;
+            # amides, aromatic/conjugated nitrogens and other ionizations fail.
+            if any(n.GetDegree() != 2 or n.IsInRing() or n.GetIsAromatic()
+                   or n.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED for n in (k, e)):
+                continue
+            if any(b.GetBondType() != Chem.BondType.SINGLE for n in (k, e) for b in n.GetBonds()):
+                continue
+            neighbors = [a for n in (k, e) for a in n.GetNeighbors()]
+            if any(a.GetAtomicNum() != 6 or a.GetIsAromatic() for a in neighbors):
+                continue
+            if any(b.GetBondType() != Chem.BondType.SINGLE and b.GetOtherAtom(a).GetAtomicNum() in (7, 8, 16)
+                   for a in neighbors for b in a.GetBonds()):
+                continue
+            # The other N substituent must be saturated. Only conjugation at
+            # the already proven alpha carbon belongs to this local rule.
+            other = [a for a in atom.GetNeighbors() if a.GetIdx() != alpha]
+            if any(b.GetBondType() != Chem.BondType.SINGLE for a in other for b in a.GetBonds()):
+                continue
+            candidates.append(i)
+        if len(candidates) == 1:
+            allowed.extend(candidates)
+    return tuple(sorted(set(allowed)))
+
+
+def _verify(original, target, mapping, sites, protonated_amines=()):
+    reactive = {i for site in sites for i in site} | set(protonated_amines)
+    # Only the proven oxygen/alpha changes and paired alpha-amine protonation
+    # are authorized. All other atom signatures must remain identical.
     for i, j in enumerate(mapping):
         a, b = original.GetAtomWithIdx(i), target.GetAtomWithIdx(j)
         if i not in reactive and _signature(a) != _signature(b):
@@ -86,7 +129,7 @@ def _verify(original, target, mapping, sites):
     # Normalize copies at the proven reaction sites only. Keep all other stereo,
     # including E/Z, and require the exact proposed bijection in both directions.
     left, right = Chem.RWMol(original), Chem.RWMol(target)
-    for site in sites:
+    for site in list(sites) + [(i,) for i in protonated_amines]:
         for i in site:
             a, b = left.GetAtomWithIdx(i), right.GetAtomWithIdx(mapping[i])
             a.SetFormalCharge(b.GetFormalCharge())
@@ -140,9 +183,10 @@ def map_keto_enol(original, target, core_indices, *, timeout):
         if not sites:
             continue
         recognized = True
-        if not _verify(original, target, mapping, sites):
+        amines = _protonated_amines(original, target, mapping, sites)
+        if not _verify(original, target, mapping, sites, amines):
             continue
-        reactive = {i for site in sites for i in site}
+        reactive = {i for site in sites for i in site} | set(amines)
         if reactive & set(core_indices):
             raise ValueError('Elite keto/enol conversion overlaps the declared reference core')
         cut = Chem.RWMol(original)
@@ -158,10 +202,11 @@ def map_keto_enol(original, target, core_indices, *, timeout):
         distance = sum((original.GetConformer().GetAtomPosition(i) -
                         target.GetConformer().GetAtomPosition(j)).LengthSq()
                        for i, j in enumerate(mapping))
-        candidates.append((distance, mapping, keep, sites))
+        candidates.append((distance, mapping, keep, sites, amines))
     if not candidates:
         if recognized:
             raise ValueError('Elite keto/enol mapping changes unrelated chemistry or stereochemistry')
         return None
-    _, mapping, keep, sites = min(candidates)
-    return dict(mapping=mapping, core=keep, sites=sites, policy=POLICY)
+    _, mapping, keep, sites, amines = min(candidates)
+    return dict(mapping=mapping, core=keep, sites=sites, protonated_amines=amines,
+                policy=AMINE_POLICY if amines else POLICY)

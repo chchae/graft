@@ -214,7 +214,62 @@ stopped native job or supervisor was automatically restarted.
 
 
 
+## Partial elite parent-pose matching (2026-11-19)
+
+**Confirmed user request:** when the full original molecule cannot match its
+saved docking pose, allow a matching part or MCS instead. This supersedes the
+full-equivalence rejection below for new parent bindings: a failed local
+keto/enol proof may proceed to partial matching without asserting equivalence
+of the omitted chemistry. Keep original molecules, poses, scores and ancestry.
+
+**Implementation choice:** retain the full-parent and proven local-state fast
+paths. Otherwise validate the original declared reference-core fragment in both
+structures, then seed a bounded, exact-bond/ring/stereo MCS search with that core.
+Convert accepted MCS atom sets into connected original-fragment SMARTS and
+verify matched atom elements, isotopes, H counts, charges, aromaticity, radicals
+and query stereochemistry. Every accepted original mapping must include every
+declared core UID. If MCS is empty, cancelled or unusable, use the independently
+validated exact declared-core fragment; never label a cancelled search as a
+maximum. Missing/changed/disconnected cores and mapping/symmetry limits still
+fail. Retain the equal-heavy-atom identity guard, receptor-frame displacement
+selection, native reference indices and constrained SP docking without fallback.
+
+Save partial_mapping with policy reference_core_seeded_mcs_v1 or
+declared_reference_core_partial_v1, matched/original counts, omitted original
+indices and any rejected full-state proof. Log the partial counts and retained
+core. Saved generation plans keep their frozen references and fingerprints.
+
+**Verification:** read-only replay of all 500 selected iter8 parents accepts
+494 full matches, two proven alpha-amine local pairs and four seeded partial
+MCS mappings. CMPID_256496 maps 27/72 atoms, retaining its 17-atom declared core.
+The existing supervisor subsequently entered iter8 CReM generation from all 500
+parents. No manual DB reset, elite replacement or native job restart was used.
+This is graph/workflow evidence, not scientific accuracy or completed generation.
+
+
 ## Local keto/enol parent-pose mapping (2026-11-18)
+
+**Confirmed follow-up (2026-11-19):** allow the observed local zwitterion pair
+in CMPID_258505 and CMPID_267607. An acyclic aliphatic secondary amine directly
+bonded to the proven alpha carbon may change from neutral NH to NH2-plus only
+on the enolate side with O-minus. Verify one added N hydrogen and one positive
+charge; allow at most one such amine per local site, in either mapping direction.
+Exclude amides, aromatic/conjugated nitrogens and all unrelated ionizations.
+Remove that nitrogen as well as the three keto/enol atoms from the unchanged
+connected query, retaining every declared reference-core atom. Persist
+local_keto_enol_alpha_amine_shared_core_v1 and the changed parent N indices;
+log the paired protonation explicitly. This narrowly extends the rule below;
+all other chemistry/stereo, original structures, poses, scores and saved plans
+remain protected. Regression fixtures retain both actual molecular pairs.
+
+**Follow-up verification:** both retained pairs pass forward/reverse mappings
+with explicit H and reordered atoms. A read-only replay of all 500 selected
+iter8 parents accepts 499, including both new local pairs; CMPID_256496 still
+fails the separate legacy MCS reference-core retention check, also observed in
+the production worker. It has a ring tautomer and an independent amine charge
+change outside this extension. No elite was excluded and no saved molecule,
+pose, score, plan or job was reset. Graph checks do not validate scientific
+energies or new native calculation results.
 
 **Confirmed user request:** handle keto/enol and the associated limited
 protonation difference during elite pose binding, preserving original structures,

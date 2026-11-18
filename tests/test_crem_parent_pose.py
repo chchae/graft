@@ -104,16 +104,10 @@ def test_ring_stereo_survives_hydrogen_query_relaxation(smiles, monkeypatch):
     assert not inverted.HasSubstructMatch(query, useChirality=True)
 
 
-@pytest.mark.parametrize('problem', ['timeout', 'incompatible', 'nonfinite'])
+@pytest.mark.parametrize('problem', ['incompatible', 'nonfinite'])
 def test_parent_reference_failure_has_no_iter0_fallback(parent, monkeypatch, problem):
     row, mol = parent
-    if problem == 'timeout':
-        from graft.chemistry.combichem3d import parent_pose
-        mol = Chem.Mol(mol)
-        mol.GetAtomWithIdx(0).SetAtomicNum(7)
-        Chem.SanitizeMol(mol)
-        monkeypatch.setattr(parent_pose.rdFMCS, 'FindMCS', lambda *a, **k: SimpleNamespace(canceled=True))
-    elif problem == 'incompatible':
+    if problem == 'incompatible':
         mol = Chem.MolFromSmiles('CCCC')
         AllChem.EmbedMolecule(mol, randomSeed=37)
     else:

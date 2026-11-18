@@ -64,7 +64,7 @@ def shared_project(project, monkeypatch):
     return args,root,group,launches,plan
 
 
-def test_pool_uses_global_cpu_budget_and_multiple_concurrent_claims(shared_project):
+def test_pool_uses_global_cpu_budget_and_multiple_concurrent_claims(shared_project, capsys):
     args,root,group,launches,plan = shared_project
     shared.service_pass(args,1,root,'merger',lambda *a:None)
     tasks=database.glide_license_retries(args.db_path,1)
@@ -73,6 +73,13 @@ def test_pool_uses_global_cpu_budget_and_multiple_concurrent_claims(shared_proje
     assert sum(t['state']=='pending' for t in tasks)==1
     assert all(c[c.index('-HOST')+1]=='slurm-cpu:1' for _,c,_ in launches)
     assert all(c[c.index('-NJOBS')+1]=='1' for _,c,_ in launches)
+    submission_lines = [line for line in capsys.readouterr().out.splitlines() if 'submitting task' in line]
+    assert len(submission_lines) == 2
+    for task in tasks:
+        if task['state'] == 'running':
+            # CMPID_2 has two prepared states but is one original compound.
+            assert (f'Glide shared pool: submitting task {task["id"]}, reference 10, compounds=1.'
+                    in submission_lines)
     shared.service_pass(args,1,root,'merger',lambda *a:None)
     assert len(launches)==2
     with pytest.raises(RuntimeError,match='plan changed'):

@@ -203,7 +203,8 @@ def service_pass(args, iteration, root, merger, merge_best, legacy_jobs=(), extr
                         break
                     folder = attempt_directory(root, task)
                     folder.mkdir(parents=True, exist_ok=True)
-                    work_started(f'Glide shared pool: submitting task {task["id"]}, reference {task["reference_id"]}.')
+                    work_started(f'Glide shared pool: submitting task {task["id"]}, reference {task["reference_id"]}, '
+                                 f'compounds={len(set(task["payload"]["ids"]))}.')
                     prepared = retry._helper(args, folder, dict(action='prepare', payload=task['payload'], output=str(folder.resolve())))
                     c.submit_glide(args.schrodinger, Path(prepared['input']), folder, host+':1',
                                    memory_mb=GLIDE_SLURM_MEMORY_MB if getattr(args, 'use_slurm', False) else None,

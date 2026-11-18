@@ -32,6 +32,102 @@ def actual_parent():
     return row, original, Chem.MolFromMolBlock(data['docked_molblock'])
 
 
+@pytest.fixture(params=[258505, 267607])
+def alpha_amine_parent(request):
+    data = json.loads((Path(__file__).parent/f'data/parent_tautomer/cmpid_{request.param}.json').read_text())
+    row, original = parent_row(Chem.MolFromMolBlock(data['original_molblock']), data['core_indices'])
+    row['compound_id'] = request.param
+    return row, original, Chem.MolFromMolBlock(data['docked_molblock'])
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('explicit_reordered', [False, True])
+def test_actual_alpha_amine_zwitterion_preserves_chemistry_and_core(alpha_amine_parent, monkeypatch, reverse, explicit_reordered):
+    row, original, docked = alpha_amine_parent
+    if reverse:
+        original, docked = docked, original
+        row, original = parent_row(original, original.GetSubstructMatch(Chem.MolFromSmarts('c1ncnc2[nH]ccc12')))
+    if explicit_reordered:
+        docked = Chem.AddHs(docked, addCoords=True)
+        docked = Chem.RenumberAtoms(docked, list(reversed(range(docked.GetNumAtoms()))))
+    saved = copy.deepcopy(row)
+    pose_block = Chem.MolToMolBlock(docked)
+    no_mcs(monkeypatch)
+    bound = parent_pose.constrain_parent(row, docked, timeout=5)
+    reference = bound['docking_reference']
+    proof = reference['tautomer_mapping']
+    assert proof['policy'] == parent_tautomer.AMINE_POLICY
+    assert (proof['original_charge'], proof['pose_charge']) == (0, 0)
+    assert len(proof['parent_atom_indices']) == original.GetNumAtoms()
+    assert len(set(proof['reference_atom_indices'])) == original.GetNumAtoms()
+    assert len(proof['protonated_amine_parent_atom_indices']) == 1
+    changed = set(proof['protonated_amine_parent_atom_indices']) | {
+        i for site in proof['reactive_parent_atom_indices'] for i in site}
+    assert len(changed) == 4
+    assert not changed & set(reference['parent_atom_indices'])
+    query = Chem.MolFromSmarts(reference['mcs_smarts'])
+    assert len(Chem.GetMolFrags(query)) == 1
+    assert tuple(reference['parent_atom_indices']) in original.GetSubstructMatches(query, uniquify=False, useChirality=True)
+    assert tuple(i-1 for i in reference['reference_atom_indices']) in docked.GetSubstructMatches(query, uniquify=False, useChirality=True)
+    assert {r['uid'] for r in row['history']['core']} <= {r['uid'] for r in bound['history']['constraint_core']}
+    for entry, index in zip(bound['history']['constraint_core'], reference['reference_atom_indices']):
+        assert entry['xyz'] == pytest.approx(list(docked.GetConformer().GetAtomPosition(index-1)))
+    assert Chem.MolToSmiles(Chem.MolFromMolBlock(bound['molblock'])) == Chem.MolToSmiles(original)
+    assert row == saved
+    assert Chem.MolToMolBlock(docked) == pose_block
+    assert bound['history']['constraint_reference'] == reference
+
+
+@pytest.mark.parametrize('problem', ['neutral_enol', 'inverted', 'lost_stereo', 'isotope', 'extra_charge', 'core'])
+def test_alpha_amine_exception_refuses_other_changes(alpha_amine_parent, monkeypatch, problem):
+    row, original, docked = alpha_amine_parent
+    if problem == 'neutral_enol':
+        oxygen = next(a for a in docked.GetAtoms() if a.GetFormalCharge() == -1)
+        oxygen.SetFormalCharge(0)
+        oxygen.SetNumExplicitHs(1)
+        Chem.SanitizeMol(docked)
+    elif problem in ('inverted', 'lost_stereo'):
+        atom = next(a for a in docked.GetAtoms() if a.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED)
+        if problem == 'inverted':
+            atom.InvertChirality()
+        else:
+            atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+    elif problem == 'isotope':
+        next(a for a in docked.GetAtoms() if a.GetFormalCharge() == 1).SetIsotope(15)
+    elif problem == 'extra_charge':
+        atom = next(a for a in docked.GetAtoms() if a.GetAtomicNum() == 7 and a.GetDegree() == 3)
+        atom.SetFormalCharge(1)
+        atom.SetNumExplicitHs(1)
+        Chem.SanitizeMol(docked)
+    else:
+        # A protonated amine must be excluded from the shared core too.
+        amine = next(a.GetIdx() for a in original.GetAtoms() if a.GetAtomicNum() == 7
+                     and any(n.GetIdx() == 36 for n in a.GetNeighbors()))
+        row['history']['core'].append(dict(core_index=17, uid=f'a{amine}', xyz=[0, 0, 0]))
+    no_mcs(monkeypatch)
+    with pytest.raises(ValueError, match='keto/enol'):
+        parent_tautomer.map_keto_enol(original, docked,
+            {int(r['uid'][1:]) for r in row['history']['core']}, timeout=5)
+
+
+@pytest.mark.parametrize(('keto', 'enolate'), [
+    # A second ammonium cannot be compensated by the one enolate oxygen.
+    ('CNC(NC)C(=O)c1ccccc1', 'C[NH2+]C([NH2+]C)=C([O-])c1ccccc1'),
+    # An adjacent amide is outside the secondary-amine exception.
+    ('CC(=O)NC(C)C(=O)c1ccccc1', 'CC(=O)[NH2+]C(C)=C([O-])c1ccccc1'),
+    # An aniline nitrogen is outside the aliphatic-amine exception.
+    ('c1ccccc1NC(C)C(=O)c1ccccc1', 'c1ccccc1[NH2+]C(C)=C([O-])c1ccccc1'),
+    # Conjugation on the other N substituent is not the proven local change.
+    ('C=CNC(C)C(=O)c1ccccc1', 'C=C[NH2+]C(C)=C([O-])c1ccccc1'),
+])
+def test_alpha_amine_exception_has_bounded_chemistry(keto, enolate):
+    original = Chem.MolFromSmiles(keto)
+    _, original = parent_row(original, [])
+    _, target = parent_row(Chem.MolFromSmiles(enolate), [])
+    with pytest.raises(ValueError, match='unrelated chemistry'):
+        parent_tautomer.map_keto_enol(original, target, set(), timeout=5)
+
+
 def no_mcs(monkeypatch):
     monkeypatch.setattr(parent_pose.rdFMCS, 'FindMCS',
                         lambda *a, **k: pytest.fail('Proven local tautomer must avoid global MCS'))
@@ -111,7 +207,8 @@ def test_local_mapping_refuses_unrelated_changes(actual_parent, monkeypatch, pro
         row['history']['core'].append(dict(core_index=17, uid='a36', xyz=[0, 0, 0]))
     no_mcs(monkeypatch)
     with pytest.raises(ValueError, match='keto/enol'):
-        parent_pose.constrain_parent(row, docked, timeout=5)
+        parent_tautomer.map_keto_enol(original, docked,
+            {int(r['uid'][1:]) for r in row['history']['core']}, timeout=5)
 
 
 def test_symmetry_limit_and_timeout_fail_closed(actual_parent, monkeypatch):
