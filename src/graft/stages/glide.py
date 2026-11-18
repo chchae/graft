@@ -25,6 +25,7 @@ from graft.stages._logging import work_started, timed_stage, format_elapsed, cur
 from graft.states import CompoundState as State
 from graft.glide_recovery import group_status, load_record, record_file, discard_terminal_results
 from graft.glide_recovery import timeout_pose_files, save_record, output_paths, has_timeouts
+from graft.glide_recovery import GlideResultsPending
 from graft.schrodinger_guard import active_jobs, belongs_to_directory, SubmissionBlocked, job_details, TERMINAL
 from graft.schrodinger_guard import native_error_message, JobStatusUnavailable
 
@@ -220,8 +221,12 @@ def merge_current_best(args, glide_root, merger):
 
 
 def process_completed_job(iteration, args, job, extractor, merger, glide_root):
+    from graft.stages.glide_license_retry import inspect_group
+    inspect_group(args, iteration, job['group_dir'])
     if has_timeouts(load_record(job['group_dir'])):
-        return process_timeout_job(iteration, args, job, merger, glide_root)
+        result = process_timeout_job(iteration, args, job, merger, glide_root)
+        inspect_group(args, iteration, job['group_dir'])
+        return result
     started = time.monotonic()
     score_file, best_file = c.extract_scores_and_best_poses(
         args.schrodinger, extractor, job["output_file"], job["group_dir"]
@@ -269,6 +274,8 @@ def process_completed_job(iteration, args, job, extractor, merger, glide_root):
 
 def process_timeout_job(iteration, args, job, merger, glide_root):
     directory = job['group_dir']
+    from graft.stages.glide_license_retry import inspect_group
+    inspect_group(args, iteration, directory)
     record = load_record(directory)
     if not has_timeouts(record):
         raise RuntimeError('Glide timeout recovery has no durable native identity')
@@ -280,10 +287,10 @@ def process_timeout_job(iteration, args, job, merger, glide_root):
         if subjobs:
             native = job_details(args.schrodinger, record['job_id'], directory)
             if any(row.get('status') not in TERMINAL for row in native):
-                raise RuntimeError('Glide subjob result collection waits for parent and children')
+                raise GlideResultsPending('Glide subjob result collection waits for parent and children')
             parent = next(row for row in native if row['jobId'] == record['job_id'])
             if parent['status'] != 'DONE' or not record.get('downloaded'):
-                raise RuntimeError('Glide parent must finish merging and download before subjob result collection')
+                raise GlideResultsPending('Glide parent must finish merging and download before subjob result collection')
             log_file, output_file = output_paths(directory)
             archive = directory / f'{log_file.stem}_subjobs.tar.gz'
             sources = [output_file] if output_file.exists() and output_file.stat().st_size else []
@@ -376,20 +383,20 @@ def try_timeout_collection(iteration, args, job, merger, glide_root):
     """Keep native retrieval uncertainty local; scientific validation still raises."""
     try:
         process_timeout_job(iteration, args, job, merger, glide_root)
-    except JobStatusUnavailable as exc:
+    except (JobStatusUnavailable, GlideResultsPending) as exc:
         print(f'[WARNING] Glide {job["group_dir"].name}: timeout result recovery unavailable; '
               f'keeping pending for retry: {native_error_message(exc)}', flush=True)
         return False
     return True
 
 
-def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root, *, skip_active=False):
+def collect_finished_groups(iteration, args, jobs, extractor, merger, glide_root, *, skip_active=False, native_snapshot=None):
     """Publish each verified finished group without waiting for its peers."""
     if not jobs:
         return [], 0
     started = time.monotonic()
     try:
-        live = active_jobs(args.schrodinger)
+        live = active_jobs(args.schrodinger) if native_snapshot is None else native_snapshot
     except (RuntimeError, subprocess.SubprocessError, OSError, ValueError) as exc:
         # Collection owns durable group identities and may query those directly.
         # An unavailable global snapshot never authorizes a new submission.
@@ -654,7 +661,15 @@ def _run_stage(args, ns):
 
     iteration = ns.iteration or c.find_iteration_for_state("glide", args.db_path)
     if iteration is None:
+        from graft.glide_local_cleanup import pending_iteration
+        iteration = pending_iteration(args.output)
+    if iteration is None:
         print("No iteration requires Glide.")
+        return
+
+    from graft.glide_local_cleanup import resume_cleanup
+    if resume_cleanup(args, iteration):
+        print(f"Iteration {iteration}: Prime Glide results already collected locally.")
         return
 
     reason = database.upstream_completion_reason(
@@ -664,12 +679,16 @@ def _run_stage(args, ns):
         print(f"Iteration {iteration}: Glide waiting: {reason}.")
         return
 
+    from graft.glide_local import configure_backend
+    configure_backend(args, iteration)
+
     from graft.chemistry.scaffold import prepare_iteration_scaffold
     prepare_iteration_scaffold(args, iteration, include_generation=False)
     args.glide_pose_point = pose_selection_point(args, iteration)
     args.crem_docking_references = database.crem_glide_references(args.db_path, iteration)
 
-    glide_root = stage_directory(args.output, iteration, 'glide')
+    glide_root = stage_directory(args.output, iteration, 'glide').resolve()
+    from graft.stages import glide_license_retry
     ligprep_file = stage_directory(args.output, iteration, 'ligprep') / 'ligprep.maegz'
     signature = glide_root/'ligprep_input.sha256'
     if (signature.is_file() and ligprep_file.is_file()
@@ -679,13 +698,21 @@ def _run_stage(args, ns):
 
     # Assign nearest reference for any still-undocked compounds.
     c.assign_reference_compounds(iteration, args)
-    recover_timeout_groups(args, iteration, stage_directory(args.output, iteration, 'glide'))
+    recover_timeout_groups(args, iteration, stage_directory(args.output, iteration, 'glide').resolve())
+    glide_license_retry.inspect_downloaded(args, iteration, glide_root)
     groups = query_groups(iteration, args.db_path)
+    if getattr(args, 'glide_shared_queue', False):
+        owned = database.glide_shared_references(args.db_path, iteration)
+        groups = {ref: rows for ref, rows in groups.items() if ref not in owned}
     fresh_references = database.fresh_glide_references(args.db_path, iteration)
 
     groups = _claim_reference_groups(args.db_path, groups)
     if not groups:
         print(f"Iteration {iteration}: no Glide-pending compounds.")
+        needs_merge = (database.glide_license_retries(args.db_path, iteration) or
+                       database.glide_shared_publication(args.db_path, iteration))
+        merger = c.create_best_pose_merger(glide_root) if needs_merge else None
+        glide_license_retry.run_tail(args, iteration, glide_root, merge_current_best, merger)
         return
 
     work_started(f"Iteration {iteration}: processing Glide for {len(groups)} reference groups.")
@@ -696,7 +723,7 @@ def _run_stage(args, ns):
     if not ligprep_file.exists():
         raise FileNotFoundError(f"LigPrep output not found: {ligprep_file}")
 
-    glide_root = stage_directory(args.output, iteration, 'glide')
+    glide_root = stage_directory(args.output, iteration, 'glide').resolve()
     glide_root.mkdir(parents=True, exist_ok=True)
     live = active_jobs(args.schrodinger)
     prepare_glide_files(glide_root, ligprep_file, live, args.schrodinger)
@@ -713,6 +740,16 @@ def _run_stage(args, ns):
         args, iteration, groups, group_ligand_files, glide_root,
         fresh_references, live, score_extractor, merger,
     )
+
+    if getattr(args, 'glide_shared_queue', False):
+        from graft.stages import glide_shared
+        if unsubmitted:
+            inputs = prepare_new_inputs(args, unsubmitted, glide_root)
+            glide_shared.enroll(args, iteration, unsubmitted, inputs,
+                               iteration_batch_size(args.db_path, iteration))
+        return glide_shared.service(args, iteration, glide_root, merger, merge_current_best,
+                                    legacy_jobs=jobs, extractor=score_extractor,
+                                    collect_legacy=collect_finished_groups)
 
     counts_file = glide_root / 'ligprep_counts.json'
     structure_counts = json.loads(counts_file.read_text()) if counts_file.exists() else {}
@@ -773,6 +810,8 @@ def _run_stage(args, ns):
 
     if not jobs:
         print("No running Glide jobs remain.")
+        glide_license_retry.inspect_downloaded(args, iteration, glide_root)
+        glide_license_retry.run_tail(args, iteration, glide_root, merge_current_best, merger)
         return
 
     total = len(jobs) + collected_during_submission
@@ -784,6 +823,9 @@ def _run_stage(args, ns):
     while pending:
         pending, finished = collect_finished_groups(iteration, args, pending, score_extractor, merger, glide_root)
         terminal += finished
+        # The collector has returned ownership of pose publication to this
+        # thread. Backfill license retries now, even while originals remain.
+        glide_license_retry.run_tail(args, iteration, glide_root, merge_current_best, merger)
         if not pending:
             break
 
@@ -799,6 +841,8 @@ def _run_stage(args, ns):
         time.sleep(args.poll_interval)
 
     merge_current_best(args, glide_root, merger)
+    glide_license_retry.inspect_downloaded(args, iteration, glide_root)
+    glide_license_retry.run_tail(args, iteration, glide_root, merge_current_best, merger)
 
 
 def main(argv=None):
@@ -813,6 +857,8 @@ def main(argv=None):
     args = c.configure_project(ns.project_toml, ns.schrodinger)
     with database.stage_lock(args.db_path, "glide"):
         _run_stage(args, ns)
+        from graft.glide_local_cleanup import collect_and_cleanup
+        collect_and_cleanup(args)
 
 
 if __name__ == "__main__":

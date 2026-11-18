@@ -11,6 +11,10 @@ import tomllib
 
 SCHRODINGER_LICENSE_SERVERS = 'virusgpu1:53000;atlas:53000'
 GLIDE_SLURM_MEMORY_MB = 2048
+GLIDE_LICENSE_RETRY_DELAY_SECONDS = 60
+GLIDE_LICENSE_RETRY_CPUS = 1
+GLIDE_SHARED_CPU_RESERVATION = 1  # NJOBS=1 is a serial native job (verified with 2026-1).
+GLIDE_SHARED_TARGET_SECONDS = 300
 
 
 def schrodinger_environment():
@@ -635,6 +639,26 @@ def glide_job_timeout(config: dict[str, Any]) -> int:
     return value
 
 
+def glide_local_settings(config: dict[str, Any]) -> dict[str, Any]:
+    enabled = config.get('glide_local', config.get('glide-local', False))
+    if 'glide_local' in config and 'glide-local' in config and config['glide_local'] != config['glide-local']:
+        raise ValueError('glide_local and glide-local disagree')
+    if any(key in config and not isinstance(config[key], bool) for key in ('glide_local', 'glide-local')):
+        raise ValueError('glide_local must be a boolean')
+    host = config.get('glide-local-host', 'prime')
+    if (not isinstance(host, str) or not host or host.startswith('-') or ':' in host
+            or any(c.isspace() for c in host)):
+        raise ValueError('Invalid glide-local-host')
+    result = dict(glide_local=enabled, glide_local_host=host)
+    for key, default in [('work-dir', '/home1/prime_share'),
+                         ('schrodinger', '/home/schrodinger/default')]:
+        value = config.get('glide-local-'+key, default)
+        if not isinstance(value, str) or not value.startswith('/') or any(c in value for c in '\n\r'):
+            raise ValueError('glide-local-'+key+' must be an absolute remote/shared path')
+        result['glide_local_'+key.replace('-', '_')] = value
+    return result
+
+
 def schrodinger_stage_hosts(config: dict[str, Any]) -> dict[str, str]:
     """Route new preparation/docking jobs; saved native commands stay pinned."""
     slurm = config.get('use-slurm', False)
@@ -970,6 +994,7 @@ def load_project_toml(path: str | Path) -> dict[str, Any]:
     from graft.config import prime_gbsa_local_settings, submission_installation, attraction_point_settings
     return debug_settings(config, {
         **attraction_point_settings(config),
+        **glide_local_settings(config),
         **prime_gbsa_local_settings(config),
         **distribution_settings(config),
         **md_gbsa_settings(config, base),
@@ -999,6 +1024,9 @@ def load_project_toml(path: str | Path) -> dict[str, Any]:
         "host": str(config["host"]),
         "tail_timeout": int(config.get("tail-timeout", 300)),
         "glide_job_timeout": glide_job_timeout(config),
+        "glide_shared_queue": bool(config.get('glide-cpus') or all(
+            re.fullmatch(r'[^:]+:[1-9][0-9]*', entry) for entry in
+            schrodinger_stage_hosts(config)['glide_host'].split())),
         "elite_count": int(config.get("elite-count", 30)),
         "elite_best_count": int(config.get("elite-best-count", 10)),
         "elite_diverse_count": int(config.get("elite-diverse-count", 20)),

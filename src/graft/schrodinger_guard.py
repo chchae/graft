@@ -136,8 +136,27 @@ def unregister_md_remote(settings):
             from graft.md_gbsa_native import save
             save(registry,saved)
 
+def local_glide_registry():
+    return Path.home() / '.cache' / 'graft' / 'glide-local-clients.json'
+
+
 def active_jobs(suite):
-    rows = _local_active_jobs(suite)
+    from graft.glide_local import backend_settings
+    backend = backend_settings(suite)
+    rows = _local_active_jobs(backend['local_suite'] if backend else suite)
+    clients = local_glide_registry()
+    saved = json.loads(clients.read_text()) if clients.exists() else []
+    if backend and str(Path(suite).resolve()) not in saved:
+        saved.append(str(Path(suite).resolve()))
+    inspected = set()
+    for client in saved:
+        remote = backend_settings(client)
+        if remote is None:
+            raise JobStatusUnavailable('Registered Prime Glide client missing; submissions withheld')
+        identity = (remote['host'], remote['remote_suite'])
+        if identity not in inspected:
+            rows.extend(_local_active_jobs(client))
+            inspected.add(identity)
     registry = _md_registry()
     if registry.exists():
         from graft.md_gbsa import remote_call, response
@@ -151,7 +170,20 @@ def active_jobs(suite):
 def belongs_to_directory(job, directory):
     launch = job.get('spec', {}).get('launchParams', {}).get('launchDirectory')
     if launch:
-        return Path(launch).resolve() == Path(directory).resolve()
+        if Path(launch).resolve() == Path(directory).resolve():
+            return True
+        # Prime's shared mount can have a different canonical path (e.g.
+        # /home1/prime_share -> /home/prime_share). Compare the pinned roots.
+        from graft.glide_local import backend_settings
+        registry = local_glide_registry()
+        clients = json.loads(registry.read_text()) if registry.exists() else []
+        for client in clients:
+            backend = backend_settings(client)
+            if backend and Path(launch).is_relative_to(backend['remote_root']):
+                relative = Path(launch).relative_to(backend['remote_root'])
+                if (Path(backend['shared_root']) / relative).resolve() == Path(directory).resolve():
+                    return True
+        return False
     return str(Path(directory).resolve()) + '/' in job.get('commandLine', '')
 
 

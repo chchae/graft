@@ -873,6 +873,35 @@ Run `graft run egfr.toml --iteration 1` to supervise the full iteration, or
 The receptor path is local and relative to TOML; environment/work/init paths
 belong to t41. Optional `amber-ssh-config` points to a local SSH config.
 
+To run new Glide iterations on the Prime server's local CPUs, add:
+
+```toml
+glide_local = true
+glide-cpus = 32
+# glide-local-host = "prime"
+# glide-local-schrodinger = "/home/schrodinger/default"
+# glide-local-work-dir = "/home1/prime_share"
+```
+
+`glide_local` defaults to false (`glide-local` is also accepted). This overrides
+Glide's Slurm/host destination only; LigPrep, Amber and Prime MM-GBSA retain their
+own settings. Prime receives native `localhost` jobs without Slurm queue options.
+`glide-cpus` sets the shared concurrency budget; omission uses one CPU.
+Passwordless SSH and a work directory visible at the configured path on both
+machines are required. The worker verifies shared-file visibility before work.
+While calculations run, the iteration's `06-glide` symlink exposes shared files.
+After all native trees are terminal and SQLite queues/results are committed,
+the worker copies the full stage back to the local output folder, verifies its
+checksums, and deletes that run's shared data. A durable receipt resumes an
+interrupted publication/deletion without resubmitting work. Active or uncertain
+work remains in the share. Local server-monitor metadata preserves cross-project
+submission exclusion after shared cleanup.
+An existing nonempty Glide iteration retains its original backend. A new Prime
+iteration pins its host, installation, CPU budget and grid snapshot, including
+when the flag/configuration is changed on restart. JobIds, terminal-tree checks,
+license admission, pose validation and cross-project Glide/Prime exclusion remain
+in effect. Do not move or clear existing jobs to switch execution locations.
+
 Set `use-slurm = true` to submit new **LigPrep and Glide** jobs through native
 `slurm-cpu` and run **Amber** arrays on the `slurm` SSH host's `cpu` partition.
 LigPrep and Glide keep their `ligprep-cpus`/`glide-cpus` budgets; Glide divides

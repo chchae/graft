@@ -2878,7 +2878,7 @@ CORE_POS_MAX_RMSD 1.0
 
 
 def submit_glide(schrodinger, glide_input, group_dir, host, cpus=None, *, ligand_count=None,
-                 molecules_per_job=50, memory_mb=None):
+                 molecules_per_job=50, memory_mb=None, submitter=None):
     """Submit a Glide job and return immediately; intentionally no -WAIT."""
     from graft.config import glide_job_options, schrodinger_job_options
     options = (glide_job_options(host, ligand_count, cpus, molecules_per_job=molecules_per_job)
@@ -2901,7 +2901,7 @@ def submit_glide(schrodinger, glide_input, group_dir, host, cpus=None, *, ligand
     print("$", command_display(cmd))
 
     from graft.glide_recovery import submit
-    job_id = submit(schrodinger, cmd, group_dir)
+    job_id = (submitter or submit)(schrodinger, cmd, group_dir)
 
     return {
         "job_id": job_id,

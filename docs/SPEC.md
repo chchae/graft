@@ -1,5 +1,219 @@
 # Graft specification
 
+## Optional Prime-server local Glide (2026-11-18)
+
+**Confirmed user request:** `glide_local = true` executes Glide on the Prime
+server, whose installation is `/home/schrodinger/default` and local JobServer
+reports localhost:40813. The user confirms `/home1/prime_share` is shared
+with Prime. Omission/false preserves existing execution.
+
+**Implementation choices:** the independent SQLite-owning Glide worker retains
+input preparation, scientific validation, shared batch admission, immediate
+publication and durable JobId recovery. Only native Glide/jsc commands use SSH
+to `prime`; compute HOST is localhost and no Slurm QARGS are added. Optional
+`glide-local-host`, `glide-local-schrodinger`, `glide-local-work-dir` configure
+transport; the shared work directory defaults to `/home1/prime_share` and is
+verified before use. `glide-cpus` supplies concurrency (one CPU if omitted).
+An iteration symlink exposes its shared Glide results at the normal stage path.
+The saved backend pins transport, CPU budget and a copied grid. Nonempty legacy
+iterations keep their original backend; never move live/uncertain submissions.
+Saved Prime iterations recover there even if the flag is later disabled.
+Persistent remote-client registration includes Prime Glide in cross-project
+Glide/Prime admission checks, including shared-mount canonical-path aliases.
+
+**Confirmed follow-up:** delete shared data after calculations finish and results
+are collected. Verify SQLite docking/queue/publication barriers, every saved
+native tree and orphaned active jobs before collection. Copy the complete stage
+to local output, verify checksums and sync files, then publish it in place of the
+stage symlink before deleting only that owned shared run. A durable local receipt
+replays interrupted publication/retirement/deletion without new scientific jobs.
+A local server monitor preserves cross-project exclusion after deleting the
+shared client. Supervisor/standalone discovery revisits pending cleanup even
+after compound scores are committed, including a publication gap without the
+stage directory. Pending, active, unknown or uncommitted work stays in the share;
+other projects and local results/DB are preserved.
+
+**Verification scope:** configuration/transport/restart/fence regression tests
+plus read-only native preflight on Prime verify localhost registration, running
+JobServer, shared-file visibility and local preparation-client execution. An
+isolated dummy-file run verified actual shared-folder publication/deletion and
+post-cleanup monitoring. Regression tests cover SQLite/publication barriers,
+live/unknown/orphaned jobs, corrupted copies, neighbor preservation and restart
+after publication/retirement interruptions. No scientific job is submitted by
+these checks; they do not establish docking accuracy, runtime behavior under
+load, or scientific equivalence across versions.
+
+**Verification:** full suite: 3,081 passed, eight skipped. Focused transport,
+cleanup, restart and supervision regressions pass after the final registration
+replay correction. Editable installation, compileall, package/CLI imports and
+diff whitespace checks pass; existing multiprocessing warnings remain.
+
+
+## Explicit latest Glide restart maintenance (2026-11-18)
+
+**Confirmed user request:** stop the current EGFR Glide work and prepare its
+output/database so restarting the program begins again at Glide. This is an
+explicit maintenance exception to normal result-preserving restart behavior;
+never run this reset automatically. The operator holds driver/stage locks,
+verifies every native parent and child is terminal, archives the Glide directory,
+and uses SQLite backup before resetting only the latest non-reference iteration.
+Refuse incomplete upstream processing, downstream scores or frozen selections,
+and later iterations. Keep original identities, reference assignments, upstream
+science and all earlier iterations. Clear that iteration's Glide score/failure,
+queue/audit/timeout/publication/runtime records and Glide timing; restore its
+compounds to ligprepped. Tests cover backup preservation, queue cleanup and guard
+failures; focused database/queue/maintenance suite: 59 passed.
+
+**Operational evidence:** EGFR iteration 7 had 65 terminal parents (63 DONE,
+two STOPPED) and no live descendants. Its 50,000 compounds were explicitly reset
+after a full database backup and archive of 06-glide. The separately running
+orca PGDH15 glide-kcb-b job was identified through license Host/JobId/Pid and
+its native launch directory; it does not belong to this EGFR project and was
+left running. Its checkouts must not be mistaken for stale EGFR licenses.
+
+
+## Shared Glide batch queue (2026-11-18)
+
+**Confirmed user request:** replace static per-reference execution limits with a
+shared queue that refills available slots across all references, respects CPU and
+observed license capacity, and uses measured runtimes to improve batch sizing.
+This supersedes the one-active-license-retry implementation choice below when
+an explicit Glide CPU budget is available. Sequential iteration supervision and
+scientific stage barriers remain unchanged.
+
+**Implementation choices:** independent Glide stage workers freeze new reference
+inputs into SQLite batches and atomically claim work. Round-robin batch ordinals
+across references share one pool; ordinary untried work precedes license retries.
+All prepared states of an original compound stay in the same new batch. Use the
+existing RotB-derived state count as the upper bound; the preceding iteration's
+median successful native batch seconds/state can reduce it toward 300 seconds.
+Existing frozen plans and native parent jobs are never resized or resubmitted.
+
+An explicit glide-cpus or HOST slot budget activates this queue. Reserve one
+budget unit per new native HOST:1/NJOBS=1 serial batch; isolated native 2026-1
+runs verified one native job without a separate child, tpp=1 and ntasks=1.
+Retain the full saved HOST reservation of unresolved legacy parents. Read installed lictool status for each configured
+server. Normal SP capacity is min(GLIDE_MAIN, floor(GLIDE_SP_DOCKING/4)) per
+server, summed across servers. Admission uses both total and available snapshots;
+these are observations, not atomic license reservations. External checkout races
+still return exact failed input states to the durable license queue after at least
+60 seconds. Unverifiable capacity blocks new launches while collection continues.
+Bare hosts without explicit CPU budgets retain the previous conservative path.
+
+Hold the existing cross-project Glide/Prime submission fence across each finite
+admission wave, persisting every native intent/JobId before the next launch.
+Never duplicate an uncertain launch. A single collector verifies terminal native
+parent/child status and publishes matching best poses and scores while the worker
+submits other batches. Keep a durable publication barrier until the root merged
+pose library catches up; recover that barrier even when all queue rows are done.
+Preserve constrained SP inputs, CMPID identities, existing best-state pose
+selection, downstream ranking barriers, and all successful scientific results.
+The worker polls and replenishes its pool without repeated stage initialization.
+Existing stopped or uncertain production jobs are not automatically reset.
+
+**Verification scope:** regression tests exercise CPU/license caps, concurrent
+atomic claims, free-slot refill while other work remains active, license cooldown,
+expired capacity snapshots, input/state preservation, uncertain native intent,
+frozen plans, runtime feedback, fresh partial pose recovery after a serial timeout,
+and crash recovery of pose publication. Queue/audit/publication barriers also
+participate in automatic iteration discovery without relying on compound states. Mock
+results verify scheduling and recovery, not scientific docking or affinity.
+An isolated temporary native smoke test ran CMPID_124 and CMPID_387 from two
+different references: both native trees finished DONE, both scores and matching
+poses were imported, and both queue rows finished. This validates the small
+execution/recovery path, not affinity or production-scale speedup. Production
+databases and existing native identities were unchanged by that smoke test.
+
+**Verification:** full suite: 3,046 passed, eight skipped. Focused shared-queue
+and license-recovery tests: 39 passed; compileall, package/CLI imports, editable
+installation and diff whitespace checks pass. Existing suite warnings remain.
+
+
+## Backfill native Glide license failures into free slots (2026-11-18)
+
+**Confirmed user request, latest correction:** calculations that fail because
+Glide licenses are exhausted must retry when configured Glide slots become free,
+even while other original Glide groups still run. This supersedes the earlier
+wait-for-all-originals policy. Do not retry scientific docking/core failures,
+cancel native jobs or reset successful results. The original one-active-retry
+implementation is superseded by the shared queue above for explicit budgets.
+
+**Implementation:** inspect verified terminal parent/child trees and downloaded
+native parent logs/subjob archives. Require native retry-exhaustion evidence and
+a final subjob log reporting all-server checkout exhaustion plus an unavailable
+GLIDE feature. Temporary server warnings followed by successful checkout do not
+qualify. A verified FAILED serial parent without children can enroll its complete
+saved input. A successful native child takes precedence over older failure logs.
+Use archived LIGAND_START/END/OFFSET to select exact prepared-state indices from
+the checksummed original group input; never infer slices from NJOBS or select
+all states merely because they share a CMPID.
+
+SQLite glide_license_audit fences downstream atomic claims before slow failure
+inspection; glide_license_retry stores immutable evidence/ranges/compound IDs,
+claims and attempt counters. Queue/audit readiness joins the docking barrier, so
+Amber/Prime/MD ranking and iteration advancement cannot finish early. Claims
+are atomic; the historical fallback allows one active retry per iteration. After each ordinary polling
+collection, the same collector thread can recover/submit the retry into free
+budget. Reserve each unresolved original parent's full saved HOST request,
+including slots its queued children may later use. A verified all-terminal tree
+releases its reservation even if scientific result import is pending. Unknown
+identities/status cannot release budget; unsubmitted original groups have priority. Choose the
+host with actual free budget. Bare hosts without measurable slot counts retain
+the conservative terminal-only fallback. Never alter live parents' HOST requests.
+New recovery parents use one HOST slot and NJOBS=1, preserving strict saved
+core/scientific settings, license environment, per-job Slurm memory and
+Glide/Prime submission exclusion. Recover an already-running retry even when
+no new slot is available; recheck capacity before any new native launch.
+
+Keep each attempt in its own directory with the existing durable intent/JobId
+recovery. Missing identities, unavailable status or changed inputs stay pending;
+cached files and zero worker exit do not establish completion. Another license
+failure returns to the back of untried work, with at least 60 seconds before its
+next attempt. It is not exhausted by a fixed retry count. Non-license terminal
+failures finish normally; retained artifacts remain available for diagnosis.
+
+Validate retry pose CMPID and i_i_glide_lignum against its actual submitted
+prepared subset. Select across the prior best poses and new outputs with the
+existing fixed-frame core, contact/score/tie policy. Publish matching poses before
+an atomic score/queue commit, preserving previously scored compounds and
+unrelated failures. Recollection after a crash is idempotent. No direct DB reset,
+old input rewrite, unconstrained fallback, or duplicate uncertain launch.
+
+Downloaded groups from an in-progress iteration can enroll historical license
+failures, even if they were already marked No Glide pose. Refuse adoption after
+downstream scoring/selection or a later population has started. Do not reopen
+completed downstream science silently. An already-running supervisor/worker must
+reload the updated implementation before it can use the new queue.
+
+**Verification scope:** regression tests cover exact state slices, science/input
+immutability, queue ordering/cooldown, concurrent claims, pending audit barriers,
+serial-parent failures, transient warning rejection, missing/ambiguous evidence,
+source changes, uncertain launch recovery, preserved best poses, foreign pose
+rejection and crash-after-publication recovery. A separate temporary native
+Schrodinger helper replay identified 11 license-only subjobs in an actual saved
+group and prepared exactly 24 states for one of them, without submitting a
+scientific job. Mock tests and input preparation do not validate fresh native
+docking, affinity, or license availability.
+
+**Verification:** 269 focused tests and the full suite (3,033 passed, eight
+skipped) pass, including 26 license-queue regressions. New coverage verifies
+backfill while originals run, full/queued parent reservations, unknown native
+identities/status, original-group priority, host-specific vacancies and bare-host
+fallback. Editable installation, compileall, package/CLI imports and diff
+whitespace checks pass. The initial rollout reloaded the project supervisor;
+the vacancy-policy update reloads only its Glide worker. All 65 original iter7
+native parent JobIds are retained unchanged. This operational reload does not
+establish completion of pending native work or of future retry calculations.
+Read-only replay against the retained production records selected slurm-cpu:1
+as available capacity. A typed pending-merge condition allows other queued work
+to continue without treating a stopped/unmerged parent as scientifically complete;
+scientific validation exceptions still propagate. At the final inspection the
+remaining original parent trees were STOPPED and no supervisor was running; no
+stopped native job or supervisor was automatically restarted.
+
+
+
+
 ## Local keto/enol parent-pose mapping (2026-11-18)
 
 **Confirmed user request:** handle keto/enol and the associated limited

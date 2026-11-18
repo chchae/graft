@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from graft import _core
 from graft.states import CompoundState as State
 from graft.states import GrowthTaskState as Growth
+from graft.states import GlideRetryState as GlideRetry
 
 
 RDK_DESCRIPTOR_TYPES = {
@@ -333,6 +334,46 @@ def restore_reference_score_records(path, updates, md):
                              (result['mean'],result['std'],len(result['snapshots']),State.MD_GBSA_DONE,cid))
         _finish_reference_cache_import(conn)
         return len(updated_names)
+
+
+def reset_latest_glide_after_native_retirement(path, iteration, backup):
+    """Explicit maintenance only; caller holds stage locks and verifies native retirement.
+
+    Archive the owned Glide directory separately. Never invoke automatically.
+    Keep upstream science and every earlier iteration; refuse downstream science.
+    """
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if iteration < 1 or conn.execute('SELECT MAX(iteration) FROM compound').fetchone()[0] != iteration:
+            raise RuntimeError('Only the latest non-reference Glide iteration can be reset')
+        if conn.execute('SELECT 1 FROM compound WHERE iteration=? AND '
+                        '(prime_gbsa_score IS NOT NULL OR amber_gbsa_score IS NOT NULL '
+                        'OR md_gbsa_score IS NOT NULL OR fep_score IS NOT NULL) LIMIT 1', (iteration,)).fetchone():
+            raise RuntimeError('Cannot reset Glide after downstream scientific results exist')
+        if conn.execute("SELECT 1 FROM compound WHERE iteration=? AND NOT "
+                        "(state IN ('ligprepped','glide_running','docked') OR "
+                        "(state='failed' AND COALESCE(failed_stage,'')='glide')) LIMIT 1", (iteration,)).fetchone():
+            raise RuntimeError('Glide reset requires completed upstream processing for every compound')
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table in ('iteration_score_selection', 'iteration_md_gbsa_selection', 'iteration_fep_selection'):
+            if table in tables and conn.execute(f'SELECT 1 FROM {table} WHERE iteration=? LIMIT 1', (iteration,)).fetchone():
+                raise RuntimeError('Cannot reset Glide after downstream selection was frozen')
+        backup = Path(backup)
+        if backup.exists():
+            raise FileExistsError(f'Refusing to overwrite Glide restart backup: {backup}')
+        with sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro', uri=True) as source:
+            with sqlite3.connect(backup) as destination:
+                source.backup(destination)
+        count = conn.execute('UPDATE compound SET docking_score=NULL,state=?,failed_stage=NULL,'
+                             'failure_message=NULL,modified_at=CURRENT_TIMESTAMP WHERE iteration=?',
+                             (State.LIGPREPPED, iteration)).rowcount
+        for table in ('glide_timeout_collection', 'glide_license_retry', 'glide_license_audit',
+                      'glide_shared_plan', 'glide_shared_publication', 'glide_batch_runtime'):
+            if table in tables:
+                conn.execute(f'DELETE FROM {table} WHERE iteration=?', (iteration,))
+        if 'stage_timing' in tables:
+            conn.execute("DELETE FROM stage_timing WHERE iteration=? AND stage='glide'", (iteration,))
+        return count
 
 
 def restart_calculation_stage(path, iteration):
@@ -878,6 +919,14 @@ def _docking_completion_reason(rows, target_count, conn=None, iteration=None):
         reason = _generation_readiness_reason(conn, iteration, target_count)
         if reason:
             return reason
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_license_retry'").fetchone():
+            if conn.execute("SELECT 1 FROM glide_license_retry WHERE iteration=? AND state!='done' LIMIT 1",
+                            (iteration,)).fetchone():
+                return 'Glide license retry queue pending'
+        if _glide_license_inspection_pending(conn, iteration):
+            return 'Glide license failure inspection pending'
+        if _glide_shared_publication_pending(conn, iteration):
+            return 'Glide shared pose publication pending'
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_timeout_collection'").fetchone():
             if conn.execute('SELECT 1 FROM glide_timeout_collection WHERE iteration=? AND completed=0',
                             (iteration,)).fetchone():
@@ -2366,6 +2415,276 @@ def glide_pending_rows(path, iteration):
             'WHERE iteration=? AND state IN (?,?) AND docking_score IS NULL '
             f'AND similar_to IS NOT NULL ORDER BY {order}',
             (iteration, State.LIGPREPPED, State.GLIDE_RUNNING)).fetchall()
+
+
+def _ensure_glide_license_retry(conn):
+    conn.execute('CREATE TABLE IF NOT EXISTS glide_license_retry ('
+                 'id INTEGER PRIMARY KEY,iteration INTEGER NOT NULL,reference_id INTEGER NOT NULL,'
+                 'source_job_id TEXT NOT NULL,source_job_name TEXT NOT NULL,payload TEXT NOT NULL,'
+                 "state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,"
+                 'not_before REAL NOT NULL DEFAULT 0,last_error TEXT,'
+                 'UNIQUE(iteration,reference_id,source_job_id,source_job_name))')
+    if 'kind' not in {r[1] for r in conn.execute('PRAGMA table_info(glide_license_retry)')}:
+        conn.execute("ALTER TABLE glide_license_retry ADD COLUMN kind TEXT NOT NULL DEFAULT 'license'")
+    conn.execute('CREATE TABLE IF NOT EXISTS glide_shared_plan ('
+                 'iteration INTEGER NOT NULL,reference_id INTEGER NOT NULL,source TEXT NOT NULL,'
+                 'PRIMARY KEY(iteration,reference_id))')
+    conn.execute('CREATE TABLE IF NOT EXISTS glide_shared_publication ('
+                 'iteration INTEGER PRIMARY KEY,pending INTEGER NOT NULL DEFAULT 0)')
+    conn.execute('CREATE TABLE IF NOT EXISTS glide_batch_runtime ('
+                 'task_id INTEGER NOT NULL,attempt INTEGER NOT NULL,iteration INTEGER NOT NULL,'
+                 'seconds REAL NOT NULL,structures INTEGER NOT NULL,PRIMARY KEY(task_id,attempt))')
+    conn.execute('CREATE TABLE IF NOT EXISTS glide_license_audit ('
+                 'iteration INTEGER NOT NULL,reference_id INTEGER NOT NULL,source_job_id TEXT NOT NULL,'
+                 'completed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(iteration,reference_id,source_job_id))')
+
+
+def _glide_license_inspection_pending(conn, iteration):
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_license_audit'").fetchone()
+                and conn.execute('SELECT 1 FROM glide_license_audit WHERE iteration=? AND completed=0 LIMIT 1',
+                                 (iteration,)).fetchone())
+
+
+def glide_license_inspection_pending(path, iteration):
+    with connect(path) as conn:
+        return _glide_license_inspection_pending(conn, iteration)
+
+
+def begin_glide_license_inspection(path, iteration, reference_id, source_job_id):
+    """Fence downstream atomic claims before slow native failure/input inspection."""
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        _ensure_glide_license_retry(conn)
+        row = conn.execute('SELECT completed FROM glide_license_audit WHERE iteration=? AND reference_id=? AND source_job_id=?',
+                           (iteration, reference_id, source_job_id)).fetchone()
+        if row and row[0]:
+            return
+        _check_glide_license_admission(conn, iteration)
+        conn.execute('INSERT OR IGNORE INTO glide_license_audit(iteration,reference_id,source_job_id) VALUES (?,?,?)',
+                     (iteration, reference_id, source_job_id))
+
+
+def _check_glide_license_admission(conn, iteration):
+    _check_glide_timeout_admission(conn, iteration)
+    for table in ('iteration_score_selection', 'iteration_md_gbsa_selection'):
+        if (conn.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone()
+                and conn.execute(f'SELECT 1 FROM {table} WHERE iteration=? LIMIT 1', (iteration,)).fetchone()):
+            raise RuntimeError('Cannot retry Glide licenses after downstream selection was frozen')
+    if conn.execute('SELECT 1 FROM compound WHERE iteration>? LIMIT 1', (iteration,)).fetchone():
+        raise RuntimeError('Cannot retry Glide licenses after a later iteration started')
+
+
+def enqueue_glide_license_retries(path, iteration, reference_id, source_job_id, tasks):
+    """Freeze proven failed prepared-state ranges without resetting compounds."""
+    import json
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        _ensure_glide_license_retry(conn)
+        for name, payload in tasks.items():
+            old = conn.execute('SELECT payload FROM glide_license_retry WHERE iteration=? AND reference_id=? '
+                               'AND source_job_id=? AND source_job_name=?',
+                               (iteration, reference_id, source_job_id, name)).fetchone()
+            encoded = json.dumps(payload, sort_keys=True)
+            if old:
+                if old[0] != encoded:
+                    raise RuntimeError('Frozen Glide license retry inputs changed')
+                continue
+            _check_glide_license_admission(conn, iteration)
+            ids = payload['ids']
+            actual = {row[0] for row in conn.execute('SELECT id FROM compound WHERE iteration=? AND similar_to=?',
+                                                    (iteration, reference_id))}
+            if not ids or not set(ids) <= actual:
+                raise RuntimeError('Glide license retry contains foreign compound IDs')
+            conn.execute('INSERT INTO glide_license_retry(iteration,reference_id,source_job_id,source_job_name,payload,kind) '
+                         'VALUES (?,?,?,?,?,?)', (iteration, reference_id, source_job_id, name, encoded,
+                                                payload.get('kind', 'license')))
+        conn.execute('UPDATE glide_license_audit SET completed=1 WHERE iteration=? AND reference_id=? AND source_job_id=?',
+                     (iteration, reference_id, source_job_id))
+
+
+def glide_license_retries(path, iteration, *, pending_only=True, state=None, task_id=None):
+    import json
+    with connect(path) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_license_retry'").fetchone():
+            return []
+        kind = 'kind' if 'kind' in {r[1] for r in conn.execute('PRAGMA table_info(glide_license_retry)')} else "'license'"
+        where, params = 'iteration=?', [iteration]
+        if task_id is not None:
+            where += ' AND id=?';params.append(task_id)
+        if state is not None:
+            where += ' AND state=?';params.append(state)
+        elif pending_only:
+            where += " AND state!='done'"
+        rows = conn.execute('SELECT id,reference_id,source_job_id,source_job_name,payload,state,attempts,not_before,'+kind+' '
+                            'FROM glide_license_retry WHERE '+where+' ORDER BY id', params).fetchall()
+    return [dict(id=r[0], reference_id=r[1], source_job_id=r[2], source_job_name=r[3],
+                 payload=json.loads(r[4]), state=r[5], attempts=r[6], not_before=r[7], kind=r[8]) for r in rows]
+
+
+def glide_queue_counts(path, iteration, now):
+    with connect(path) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_license_retry'").fetchone():
+            return dict(pending=0,running=0,done=0,ready=0)
+        counts = dict(conn.execute('SELECT state,count(*) FROM glide_license_retry WHERE iteration=? GROUP BY state', (iteration,)))
+        counts['ready'] = conn.execute("SELECT count(*) FROM glide_license_retry WHERE iteration=? AND state='pending' AND not_before<=?", (iteration,now)).fetchone()[0]
+        return dict(pending=counts.get('pending',0),running=counts.get('running',0),done=counts.get('done',0),ready=counts['ready'])
+
+
+def glide_shared_references(path, iteration):
+    with connect(path) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_shared_plan'").fetchone():
+            return set()
+        return {r[0] for r in conn.execute('SELECT reference_id FROM glide_shared_plan WHERE iteration=?', (iteration,))}
+
+
+def freeze_glide_shared_plan(path, iteration, reference_id, source, tasks, missing):
+    """Enroll new groups only; never convert a saved native parent."""
+    import json
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        _ensure_glide_license_retry(conn)
+        old = conn.execute('SELECT source FROM glide_shared_plan WHERE iteration=? AND reference_id=?',
+                           (iteration, reference_id)).fetchone()
+        if old:
+            if old[0] != source:
+                raise RuntimeError('Frozen shared Glide plan changed')
+            return
+        _check_glide_license_admission(conn, iteration)
+        allowed = {r[0] for r in conn.execute('SELECT id FROM compound WHERE iteration=? AND similar_to=? '
+                    'AND docking_score IS NULL AND state IN (?,?)',
+                    (iteration, reference_id, State.LIGPREPPED, State.GLIDE_RUNNING))}
+        task_ids = [cid for payload in tasks.values() for cid in payload['ids']]
+        if len(task_ids) != len(set(task_ids)) or set(task_ids) & set(missing) or set(task_ids)|set(missing) != allowed:
+            raise RuntimeError('Shared Glide plan must partition every original compound and all its states')
+        conn.execute('INSERT INTO glide_shared_plan VALUES (?,?,?)', (iteration, reference_id, source))
+        for name, payload in tasks.items():
+            conn.execute('INSERT INTO glide_license_retry(iteration,reference_id,source_job_id,source_job_name,payload,kind) '
+                         "VALUES (?,?,?,?,?,'ordinary')", (iteration, reference_id, source, name, json.dumps(payload, sort_keys=True)))
+        conn.executemany('UPDATE compound SET state=?,failed_stage=?,failure_message=? WHERE id=?',
+                         [(State.FAILED, 'glide', 'No Glide pose', cid) for cid in missing])
+
+
+def _glide_shared_publication_pending(conn, iteration):
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_shared_publication'").fetchone()
+                and conn.execute('SELECT 1 FROM glide_shared_publication WHERE iteration=? AND pending=1', (iteration,)).fetchone())
+
+
+def glide_shared_publication(path, iteration, pending=None):
+    with connect(path) as conn:
+        if pending is None:
+            return _glide_shared_publication_pending(conn, iteration)
+        conn.execute('BEGIN IMMEDIATE')
+        _ensure_glide_license_retry(conn)
+        conn.execute('INSERT INTO glide_shared_publication VALUES (?,?) ON CONFLICT(iteration) '
+                     'DO UPDATE SET pending=excluded.pending', (iteration, int(pending)))
+
+
+def record_glide_batch_runtime(path, task, iteration, seconds):
+    if not math.isfinite(seconds) or seconds <= 0:
+        return
+    with connect(path) as conn:
+        _ensure_glide_license_retry(conn)
+        conn.execute('INSERT OR IGNORE INTO glide_batch_runtime VALUES (?,?,?,?,?)',
+                     (task['id'], task['attempts'], iteration, seconds, len(task['payload']['indices'])))
+
+
+def glide_observed_batch_size(path, iteration, default, target_seconds):
+    import statistics
+    with connect(path) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='glide_batch_runtime'").fetchone():
+            return default
+        rates = [s/n for s,n in conn.execute('SELECT seconds,structures FROM glide_batch_runtime '
+                    'WHERE iteration=? AND structures>0 AND seconds>0', (iteration-1,))]
+    return min(default, max(1, int(target_seconds/statistics.median(rates)))) if rates else default
+
+
+def claim_glide_license_retry(path, iteration, now, max_running=1):
+    """Atomically claim within the caller's verified shared capacity."""
+    if isinstance(max_running, bool) or not isinstance(max_running, int) or max_running < 1:
+        raise ValueError('Glide capacity must be a positive integer')
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        _ensure_glide_license_retry(conn)
+        if conn.execute("SELECT COUNT(*) FROM glide_license_retry WHERE iteration=? AND state='running'", (iteration,)).fetchone()[0] >= max_running:
+            return None
+        row = conn.execute("SELECT id FROM glide_license_retry WHERE iteration=? AND state='pending' "
+                           "AND not_before<=? ORDER BY CASE kind WHEN 'ordinary' THEN 0 ELSE 1 END,"
+                           'attempts,source_job_name,id LIMIT 1', (iteration, now)).fetchone()
+        if row is None:
+            return None
+        _check_glide_license_admission(conn, iteration)
+        conn.execute("UPDATE glide_license_retry SET state='running',attempts=attempts+1 WHERE id=?", row)
+        return row[0]
+
+
+def finish_glide_license_retry(path, task_id, *, license_error=False, now=0):
+    """A license error remains queued; scientific failure finishes the attempt."""
+    from graft.config import GLIDE_LICENSE_RETRY_DELAY_SECONDS
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT iteration,state FROM glide_license_retry WHERE id=?', (task_id,)).fetchone()
+        if row is None or row[1] == 'done':
+            return
+        if row[1] != 'running':
+            raise RuntimeError('Glide license retry is not claimed')
+        _check_glide_license_admission(conn, row[0])
+        conn.execute('UPDATE glide_license_retry SET state=?,not_before=?,last_error=? WHERE id=?',
+                     (GlideRetry.PENDING if license_error else GlideRetry.DONE,
+                      now+GLIDE_LICENSE_RETRY_DELAY_SECONDS if license_error else 0,
+                      'Native Glide license checkout exhausted' if license_error else None, task_id))
+        if license_error:
+            conn.execute("UPDATE glide_license_retry SET kind='license' WHERE id=?", (task_id,))
+        else:
+            _finish_glide_unscored_inputs(conn, task_id)
+
+
+def _finish_glide_unscored_inputs(conn, task_id):
+    import json
+    payload = json.loads(conn.execute('SELECT payload FROM glide_license_retry WHERE id=?', (task_id,)).fetchone()[0])
+    conn.executemany('UPDATE compound SET state=?,failed_stage=?,failure_message=?,modified_at=CURRENT_TIMESTAMP '
+                     'WHERE id=? AND docking_score IS NULL AND state IN (?,?)',
+                     [(State.FAILED, 'glide', 'No Glide pose', cid, State.LIGPREPPED, State.GLIDE_RUNNING)
+                      for cid in payload['ids']])
+
+
+def _validate_glide_license_retry_scores(conn, task_id, scores):
+    row = conn.execute('SELECT iteration,reference_id,state FROM glide_license_retry WHERE id=?',
+                       (task_id,)).fetchone()
+    if row is None:
+        raise RuntimeError('Unknown Glide license retry')
+    if row[2] == GlideRetry.DONE:
+        return False
+    if row[2] != GlideRetry.RUNNING:
+        raise RuntimeError('Glide license retry is not claimed')
+    _check_glide_license_admission(conn, row[0])
+    original = conn.execute('SELECT id,docking_score,state,failed_stage FROM compound WHERE iteration=? AND similar_to=?',
+                            row[:2]).fetchall()
+    ids = {r[0] for r in original}
+    scored = {r[0] for r in original if r[1] is not None and math.isfinite(r[1])}
+    if not set(scores) <= ids or not scored <= set(scores) or any(not math.isfinite(s) for s in scores.values()):
+        raise RuntimeError('Glide license retry would lose or mix existing scientific results')
+    if any(cid in scores and state not in (State.DOCKED, State.LIGPREPPED, State.GLIDE_RUNNING)
+           and (state, stage) != (State.FAILED, 'glide') for cid, _, state, stage in original):
+        raise RuntimeError('Glide license retry belongs to unrelated failed or active work')
+    return True
+
+
+def validate_glide_license_retry_scores(path, task_id, scores):
+    with connect(path) as conn:
+        _validate_glide_license_retry_scores(conn, task_id, scores)
+
+
+def store_glide_license_retry_scores(path, task_id, scores):
+    """Commit the merged original+retry best poses and finish one claimed task."""
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if not _validate_glide_license_retry_scores(conn, task_id, scores):
+            return
+        conn.executemany('UPDATE compound SET docking_score=?,state=?,failed_stage=NULL,failure_message=NULL,'
+                         'modified_at=CURRENT_TIMESTAMP WHERE id=?',
+                         [(score, State.DOCKED, cid) for cid, score in scores.items()])
+        conn.execute("UPDATE glide_license_retry SET state='done',not_before=0,last_error=NULL WHERE id=?", (task_id,))
+        _finish_glide_unscored_inputs(conn, task_id)
 
 
 def glide_timeout_rows(path, iteration, reference_id):
@@ -4291,6 +4610,16 @@ def find_iteration_for_state(stage: str, db_path: str | Path) -> int | None:
         row = conn.execute(
             f"SELECT MIN(iteration) FROM compound WHERE {conditions[stage]}"
         ).fetchone()
+        if stage == 'glide':
+            iterations = [row[0]] if row and row[0] is not None else []
+            for table, predicate in (('glide_license_retry', "state!='done'"),
+                                     ('glide_license_audit', 'completed=0'),
+                                     ('glide_shared_publication', 'pending=1')):
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                    queued = conn.execute(f'SELECT MIN(iteration) FROM {table} WHERE iteration>0 AND {predicate}').fetchone()[0]
+                    if queued is not None:
+                        iterations.append(queued)
+            return min(iterations) if iterations else None
     return row[0] if row and row[0] is not None else None
 
 

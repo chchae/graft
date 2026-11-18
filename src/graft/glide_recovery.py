@@ -4,6 +4,7 @@ import hashlib
 import re
 import subprocess
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from graft.stages._logging import detail
@@ -11,6 +12,10 @@ from graft.glide_timing import record as record_timing
 
 from graft.schrodinger_guard import (active_jobs, belongs_to_directory,
     job_details, job_kind, submission_guard, TERMINAL, JobStatusUnavailable, native_error_message)
+
+
+class GlideResultsPending(RuntimeError):
+    """Native work/result merging is unresolved; no scientific import is allowed."""
 
 
 def record_file(directory):
@@ -287,50 +292,75 @@ def timeout_pose_files(suite, directory):
 
 
 def submit(suite, command, directory):
+    with submission_guard(suite, 'glide') as live:
+        return _submit_guarded(suite, command, directory, live)
+
+
+@contextmanager
+def submission_batch(suite):
+    """Keep the cross-project fence locked for a finite admission wave.
+
+    Never export/cache a native snapshot beyond this context. Every native
+    intent and returned JobId is persisted before the next launch in the wave.
+    """
+    with submission_guard(suite, 'glide') as live:
+        valid = True
+        def launch(requested_suite, command, directory):
+            if not valid or Path(requested_suite).resolve() != Path(suite).resolve():
+                raise RuntimeError('Expired or mismatched Glide submission fence')
+            return _submit_guarded(suite, command, directory, live)
+        try:
+            yield live, launch
+        finally:
+            valid = False
+
+
+def _submit_guarded(suite, command, directory, live):
     directory = Path(directory)
     started = time.monotonic()
-    with submission_guard(suite, 'glide') as live:
-        # Recheck under the same submission mutex as prime_gbsa.
-        # Reuse the guard's fresh query under this lock, not a second full
-        # native/remote scan or a snapshot from a previous submission.
-        if any(job_kind(j) == 'glide' and belongs_to_directory(j, directory) for j in live):
-            raise RuntimeError('Glide group already has a live external job; recover it instead')
-        existing = load_record(directory)
-        if existing and not existing.get('job_id'):
-            raise RuntimeError('Glide launch has no saved JobId; reconcile before resubmission')
-        if existing:
-            if any(j.get('status') not in TERMINAL for j in job_details(suite, existing['job_id'], directory)):
-                raise RuntimeError('Glide group saved job still running')
-        archive = directory / f'previous-{time.time_ns()}'
-        old = [path for path in directory.glob('glide*')
-               if path.name != Path(command[1]).name]
-        old += [path for name in ('best_poses.maegz', 'docking_scores.tsv', 'glide_launch.log')
-                if (path := directory / name).exists()]
-        if old:
-            archive.mkdir()
-            for path in old:
-                path.replace(archive / path.name)
-        record = {'command': [str(x) for x in command], 'job_id': None,
-                  'submitted_at': time.time(), 'downloaded': False}
-        save_record(directory, record)
-        verified = time.monotonic()
-        from graft.config import schrodinger_environment
-        result = subprocess.run(record['command'], cwd=directory, check=True,
-                                capture_output=True, text=True, env=schrodinger_environment())
-        with (directory / 'glide_launch.log').open('a') as log:
-            log.write(result.stdout)
-            log.write(result.stderr or '')
-        detail(result.stdout, end='', flush=True)
-        if result.stderr:
-            detail(result.stderr, end='', flush=True)
-        match = re.search(r'^JobId:\s*(\S+)', result.stdout, re.MULTILINE | re.IGNORECASE)
-        if not match:
-            raise RuntimeError('Glide submission returned no JobId; reconcile before retrying')
-        record['job_id'] = match.group(1)
-        save_record(directory, record)
-        launched = time.monotonic()
-        record_timing(directory, 'safety_recovery', verified-started)
-        record_timing(directory, 'native_launch', launched-verified)
-        print(f'Glide timing: {directory.name} safety/recovery={verified-started:.2f}s, '
-              f'native launch={launched-verified:.2f}s.', flush=True)
-        return record['job_id']
+    # Recheck under the same submission mutex as prime_gbsa.
+    # Reuse the guard's fresh query under this lock, not a second full
+    # native/remote scan or a snapshot from a previous submission.
+    if any(job_kind(j) == 'glide' and belongs_to_directory(j, directory) for j in live):
+        raise RuntimeError('Glide group already has a live external job; recover it instead')
+    existing = load_record(directory)
+    if existing and not existing.get('job_id'):
+        raise RuntimeError('Glide launch has no saved JobId; reconcile before resubmission')
+    if existing:
+        if any(j.get('status') not in TERMINAL for j in job_details(suite, existing['job_id'], directory)):
+            raise RuntimeError('Glide group saved job still running')
+    archive = directory / f'previous-{time.time_ns()}'
+    old = [path for path in directory.glob('glide*')
+           if path.name != Path(command[1]).name]
+    old += [path for name in ('best_poses.maegz', 'docking_scores.tsv', 'glide_launch.log')
+            if (path := directory / name).exists()]
+    if old:
+        archive.mkdir()
+        for path in old:
+            path.replace(archive / path.name)
+    record = {'command': [str(x) for x in command], 'job_id': None,
+              'submitted_at': time.time(), 'downloaded': False}
+    save_record(directory, record)
+    verified = time.monotonic()
+    from graft.config import schrodinger_environment
+    result = subprocess.run(record['command'], cwd=directory, check=True,
+                            capture_output=True, text=True, env=schrodinger_environment())
+    with (directory / 'glide_launch.log').open('a') as log:
+        log.write(result.stdout)
+        log.write(result.stderr or '')
+    detail(result.stdout, end='', flush=True)
+    if result.stderr:
+        detail(result.stderr, end='', flush=True)
+    match = re.search(r'^JobId:\s*(\S+)', result.stdout, re.MULTILINE | re.IGNORECASE)
+    if not match:
+        raise RuntimeError('Glide submission returned no JobId; reconcile before retrying')
+    record['job_id'] = match.group(1)
+    save_record(directory, record)
+    launched = time.monotonic()
+    record_timing(directory, 'safety_recovery', verified-started)
+    record_timing(directory, 'native_launch', launched-verified)
+    print(f'Glide timing: {directory.name} safety/recovery={verified-started:.2f}s, '
+          f'native launch={launched-verified:.2f}s.', flush=True)
+    live.append(dict(jobId=record['job_id'], jobName='glide_shared_batch', status='RUNNING',
+                     spec=dict(launchParams=dict(launchDirectory=str(directory.resolve())))))
+    return record['job_id']

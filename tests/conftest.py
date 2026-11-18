@@ -24,6 +24,7 @@ def pytest_configure(config):
     root = Path(temporary.name)
     patch.setattr(schrodinger_guard, 'tempfile', SimpleNamespace(gettempdir=lambda: str(root)))
     patch.setattr(schrodinger_guard, '_md_registry', lambda: root/'session-md-remotes.json')
+    patch.setattr(schrodinger_guard, 'local_glide_registry', lambda: root/'session-glide-clients.json')
 
 
 @pytest.fixture(autouse=True)
@@ -33,3 +34,6 @@ def isolated_submission_mutex(tmp_path, monkeypatch):
                         SimpleNamespace(gettempdir=lambda: str(tmp_path)))
     monkeypatch.setattr(schrodinger_guard, '_md_registry',
                         lambda: tmp_path / 'md-remotes.json')
+
+    monkeypatch.setattr(schrodinger_guard, 'local_glide_registry',
+                        lambda: tmp_path / 'glide-local-clients.json')

@@ -217,6 +217,9 @@ def choose_iteration(args, requested=None):
                     minimum=1 if (getattr(args, 'md_gbsa_enabled', False)
                                   and getattr(args, 'generation_method', None) != 'crem') else 0)):
             return iteration
+        from graft.glide_local_cleanup import pending_cleanup
+        if pending_cleanup(stage_directory(args.output, iteration, 'glide')):
+            return iteration
         from graft.amber_gbsa import load_job
         if load_job(stage_directory(args.output, iteration, 'amber_gbsa')) is not None:
             return iteration
@@ -255,8 +258,10 @@ def resume_iteration_stages(args, iteration, stages):
         'ligprep':load_ligprep(stage_directory(args.output,iteration,'ligprep')) is not None,
     }
     from graft.glide_recovery import load_record
-    saved['glide'] = any(not load_record(path.parent).get('downloaded') for path in
-                          stage_directory(args.output,iteration,'glide').glob('*/glide_job.json'))
+    from graft.glide_local_cleanup import pending_cleanup
+    saved['glide'] = pending_cleanup(stage_directory(args.output, iteration, 'glide')) or any(
+        not load_record(path.parent).get('downloaded') for path in
+        stage_directory(args.output,iteration,'glide').glob('*/glide_job.json'))
     running = database.running_calculation_stages(args.db_path,iteration)
     recoveries = []
     for stage,module in stages[:start]:
@@ -296,6 +301,12 @@ def external_completion_reason(args, iteration, stage):
         if stage == "prime_gbsa" and load_prime(stage_in_iteration(directory, 'prime_gbsa')) is not None:
             return "prime_gbsa queue still requires recovery"
         if stage == "glide":
+            from graft.glide_local_cleanup import pending_cleanup, cleanup_completed
+            glide_directory = stage_in_iteration(directory, 'glide')
+            if pending_cleanup(glide_directory):
+                return 'Prime Glide results/shared cleanup still require recovery'
+            if cleanup_completed(glide_directory):
+                return None  # Durable receipt includes terminal native evidence and local checksums.
             from graft.glide_recovery import load_record, has_timeouts
             for record_path in (stage_in_iteration(directory, 'glide')).glob("*/glide_job.json"):
                 record = load_record(record_path.parent)
