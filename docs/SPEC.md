@@ -1,5 +1,59 @@
 # Graft specification
 
+## Local keto/enol parent-pose mapping (2026-11-18)
+
+**Confirmed user request:** handle keto/enol and the associated limited
+protonation difference during elite pose binding, preserving original structures,
+poses, scores, unaffected stereochemistry and the declared reference core.
+
+**Observed incident:** iter7 parent CMPID_218153 has 63 heavy atoms in both
+saved generation and best Glide structures, but neutral keto versus anionic
+enolate chemistry prevented the exact-parent shortcut. The existing 300-second
+MCS limit did not yield an accepted mapping. A separate five-second replay
+returned a cancelled, partial 52-atom MCS; that partial result was not accepted.
+
+**Implementation:** after strict matching fails, propose bounded full heavy-atom
+connectivity bijections, then prove only disjoint acyclic O=C-C <-> O-C=C local
+changes. Allow enol O-H or enolate O-minus, requiring the corresponding alpha-H
+accounting. Preserve elements, isotopes, radicals, unrelated H counts/charges,
+connectivity and stereo in both directions. No general neutralization, tautomer
+canonicalization or arbitrary bond-order relaxation is accepted as proof.
+Changed tetrahedral/E-Z stereo is relaxed only on the proven reaction site in
+comparison copies. Ring/conjugated-overlap transformations and unrelated bond
+changes remain outside this new shortcut and retain the legacy MCS path.
+Recognized local changes with invalid unrelated chemistry/stereo fail closed.
+
+Derive an exact connected shared query excluding the three atoms at each proven
+reaction site. It must retain every declared reference-core atom; a changed or
+disconnected reference core is rejected. Retain existing growth-H relaxation,
+receptor-frame symmetry selection and explicit native reference atom indices.
+Persist the full bijection, local sites, original/pose charges and versioned
+local_keto_enol_shared_core_v1 evidence in the frozen parent reference; log the
+full and constrained atom counts. Production parent chemistry, native poses and
+scientific scores are not rewritten. Saved generation plans are not rebound;
+existing source/fingerprint guards remain in force. No automatic elite exclusion,
+replacement, uncertain-job reset or unconstrained docking fallback is introduced.
+
+**Verification scope:** the retained actual 63-atom pair maps with a 52-atom
+exact shared core in a local read-only replay. Tests cover neutral/anionic forms,
+reverse mappings, explicit H and atom reordering, two disjoint sites, immutable
+inputs, coordinate/index correspondence, unrelated stereo inversion/loss,
+isotope/charge changes, reference-core overlap and match/time limits. This
+validates graph/coordinate mapping, not fresh native docking, generation
+throughput, scientific energy accuracy or affinity.
+
+**Verification:** full suite 3,007 passed, eight skipped; editable installation,
+compileall, package/CLI imports and diff whitespace checks passed. Read-only
+replay of all 500 exported iter7 parents yielded 499 strict matches and one
+local keto/enol match, with no failures (about 4.3 seconds). A separate temporary
+Schrodinger 2026-1 adapter check on the actual H-explicit exported pose confirmed
+the exact native 52-atom SMARTS mapping (two symmetry matches, selected mapping
+present). No native scientific job was submitted and production DB/results were
+not modified. This does not establish new docking or generation completion.
+
+
+
+
 ## Per-job memory for new Slurm Glide submissions (2026-11-17)
 
 **Confirmed user request:** reserve/limit each newly submitted Slurm Glide job

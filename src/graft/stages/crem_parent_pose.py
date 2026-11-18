@@ -44,5 +44,11 @@ def bind_parents(args, iteration, folder, parents):
         row['docking_reference'].update(source=str(output.resolve()), sha256=checksum,
             source_glide_sha256=source_hash, docking_score=scores[parent['compound_id']])
         row['history']['constraint_reference'] = dict(row['docking_reference'])
+        if 'tautomer_mapping' in row['docking_reference']:
+            proof = row['docking_reference']['tautomer_mapping']
+            print(f"Elite CMPID_{parent['compound_id']}: verified keto/enol pose mapping; "
+                  f"charge {proof['original_charge']} -> {proof['pose_charge']}; "
+                  f"full atoms={len(proof['parent_atom_indices'])}; "
+                  f"unchanged constrained atoms={len(row['docking_reference']['parent_atom_indices'])}.")
         bound.append(row)
     return bound
