@@ -151,8 +151,8 @@ def test_queue_claims_are_atomic_and_license_shortage_survives_restart(project):
         ids = list(pool.map(lambda _: database.claim_glide_license_retry(args.db_path, 1, 100), range(2)))
     assert sorted(str(x) for x in ids) == sorted([str(task['id']), 'None'])
     database.finish_glide_license_retry(args.db_path, task['id'], license_error=True, now=100)
-    assert database.claim_glide_license_retry(args.db_path, 1, 159) is None
-    assert database.claim_glide_license_retry(args.db_path, 1, 160) == task['id']
+    assert database.claim_glide_license_retry(args.db_path, 1, 129) is None
+    assert database.claim_glide_license_retry(args.db_path, 1, 130) == task['id']
     assert database.glide_license_retries(args.db_path, 1)[0]['attempts'] == 2
     with database.connect(args.db_path) as conn:
         assert conn.execute('SELECT state,failure_message FROM compound WHERE id=2').fetchone() == ('failed', 'No Glide pose')

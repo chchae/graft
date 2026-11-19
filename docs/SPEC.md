@@ -49,6 +49,53 @@ replay correction. Editable installation, compileall, package/CLI imports and
 diff whitespace checks pass; existing multiprocessing warnings remain.
 
 
+## Explicit full iter8 Glide reset for Slurm (2026-11-19, latest request)
+
+**Confirmed user request:** fully initialize iteration 8 Glide, superseding the
+earlier request to preserve its completed docking results. Retire only verified
+terminal native work under driver/Glide locks. Archive the complete owned Prime
+run and back up SQLite before clearing the latest iteration's Glide scores,
+failures, queue/plans/audits, publication/runtime records and Glide timing. Restore
+the original 50,000 compound rows to ligprepped; retain identities, reference
+assignments, generation/LigPrep data and every earlier iteration. Refuse live or
+uncertain jobs, incomplete upstream work, later iterations or downstream science.
+
+Replace the Prime stage symlink with an empty local stage after archiving; retire
+the old shared client through a working read-only server monitor before removing
+the owned shared run. Keep native identities/results in the archive. With
+glide-local=false, use-slurm=true and glide-cpus=324, verify that the fresh stage
+retains the local 2026-1 submission suite and slurm-cpu host. Do not launch new
+calculations as part of this preparation. Never apply this reset automatically.
+
+**Operational verification:** all 2,283 saved native trees were terminal
+(1,941 DONE, 342 STOPPED), with no orphaned active Prime jobs. The full Prime run
+was copied and checksummed under backups/iter08-full-glide-slurm-reset-20261119-124214
+beside the full SQLite backup and retirement/reset receipts. All 50,000 iter8
+rows are ligprepped with no Glide scores or queue/publication/runtime records;
+earlier rows and upstream columns match their pre-reset fingerprints. The local
+stage is empty, its Prime symlink/shared run is retired, the replacement server
+monitor works, and slurm-cpu's CPU partition/API preflight passes. Existing reset
+regressions: five passed. No new calculation was submitted.
+
+
+## Preserve completed iter8 Glide work during explicit restart (2026-11-19)
+
+**Confirmed user request:** prepare EGFR iteration 8 for restart, preserving
+completed compounds and running only unfinished work. This is explicit
+maintenance, not a new automatic stopped-job retry policy. Hold driver/Glide
+locks, make a full SQLite backup and verify frozen source checksums. Preserve
+completed queue rows, every compound row/score, native JobIds and old attempts.
+For each selected STOPPED task, recheck its native parent and entire terminal
+tree and download available old outputs/logs before changing its queue state.
+Reject live/unknown identities, timeout recovery, changed claims, scored task
+members, downstream selections/scores or later iterations. Atomically requeue
+only verified unscored stopped tasks, retaining payload, kind and attempt
+number so the next claim creates a new attempt directory. Leave DONE native
+jobs for normal result collection and a claim without native intent for its
+existing first-launch recovery. Never reset all glide_running compounds or
+erase shared files/publication barriers. Keep durable evidence with the backup.
+
+
 ## Explicit latest Glide restart maintenance (2026-11-18)
 
 **Confirmed user request:** stop the current EGFR Glide work and prepare its
@@ -73,6 +120,12 @@ left running. Its checkouts must not be mistaken for stale EGFR licenses.
 
 
 ## Shared Glide batch queue (2026-11-18)
+
+**Confirmed follow-up (2026-11-19):** shorten the minimum delay after a verified
+native Glide license failure from 60 to 30 seconds. Recheck CPU/license capacity
+before resubmission; zero free licenses leave work queued and the normal worker
+poll defaults to 30 seconds. Log license waits and retry eligibility explicitly.
+Preserve existing saved deadlines, live/uncertain jobs and successful results.
 
 **Confirmed logging follow-up:** each shared-pool submission line includes the
 number of distinct original compounds in that task, counting LigPrep states of
@@ -101,7 +154,7 @@ server. Normal SP capacity is min(GLIDE_MAIN, floor(GLIDE_SP_DOCKING/4)) per
 server, summed across servers. Admission uses both total and available snapshots;
 these are observations, not atomic license reservations. External checkout races
 still return exact failed input states to the durable license queue after at least
-60 seconds. Unverifiable capacity blocks new launches while collection continues.
+30 seconds. Unverifiable capacity blocks new launches while collection continues.
 Bare hosts without explicit CPU budgets retain the previous conservative path.
 
 Hold the existing cross-project Glide/Prime submission fence across each finite
@@ -172,7 +225,7 @@ no new slot is available; recheck capacity before any new native launch.
 Keep each attempt in its own directory with the existing durable intent/JobId
 recovery. Missing identities, unavailable status or changed inputs stay pending;
 cached files and zero worker exit do not establish completion. Another license
-failure returns to the back of untried work, with at least 60 seconds before its
+failure returns to the back of untried work, with at least 30 seconds before its
 next attempt. It is not exhausted by a fixed retry count. Non-license terminal
 failures finish normally; retained artifacts remain available for diagnosis.
 
@@ -216,6 +269,25 @@ remaining original parent trees were STOPPED and no supervisor was running; no
 stopped native job or supervisor was automatically restarted.
 
 
+
+
+## Full-parent symmetry mapping repair (2026-11-19)
+
+**Observed incident:** iter9 parent CMPID_332726 matches its full 78-atom
+parent query but has 384 self-matches and 384 docking matches. Their redundant
+147,456 Cartesian combinations exceeded the 65,536 pair guard and blocked
+generation. For the full-parent path only, fix the lexicographically first
+original embedding and enumerate all docking embeddings: original full-graph
+automorphisms merely permute the same physical bijections. Retain receptor-frame
+minimum displacement, deterministic ties, all core UIDs and native indices.
+Do not raise individual match limits or weaken partial/MCS pair limits. Saved
+generation plans, molecular chemistry, poses and scientific scores are unchanged.
+
+**Verification:** the retained real pair matches the independent exhaustive
+Cartesian minimum within numerical precision; a 1,296-fold symmetric synthetic
+parent keeps coordinate identity with reordered atoms and explicit H. Read-only
+replay maps all 154 selected iter9 parents in about 0.9 seconds. These checks
+validate graph/coordinate correspondence, not new scientific calculations.
 
 
 ## Partial elite parent-pose matching (2026-11-19)

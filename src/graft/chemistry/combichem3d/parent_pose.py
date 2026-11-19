@@ -92,7 +92,8 @@ def constrain_parent(parent, docked, *, timeout):
     tautomer = None
     partial_policy = None
     partial_reason = None
-    if not docked.HasSubstructMatch(query, useChirality=True):
+    full_parent_match = docked.HasSubstructMatch(query, useChirality=True)
+    if not full_parent_match:
         core_uids = {r['uid'] for r in parent['history']['core']}
         core_indices = {a.GetIdx() for a in original.GetAtoms() if a.GetProp('_mn_uid') in core_uids}
         try:
@@ -112,6 +113,13 @@ def constrain_parent(parent, docked, *, timeout):
     left = [m for m in left if initial <= {original.GetAtomWithIdx(i).GetProp('_mn_uid') for i in m}]
     if not left:
         raise ValueError('Elite docking MCS does not retain the declared reference core')
+    if full_parent_match:
+        # All original atoms/bonds are present. Other self-matches only permute
+        # this same full graph; composing that permutation with the complete
+        # right-hand match set gives the same physical atom bijections. Fix the
+        # lexicographically first original embedding to avoid a redundant G x G
+        # search, retaining receptor-frame minimization and deterministic ties.
+        left = [min(left)]
     if len(left) * len(right) > 65536:
         raise ValueError('Elite docking MCS symmetry mapping exceeds the pair limit')
     # Both structures are already in the receptor frame. Resolve symmetry by

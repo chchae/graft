@@ -99,6 +99,18 @@ def test_pool_honors_licenses_and_retains_uncertain_launch(shared_project,monkey
     assert len(launches)==1
 
 
+def test_license_shortage_waits_without_claiming_and_refills_when_available(shared_project, monkeypatch, capsys):
+    args,root,_,launches,_ = shared_project
+    inventory = [dict(total=2,available=0), dict(total=2,available=2)]
+    monkeypatch.setattr(shared, 'license_capacity', lambda *a: inventory.pop(0))
+    shared.service_pass(args,1,root,'merger',lambda *a:None)
+    assert not launches
+    assert database.glide_queue_counts(args.db_path,1,0) == dict(pending=3,running=0,done=0,ready=3)
+    assert 'waiting for free licenses; recheck in 30s.' in capsys.readouterr().out
+    shared.service_pass(args,1,root,'merger',lambda *a:None)
+    assert len(launches) == 2
+
+
 def test_multiple_claimers_respect_one_global_limit(shared_project):
     args,_,_,_,_=shared_project
     with ThreadPoolExecutor(max_workers=3) as pool:

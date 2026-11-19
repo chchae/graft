@@ -2638,6 +2638,48 @@ def finish_glide_license_retry(path, task_id, *, license_error=False, now=0):
             _finish_glide_unscored_inputs(conn, task_id)
 
 
+def requeue_stopped_glide_tasks(path, iteration, evidence):
+    """Explicit maintenance only; caller holds driver/stage locks and native evidence.
+
+    Retain old attempts, JobIds and all scientific rows. Never call this as an
+    automatic retry policy for arbitrary STOPPED or uncertain native jobs.
+    """
+    import json
+    from graft.glide_recovery import load_record, has_timeouts
+    from graft.schrodinger_guard import TERMINAL
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        _check_glide_license_admission(conn, iteration)
+        seen = set()
+        for item in evidence:
+            task_id = item['task_id']
+            if task_id in seen:
+                raise RuntimeError('Duplicate stopped Glide task')
+            seen.add(task_id)
+            record = load_record(Path(item['directory']))
+            jobs = item['native']
+            if (not record or not record.get('job_id') or record['job_id'] != item['job_id']
+                    or has_timeouts(record) or not jobs
+                    or not any(j.get('jobId') == item['job_id'] and j.get('status') == 'STOPPED' for j in jobs)
+                    or any(j.get('status') not in TERMINAL for j in jobs)):
+                raise RuntimeError('Stopped Glide task lacks verified terminal native identity')
+            row = conn.execute('SELECT state,attempts,payload,reference_id FROM glide_license_retry '
+                               'WHERE iteration=? AND id=?', (iteration, task_id)).fetchone()
+            if not row or row[:2] != ('running', item['attempt']):
+                raise RuntimeError('Stopped Glide task claim changed')
+            ids = set(json.loads(row[2])['ids'])
+            compounds = conn.execute('SELECT id,state,docking_score,failed_stage FROM compound '
+                                     'WHERE iteration=? AND similar_to=?', (iteration, row[3])).fetchall()
+            members = [r for r in compounds if r[0] in ids]
+            if (not ids or len(members) != len(ids) or any(r[2] is not None for r in members)
+                    or any(r[1] not in (State.LIGPREPPED, State.GLIDE_RUNNING)
+                           and (r[1], r[3]) != (State.FAILED, 'glide') for r in members)):
+                raise RuntimeError('Stopped Glide task contains scored or incompatible compounds')
+            conn.execute("UPDATE glide_license_retry SET state='pending',not_before=0,last_error=? WHERE id=?",
+                         ('Explicit restart after verified native STOPPED; previous JobId='+item['job_id'], task_id))
+    return len(seen)
+
+
 def _finish_glide_unscored_inputs(conn, task_id):
     import json
     payload = json.loads(conn.execute('SELECT payload FROM glide_license_retry WHERE id=?', (task_id,)).fetchone()[0])

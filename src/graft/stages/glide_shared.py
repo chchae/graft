@@ -13,7 +13,8 @@ import time
 
 from graft import _core as c, database
 from graft.config import (GLIDE_SHARED_CPU_RESERVATION, GLIDE_SHARED_TARGET_SECONDS,
-                          GLIDE_SLURM_MEMORY_MB, schrodinger_job_options)
+                          GLIDE_SLURM_MEMORY_MB, GLIDE_LICENSE_RETRY_DELAY_SECONDS,
+                          schrodinger_job_options)
 from graft.glide_capacity import license_capacity
 from graft.glide_license_inputs import license_exhausted, license_failure_inputs
 from graft.glide_recovery import (load_record, save_record, output_paths, group_status,
@@ -82,6 +83,8 @@ def reconcile(args, iteration, root, merger, merge_best):
             failed_license = license_exhausted(text) and (status != 'DONE' or not output.exists() or not output.stat().st_size)
         if failed_license:
             database.finish_glide_license_retry(args.db_path, task['id'], license_error=True, now=time.time())
+            print(f'Glide shared pool: task {task["id"]} license checkout exhausted; '
+                  f'retry eligible in {GLIDE_LICENSE_RETRY_DELAY_SECONDS}s when CPU/license slots are available.', flush=True)
         elif status == 'DONE' or has_timeouts(record):
             # Group files are published immediately. A separate SQLite barrier
             # fences GBSA until the root merged library has caught up as well.
@@ -188,6 +191,9 @@ def service_pass(args, iteration, root, merger, merge_best, legacy_jobs=(), extr
                 free = min(max(0, capacity-len(running))+len(unlaunched), license['available'])
                 print(f'Glide shared pool: active={len(running)}, capacity={capacity}, '
                       f'license_free={license["available"]}, new_admissions<={free}.', flush=True)
+                if license['available'] == 0:
+                    print('Glide shared pool: waiting for free licenses; '
+                          f'recheck in {getattr(args, "poll_interval", 30)}s.', flush=True)
                 for _ in range(free):
                     if future.done():
                         future.result()

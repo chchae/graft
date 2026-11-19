@@ -10,6 +10,7 @@ import time
 
 from graft import _core as c, database
 from graft.config import (GLIDE_SLURM_MEMORY_MB, GLIDE_LICENSE_RETRY_CPUS,
+                          GLIDE_LICENSE_RETRY_DELAY_SECONDS,
                           glide_group_resources, schrodinger_job_options)
 from graft.glide_license_inputs import license_exhausted, license_failure_inputs
 from graft.glide_recovery import load_record, save_record, output_paths, group_status, has_timeouts
@@ -244,7 +245,8 @@ def run_tail(args, iteration, root, merge_current_best, merger):
             not output.exists() or not output.stat().st_size)
     if failed_license:
         database.finish_glide_license_retry(args.db_path, task['id'], license_error=True, now=time.time())
-        print(f"Glide license retry: task {task['id']} still lacks licenses; retained for a later pass.", flush=True)
+        print(f"Glide license retry: task {task['id']} still lacks licenses; "
+              f"retry eligible in {GLIDE_LICENSE_RETRY_DELAY_SECONDS}s when slots are available.", flush=True)
     elif status == 'DONE' and not has_timeouts(record):
         work_started(f"Glide license retry: collecting task {task['id']}, attempt {task['attempts']}.")
         _collect(args, iteration, root, task, folder, output, merge_current_best, merger)
