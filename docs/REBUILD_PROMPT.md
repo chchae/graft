@@ -78,6 +78,33 @@ monitor works, and slurm-cpu's CPU partition/API preflight passes. Existing rese
 regressions: five passed. No new calculation was submitted.
 
 
+## Preserve iter9 results and regroup unsubmitted work (2026-11-20)
+
+**Confirmed user request:** prepare restart at Glide while reusing calculated
+results, following the minimum-ten same-reference batching choice.
+**Implementation choice:** explicit maintenance under driver/Glide locks, after
+a full SQLite backup and frozen-input verification, may coalesce only pending,
+ordinary tasks with zero attempts and no native artifacts/runtime. Keep whole
+old state sets, group by reference and identical scientific input metadata,
+merge undersized tails, and retain original reference-source fingerprints.
+Allocate replacement task IDs before retiring the archived unsubmitted rows;
+save the old task IDs/minimum in each replacement payload and hash its source.
+Never change compound rows/scores, submitted/done/uncertain tasks, native IDs,
+publication barriers or scientific settings. Refuse overlapping states/members,
+scored members, downstream science/selections, later iterations or conflicting
+native artifacts. This is a one-off maintenance exception for unsubmitted queue
+entries; normal worker restart never silently rewrites frozen plans.
+
+**Operational evidence:** backup iter09-preserve-regroup10-20261120-121954;
+all compound-row fingerprints and 93 finite scores preserved, along with 13,926
+submitted/done task rows and runtime/publication/reference/audit records. All 92
+saved submitted jobs were native DONE and remain for normal collection; one
+claim without native intent remains for first-launch recovery. Coalesced 22,883
+unsubmitted tasks into 2,284 batches of 10–19 compounds after verifying 190 frozen
+input files. No program was started. Maintenance/packing/recovery regressions:
+94 passed; graph/queue tests do not establish native batched throughput.
+
+
 ## Preserve completed iter8 Glide work during explicit restart (2026-11-19)
 
 **Confirmed user request:** prepare EGFR iteration 8 for restart, preserving
@@ -120,6 +147,21 @@ left running. Its checkouts must not be mistaken for stale EGFR licenses.
 
 
 ## Shared Glide batch queue (2026-11-18)
+
+**Confirmed follow-up (2026-11-20, latest choice):** new ordinary shared batches
+should contain at least 10 original compounds when they use the same reference,
+superseding the earlier minimum of 20. This minimum
+takes priority over the RotB/runtime prepared-state target, which can still
+produce larger batches. Preserve every prepared state of each compound in its
+batch and never mix references. Merge a final remainder smaller than 10 into
+the preceding batch; only an entire reference group smaller than 10 remains
+undersized. Include the minimum in the new plan fingerprint and log the policy.
+Legacy helper requests without the minimum keep their old packing/fingerprint;
+the stage supplies 10 for every newly enrolled reference. Existing frozen plans,
+submitted/uncertain jobs and scientific results remain unchanged. No automatic
+consolidation of current queues or timeout/CPU/license/scientific setting change
+is authorized by this follow-up. Larger batches can run longer; mock packing
+tests do not establish native throughput or completion within the job timeout.
 
 **Confirmed follow-up (2026-11-19):** shorten the minimum delay after a verified
 native Glide license failure from 60 to 30 seconds. Recheck CPU/license capacity

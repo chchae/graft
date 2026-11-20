@@ -2638,6 +2638,84 @@ def finish_glide_license_retry(path, task_id, *, license_error=False, now=0):
             _finish_glide_unscored_inputs(conn, task_id)
 
 
+def regroup_unsubmitted_glide_tasks(path, iteration, root, minimum):
+    """Explicit maintenance under driver/stage locks; coalesce untried work only.
+
+    Caller backs up SQLite and checks frozen input files first. Preserve all
+    compound rows, existing native attempts and reference source fingerprints.
+    """
+    import hashlib
+    import json
+    if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
+        raise ValueError('Glide minimum compound count must be a positive integer')
+    root = Path(root)
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if iteration < 1 or latest_compound_iteration(conn) != iteration:
+            raise RuntimeError('Only the latest Glide iteration can be regrouped')
+        _check_glide_license_admission(conn, iteration)
+        rows = conn.execute('SELECT id,reference_id,source_job_id,payload,state,attempts,kind '
+                            'FROM glide_license_retry WHERE iteration=? ORDER BY id', (iteration,)).fetchall()
+        protected = {cid for row in rows if row[4:] != ('pending',0,'ordinary')
+                     for cid in json.loads(row[3])['ids']}
+        compounds = {r[0]:r[1:] for r in conn.execute('SELECT id,similar_to,state,docking_score,failed_stage '
+                                                    'FROM compound WHERE iteration=?', (iteration,))}
+        runtime = {r[0] for r in conn.execute('SELECT task_id FROM glide_batch_runtime WHERE iteration=?', (iteration,))}
+        groups, seen = {}, set()
+        for task_id,reference,source,encoded,state,attempts,kind in rows:
+            if (state,attempts,kind) != ('pending',0,'ordinary'):
+                continue
+            if (root/'license-retries'/f'task_{task_id}').exists() or task_id in runtime:
+                raise RuntimeError('Unsubmitted Glide task has native artifacts/runtime; retained')
+            payload = json.loads(encoded)
+            ids = payload['ids']
+            if not ids or len(set(ids)) != len(ids) or set(ids) & (seen | protected):
+                raise RuntimeError('Unsubmitted Glide compound membership overlaps existing work')
+            for cid in ids:
+                row = compounds.get(cid)
+                if (not row or row[0] != reference or row[2] is not None
+                        or (row[1] not in (State.LIGPREPPED,State.GLIDE_RUNNING)
+                            and (row[1],row[3]) != (State.FAILED,'glide'))):
+                    raise RuntimeError('Unsubmitted Glide task contains scored or incompatible compounds')
+            seen.update(ids)
+            metadata = {k:v for k,v in payload.items() if k not in ('ids','indices','regrouped_from_task_ids','min_compounds')}
+            key = (reference,json.dumps(metadata,sort_keys=True))
+            groups.setdefault(key,[]).append((task_id,payload))
+        retired, created, new_ids = [], 0, []
+        for (reference,encoded_metadata),items in groups.items():
+            packs, ids, indices, originals = [], [], [], []
+            all_indices = [i for _,p in items for i in p['indices']]
+            if len(all_indices) != len(set(all_indices)) or any(not p['indices'] for _,p in items):
+                raise RuntimeError('Unsubmitted Glide prepared states overlap or are empty')
+            for task_id,payload in items:
+                ids.extend(payload['ids']);indices.extend(payload['indices']);originals.append(task_id)
+                if len(ids) >= minimum:
+                    packs.append(dict(ids=ids,indices=indices,regrouped_from_task_ids=originals))
+                    ids,indices,originals = [],[],[]
+            if ids:
+                if packs:
+                    for key,values in [('ids',ids),('indices',indices),('regrouped_from_task_ids',originals)]:
+                        packs[-1][key].extend(values)
+                else:
+                    packs.append(dict(ids=ids,indices=indices,regrouped_from_task_ids=originals))
+            if len(packs) == len(items):
+                continue
+            source = 'regrouped:'+hashlib.sha256(json.dumps(dict(reference=reference,minimum=minimum,
+                originals=[i for i,_ in items],metadata=encoded_metadata),sort_keys=True).encode()).hexdigest()
+            metadata = json.loads(encoded_metadata)
+            for ordinal,pack in enumerate(packs,1):
+                payload = dict(metadata,**pack,min_compounds=minimum)
+                cur = conn.execute('INSERT INTO glide_license_retry(iteration,reference_id,source_job_id,source_job_name,payload,kind) '
+                    "VALUES (?,?,?,?,?,'ordinary')", (iteration,reference,source,f'glide_batch_{ordinal:06d}',json.dumps(payload,sort_keys=True)))
+                if (root/'license-retries'/f'task_{cur.lastrowid}').exists():
+                    raise RuntimeError('Replacement Glide task ID has existing native artifacts')
+                new_ids.append(cur.lastrowid)
+            retired.extend(i for i,_ in items)
+            created += len(packs)
+        conn.executemany('DELETE FROM glide_license_retry WHERE id=?', [(tid,) for tid in retired])
+        return dict(retired_unsubmitted_tasks=len(retired),new_tasks=created,new_task_ids=new_ids)
+
+
 def requeue_stopped_glide_tasks(path, iteration, evidence):
     """Explicit maintenance only; caller holds driver/stage locks and native evidence.
 

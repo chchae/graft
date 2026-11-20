@@ -119,6 +119,9 @@ def plan(request, structure):
 
 def ordinary_plan(request, structure):
     """Pack complete compound state sets; no reference owns a CPU partition."""
+    minimum = request.get('min_compounds', 1)  # Preserve older request semantics.
+    if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
+        raise ValueError('Shared Glide minimum compound count must be a positive integer')
     original = Path(request['input'])
     options = fields(original.read_text())
     if options.get('PRECISION', '').upper() != 'SP':
@@ -141,12 +144,22 @@ def ordinary_plan(request, structure):
             tasks[f'glide_batch_{len(tasks)+1:06d}'] = dict(kind='ordinary', indices=list(indices), ids=list(ids),
                 input=str(original.resolve()), ligands=str(Path(request['ligands']).resolve()), files=frozen)
     for cid, states in by_id.items():
-        if indices and len(indices)+len(states) > request['batch_size']:
+        if indices and len(ids) >= minimum and len(indices)+len(states) > request['batch_size']:
             finish(); indices, ids = [], []
         indices.extend(states); ids.append(cid)
-    finish()
+    if tasks and ids and len(ids) < minimum:
+        # Do not leave a small final submission when the preceding batch uses
+        # this same reference and can retain the complete remaining compounds.
+        last = tasks[next(reversed(tasks))]
+        last['indices'].extend(indices)
+        last['ids'].extend(ids)
+    else:
+        finish()
+    packing = dict(files=frozen, batch_size=request['batch_size'])
+    if 'min_compounds' in request:
+        packing['min_compounds'] = minimum
     return dict(tasks=tasks, missing=sorted(allowed-set(by_id)),
-                source='shared:'+hashlib.sha256(json.dumps(dict(files=frozen,batch_size=request['batch_size']),sort_keys=True).encode()).hexdigest())
+                source='shared:'+hashlib.sha256(json.dumps(packing,sort_keys=True).encode()).hexdigest())
 
 
 def prepare(request, structure):

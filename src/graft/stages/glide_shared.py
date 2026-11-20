@@ -13,6 +13,7 @@ import time
 
 from graft import _core as c, database
 from graft.config import (GLIDE_SHARED_CPU_RESERVATION, GLIDE_SHARED_TARGET_SECONDS,
+                          GLIDE_SHARED_MIN_COMPOUNDS,
                           GLIDE_SLURM_MEMORY_MB, GLIDE_LICENSE_RETRY_DELAY_SECONDS,
                           schrodinger_job_options)
 from graft.glide_capacity import license_capacity
@@ -26,13 +27,16 @@ from graft.stages._logging import work_started
 
 def enroll(args, iteration, entries, inputs, default_batch):
     target = database.glide_observed_batch_size(args.db_path, iteration, default_batch, GLIDE_SHARED_TARGET_SECONDS)
-    print(f'Glide shared queue: target {target} prepared states/batch; complete compound state sets stay together.', flush=True)
+    print(f'Glide shared queue: adaptive target {target} prepared states/batch; '
+          f'minimum {GLIDE_SHARED_MIN_COMPOUNDS} compounds/batch within each reference '
+          '(smaller references stay together); complete compound state sets stay together.', flush=True)
     for job, ligands in entries:
         folder = job['group_dir']
         if load_record(folder):
             raise RuntimeError('Cannot convert an existing native Glide parent to shared tasks')
         result = retry._helper(args, folder, dict(action='ordinary_plan', input=str(inputs[job['reference_id']].resolve()),
-             ligands=str(ligands.resolve()), ids=[r[0] for r in job['compounds']], batch_size=target))
+             ligands=str(ligands.resolve()), ids=[r[0] for r in job['compounds']], batch_size=target,
+             min_compounds=GLIDE_SHARED_MIN_COMPOUNDS))
         database.freeze_glide_shared_plan(args.db_path, iteration, job['reference_id'], result['source'],
                                           result['tasks'], result['missing'])
 
