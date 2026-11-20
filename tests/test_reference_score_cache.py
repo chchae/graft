@@ -246,14 +246,40 @@ def test_only_proven_metadata_annotations_can_reuse_frozen_parent_exports(args,m
         cache.preserve_parent_signature(current,saved)
 
 
-def test_unknown_upstream_settings_are_displayed_but_never_certified_for_reuse(args,native_file,tmp_path):
+def test_unknown_amber_context_reuses_annotations_without_certifying_settings(args,native_file,tmp_path,capsys):
     completed(args)
     args.amber_charge_method='abcg2'  # Changed after the original bcc run.
     assert cache.publish(args)==2
     assert json.loads(native_file['records'][0]['cache'])['context']['amber'] is None
     new=new_project(args,tmp_path)
+    assert cache.restore(new)==2
+    selection=database.md_gbsa_selection(new.db_path,0)
+    assert selection['settings']['reference_score_cache']['context']['amber'] is None
+    with database.connect(new.db_path) as conn:
+        assert conn.execute('SELECT amber_gbsa_score,prime_gbsa_score,md_gbsa_score FROM compound').fetchall()==[(-20.,-30.,-41.)]*2
+    assert not driver.reference_work_pending(new)
+    assert 'unknown Amber calculation context: 2' in capsys.readouterr().out
+
+
+def test_known_incompatible_amber_context_still_blocks_reuse(args,native_file,tmp_path):
+    completed(args);cache.publish(args)
+    new=new_project(args,tmp_path)
+    new.amber_charge_method='abcg2'
     assert cache.restore(new)==0
     assert database.md_gbsa_selection(new.db_path,0) is None
+
+
+def test_unknown_amber_context_does_not_bypass_md_ensemble_validation(args,native_file,tmp_path):
+    completed(args);cache.publish(args)
+    for row in native_file['records']:
+        value=json.loads(row['cache'])
+        value['context']['amber']=None
+        value['md_result']['snapshots'].pop()
+        row['cache']=json.dumps(value)
+    new=new_project(args,tmp_path)
+    cache.restore(new)
+    assert database.md_gbsa_selection(new.db_path,0) is None
+    assert driver.reference_work_pending(new)
 
 
 def test_native_maegz_metadata_roundtrip_and_backup(args,tmp_path):

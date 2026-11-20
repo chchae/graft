@@ -1,5 +1,29 @@
 # Independent Graft reconstruction prompt
 
+## Reuse annotated reference scores with unknown Amber context (2026-11-20)
+
+**Confirmed user request:** after clearing execution data, a fresh run must reuse
+Amber, Prime and MD-GBSA scores already saved in the reference-pose file. The
+24 EGFR annotations contain finite scores and full MD ensembles, but their
+saved Amber context is null; target, Prime and MD contexts match current inputs.
+
+**Implementation:** accept an unknown (null) Amber context for these validated
+reference annotations, print the uncertainty on import, and retain the original
+null context in imported MD provenance rather than certifying current Amber
+settings. Explicit incompatible Amber contexts remain ineligible. Preserve
+identity, pose/source signatures, target, Prime settings, MD protocol/selection,
+finite scores and complete-ensemble/statistics checks. Restore only a fresh,
+unclaimed reference DB; never alter running/existing scientific work. This
+supersedes the earlier rule that null Amber context prevents annotation reuse;
+it does not relax publication's provenance checks or certify Amber settings.
+
+**Verification:** 37 reference-cache/project-boundary tests passed, including
+unknown-context reuse, known incompatibility rejection and incomplete-ensemble
+rejection. A separate temporary project initialized from the actual 24-ligand
+MAEGZ imported all 72 Amber/Prime/MD energies exactly, retained null Amber
+provenance and required no reference calculations. Compile/import and diff
+checks passed. No production reset or new scientific calculation was performed.
+
 ## Optional Prime-server local Glide (2026-11-18)
 
 **Monitor persistence repair (2026-11-20):** moving EGFR output to

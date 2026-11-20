@@ -226,7 +226,9 @@ def restore(args):
         requested = args.md_gbsa_input_count
         quota = min(len(population), requested if requested is not None else max(1,math.ceil(len(population)*args.md_gbsa_input_ratio)))
         chain_complete = all(name in records and
-            all(records[name]['context'][key] == reuse_context[key] for key in ('target','amber','md')) and
+            all(records[name]['context'][key] == reuse_context[key] for key in ('target','md')) and
+            (records[name]['context']['amber'] is None
+             or records[name]['context']['amber'] == reuse_context['amber']) and
             prime_settings(records[name]['context']['prime']) == prime_settings(reuse_context['prime']) and
             all(not md_enabled or not getattr(args,key+'_enabled',True) or
                 (isinstance(records[name]['scores'].get(key),(int,float))
@@ -251,19 +253,26 @@ def restore(args):
                     ranking_source='reference_score_cache'), results={n:records[n]['md_result'] for n in names})
                 md['settings']['reference_score_cache'] = dict(schema=SCHEMA,
                     source=str(args.reference_poses.resolve()), source_sha256=source['sha256'],
-                    source_signature=source['signature'], context=reuse_context)
+                    source_signature=source['signature'], context=first['context'])
             except (ValueError, KeyError, TypeError):
                 md = None
     updates = {}
     for name, item in records.items():
         scores = {}
-        if item['context']['amber'] == expected['amber']:
+        # User-approved reference annotations may have an unknown Amber
+        # context. Preserve that uncertainty in the imported MD provenance;
+        # an explicitly recorded, incompatible context still blocks reuse.
+        if item['context']['amber'] is None or item['context']['amber'] == expected['amber']:
             scores['amber_gbsa_score'] = item['scores']['amber_gbsa']
         if (prime_settings(item['context']['prime']) == prime_settings(expected['prime'])
                 and (not getattr(args,'md_gbsa_enabled',False) or md is not None)):
             scores['prime_gbsa_score'] = item['scores']['prime_gbsa']
         updates[name] = dict(smiles=item['smiles'], scores=scores)
     count = database.restore_reference_score_records(args.db_path, updates, md)
+    unknown_amber = sum(item['context']['amber'] is None and
+                        item['scores']['amber_gbsa'] is not None for item in records.values())
+    if unknown_amber:
+        print(f'Reference annotations reused with unknown Amber calculation context: {unknown_amber} structures.', flush=True)
     print(f'Reference score cache reused: {count} structures; MD ensemble cache={md is not None}.', flush=True)
     return count
 
