@@ -5,6 +5,7 @@ The pinned client routes only Glide and JobServer commands to Prime; preparation
 and pose validation continue through the existing local installation.
 """
 import json
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -53,6 +54,22 @@ def register(suite, *, replace=None):
         if saved != original:
             path.parent.mkdir(parents=True, exist_ok=True)
             save(path, saved)
+
+
+def register_monitor(settings, *, replace=None):
+    """Keep the native endpoint monitor outside movable project output trees."""
+    from graft.schrodinger_guard import local_glide_registry
+    identity = hashlib.sha256(json.dumps(settings,sort_keys=True).encode()).hexdigest()
+    root = local_glide_registry().parent/'glide-monitors'/identity
+    root.mkdir(parents=True,exist_ok=True)
+    suite = root/'client'
+    existing = backend_settings(suite)
+    if existing is not None and existing != settings:
+        raise RuntimeError('Saved Prime Glide monitor settings changed; submissions withheld')
+    if existing is None or not all((suite/name).is_file() for name in ('jsc','glide','run')):
+        suite = _client(root,settings)
+    register(suite,replace=replace)
+    return suite
 
 
 def _client(root, settings):

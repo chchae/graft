@@ -108,10 +108,7 @@ def _finish(directory, receipt):
         _verify(source, receipt['manifest'])
     # Keep a local read-only server monitor for cross-project exclusion after
     # deleting the shared client. It never depends on the removed work root.
-    monitor_root = directory.with_name(directory.name+'-prime-monitor')
-    monitor_root.mkdir(exist_ok=True)
-    monitor = glide_local._client(monitor_root, settings['transport'])
-    glide_local.register(monitor, replace=settings['client'])
+    glide_local.register_monitor(settings['transport'], replace=settings['client'])
     if shared.exists():
         if tombstone.exists():
             raise RuntimeError('Ambiguous Prime Glide retirement directories')

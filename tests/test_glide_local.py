@@ -143,6 +143,42 @@ def test_fence_includes_regular_prime_when_glide_uses_remote_client(project, mon
             pytest.fail('Glide submitted while regular Prime running')
 
 
+def test_monitor_survives_output_move_and_keeps_cross_project_fence(project,monkeypatch):
+    local.configure_backend(project,1)
+    old = project.schrodinger
+    settings = local.backend_settings(old)
+    monitor = local.register_monitor(settings,replace=old)
+    assert not monitor.is_relative_to(project.output)
+    assert monitor.is_relative_to(guard.local_glide_registry().parent/'glide-monitors')
+    project.output.rename(project.output.with_name('archived-output'))
+    assert local.backend_settings(monitor) == settings
+    assert json.loads(guard.local_glide_registry().read_text()) == [str(monitor)]
+    assert local.register_monitor(settings) == monitor
+    monkeypatch.setattr(guard,'_local_active_jobs',lambda suite:
+        [dict(jobId='still-live-glide',jobName='glide_01')] if Path(suite)==monitor else [])
+    with pytest.raises(guard.SubmissionBlocked,match='still-live-glide'):
+        with guard.submission_guard(Path('/regular'),'prime_gbsa'):
+            pytest.fail('Moving outputs must never bypass live-job exclusion')
+
+
+def test_monitor_recreates_missing_wrapper_from_its_saved_transport(project):
+    local.configure_backend(project,1)
+    settings = local.backend_settings(project.schrodinger)
+    monitor = local.register_monitor(settings,replace=project.schrodinger)
+    (monitor/'jsc').unlink()
+    assert local.register_monitor(settings)==monitor
+    assert (monitor/'jsc').is_file()
+    assert local.backend_settings(monitor)==settings
+
+
+def test_unrecoverable_registered_client_still_blocks_and_identifies_path(tmp_path,monkeypatch):
+    missing=tmp_path/'missing/client'
+    guard.local_glide_registry().write_text(json.dumps([str(missing)]))
+    monkeypatch.setattr(guard,'_local_active_jobs',lambda *a:[])
+    with pytest.raises(guard.JobStatusUnavailable,match=str(missing)):
+        guard.active_jobs(Path('/regular'))
+
+
 def test_remote_shared_mount_alias_matches_native_launch_directory(project):
     local.configure_backend(project, 1)
     settings = local.backend_settings(project.schrodinger)
@@ -243,7 +279,10 @@ def test_cleanup_preserves_results_scores_logs_and_neighbors_before_removing_sha
     clients = json.loads(guard.local_glide_registry().read_text())
     assert str(old_client) not in clients and len(clients) == 1
     assert local.backend_settings(clients[0])['host'] == 'prime'
+    assert not Path(clients[0]).is_relative_to(args.output)
     assert cleanup.resume_cleanup(args, 1) is True
+    args.output.rename(args.output.with_name('archived-output'))
+    assert local.backend_settings(clients[0])['host'] == 'prime'
 
 
 @pytest.mark.parametrize('status', ['RUNNING', 'WAITING', None])

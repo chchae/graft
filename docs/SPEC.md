@@ -2,6 +2,24 @@
 
 ## Optional Prime-server local Glide (2026-11-18)
 
+**Monitor persistence repair (2026-11-20):** moving EGFR output to
+output-09-iter09 left two registered output-relative Prime monitors missing and
+blocked the new iteration-0 Prime worker before submission. Keep retired-server
+monitors under the registry's user-cache glide-monitors directory, keyed by the
+complete saved transport settings, independently of project output paths. Reuse
+matching monitors, rebuild missing wrappers from saved settings, and retain the
+cross-project native-job exclusion. A missing/unrecoverable registration still
+fails closed and now reports its exact path; never silently drop it.
+
+Recovered both current legacy registrations from their actual moved backend
+markers, backed up registry/evidence under glide-monitor-repair-20261120-202156,
+and replaced them with stable monitors for the same Prime endpoint. Read-only
+endpoint and full JobServer checks passed; the existing driver then entered
+Prime GBSA running for all 24 references. No scientific DB reset or job stop was
+performed. Regression coverage includes output moves, cleanup retirement/replay,
+live-job exclusion and missing registrations: 120 affected tests passed. These
+checks do not establish new Prime scientific results.
+
 **Confirmed user request:** `glide_local = true` executes Glide on the Prime
 server, whose installation is `/home/schrodinger/default` and local JobServer
 reports localhost:40813. The user confirms `/home1/prime_share` is shared

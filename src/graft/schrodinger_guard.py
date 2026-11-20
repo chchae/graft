@@ -152,7 +152,7 @@ def active_jobs(suite):
     for client in saved:
         remote = backend_settings(client)
         if remote is None:
-            raise JobStatusUnavailable('Registered Prime Glide client missing; submissions withheld')
+            raise JobStatusUnavailable(f'Registered Prime Glide client missing: {client}; submissions withheld')
         identity = (remote['host'], remote['remote_suite'])
         if identity not in inspected:
             rows.extend(_local_active_jobs(client))
