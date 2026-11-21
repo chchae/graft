@@ -1,5 +1,6 @@
 """A blocked CPU transfer must not leave completed MD GPU slots idle."""
 from contextlib import nullcontext
+from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
 from types import SimpleNamespace
@@ -8,6 +9,86 @@ import pytest
 
 from graft import _core, database, md_gbsa, md_gbsa_local
 from graft import md_gbsa_native as native, schrodinger_guard as guard
+
+
+def test_refill_does_not_wait_for_another_owners_slow_status(tmp_path, monkeypatch):
+    progress = {'(1, 0)': dict(phase='md', status='running'),
+                '(2, 0)': dict(phase='md', status='running'),
+                '(3, 0)': dict(phase='md', status='unstarted')}
+    path = tmp_path/'progress.json'
+    refilled = threading.Event()
+    slow_query = threading.Event()
+    active = {1, 2}
+    events = []
+    lock = threading.Lock()
+
+    def remote(settings, action, root):
+        cid = int(root[1:])
+        if action == 'md-status' and cid == 2:
+            slow_query.set()
+            assert refilled.wait(3), 'vacancy waited for an unrelated slow status reply'
+            events.append('slow-status-returned')
+            result = dict(phase='md', status='running')
+        elif action == 'md-status':
+            assert cid == 1
+            assert slow_query.wait(3)
+            with lock:
+                active.remove(1)
+            result = dict(phase='frames', status='pending')
+        else:
+            assert action == 'md-start' and cid == 3
+            assert json.loads(path.read_text())['(3, 0)']['status'] == 'pending'
+            with lock:
+                active.add(3)
+                assert len(active) == settings['gpus']
+            events.append('replacement-started')
+            refilled.set()
+            result = dict(phase='md', status='running')
+        return 'GRAFT_MD='+json.dumps(result)
+
+    monkeypatch.setattr(md_gbsa, 'remote_call', remote)
+    md_gbsa.admit_md(dict(gpus=2), [(i, 0, f'/{i}') for i in (1, 2, 3)],
+                     progress, path, reconcile_unstarted=False)
+    assert events == ['replacement-started', 'slow-status-returned']
+    assert progress['(1, 0)'] == dict(phase='frames', status='pending')
+    assert not any(t.name.startswith('graft-md-status') for t in threading.enumerate())
+
+
+def test_concurrent_status_queries_upload_adapter_once(monkeypatch):
+    started = threading.Barrier(5)
+    uploading = threading.Event()
+    release = threading.Event()
+    uploads = []
+    mkdirs = []
+    monkeypatch.setattr(md_gbsa, '_dispatch_uploaded', set())
+
+    def upload(host, source, destination):
+        uploads.append(destination)
+        uploading.set()
+        assert release.wait(3)
+
+    def ssh(host, command, **kwargs):
+        if command.startswith('mkdir'):
+            mkdirs.append(command)
+        return 'GRAFT_MD={"phase":"md","status":"running"}'
+
+    def query(i):
+        started.wait(3)
+        return md_gbsa.remote_call(dict(root='/frozen', helper='/frozen/native.py',
+            ssh_host='submit', suite='/suite'), 'md-status', f'/frozen/CMPID_{i}/replica01')
+
+    monkeypatch.setattr(md_gbsa, 'upload', upload)
+    monkeypatch.setattr(md_gbsa, 'ssh', ssh)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        queries = [pool.submit(query, i) for i in range(4)]
+        started.wait(3)
+        try:
+            assert uploading.wait(3)
+            assert len(uploads) == len(mkdirs) == 1
+        finally:
+            release.set()
+        assert all('running' in query.result() for query in queries)
+    assert len(uploads) == len(mkdirs) == 1
 
 
 @pytest.mark.parametrize('local_compute', [False, True])
@@ -45,6 +126,8 @@ def test_refill_during_cpu_work_and_process_newly_ready_earlier_task(tmp_path, m
         if action == 'md-status':
             if cid == first:
                 state = dict(phase='frames', status='pending') if cpu_busy.is_set() else dict(phase='md', status='running')
+            elif cid == queued and refilled.is_set():
+                state = dict(phase='md', status='running')
             else:
                 state = dict(phase='md', status='unstarted')
         elif action == 'md-start':
@@ -58,18 +141,34 @@ def test_refill_during_cpu_work_and_process_newly_ready_earlier_task(tmp_path, m
             state = cpu(cid)
         return 'GRAFT_MD='+json.dumps(state)
     monkeypatch.setattr(md_gbsa, 'remote_call', remote)
-    monkeypatch.setattr(md_gbsa_local, 'poll', lambda settings, cid, *a, **kw: cpu(cid))
+    first_prepared = threading.Event()
+    def prepare_frame(settings, cid, replica, root):
+        events.append(('prepare-frame', cid))
+        if cid == ready:
+            cpu_busy.set()
+            assert refilled.wait(3)
+            assert first_prepared.wait(3)
+        else:
+            assert cid == first
+            first_prepared.set()
+        raise RuntimeError('checked refill during frame preparation')
+    monkeypatch.setattr(md_gbsa_local, 'prepare_frames', prepare_frame)
     monkeypatch.setattr(md_gbsa, '_MD_ADMISSION_INTERVAL', .01, raising=False)
     monkeypatch.setattr(md_gbsa, 'prepare', lambda *a: None)
     monkeypatch.setattr(guard, 'register_md_remote', lambda *a: None)
     monkeypatch.setattr(guard, 'active_jobs', lambda *a: [])
     monkeypatch.setattr(guard, 'submission_guard', lambda *a, **kw: nullcontext())
-    md_gbsa.run(SimpleNamespace(db_path=db, output=tmp_path, schrodinger='/suite'), 1)
-    assert [cid for action, cid in events if action == 'prime'] == [ready, first]
+    if local_compute:
+        with pytest.raises(RuntimeError, match='checked refill during frame preparation'):
+            md_gbsa.run(SimpleNamespace(db_path=db, output=tmp_path, schrodinger='/suite'), 1)
+        assert {cid for action, cid in events if action == 'prepare-frame'} == {ready, first}
+    else:
+        md_gbsa.run(SimpleNamespace(db_path=db, output=tmp_path, schrodinger='/suite'), 1)
+        assert [cid for action, cid in events if action == 'prime'] == [ready, first]
     assert [cid for action, cid in events if action == 'md-start'] == [queued]
     progress = json.loads((directory/'progress.json').read_text())
-    assert progress[str((first, 0))]['phase'] == 'prime'
-    assert progress[str((ready, 0))]['phase'] == 'prime'
+    assert progress[str((first, 0))]['phase'] == ('frames' if local_compute else 'prime')
+    assert progress[str((ready, 0))]['phase'] == ('frames' if local_compute else 'prime')
     assert progress[str((queued, 0))]['status'] == 'running'
     assert not any(t.name == 'graft-md-admission' for t in threading.enumerate())
     assert database.completed_md_ids(db, 1) == set()

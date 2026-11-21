@@ -83,6 +83,32 @@ def test_ready_molecule_frames_share_one_native_sixteen_slot_queue(pool):
     assert len(state['commands'])==1
 
 
+def test_identified_pool_poll_cannot_admit_a_new_parent(pool):
+    base, roots, state, helper = pool
+    helper.poll(roots[0], Path('/suite'))
+    assert adapter.poll_existing(helper, roots[1], Path('/suite'))['status'] == 'running'
+    assert len(state['commands']) == 1
+    batch = adapter.pool_binding(roots[0])
+    (batch/'prime/prime.job.json').unlink()
+    with pytest.raises(RuntimeError, match='missing or uncertain'):
+        adapter.poll_existing(helper, roots[0], Path('/suite'))
+    assert len(state['commands']) == 1
+
+
+def test_identified_poll_rechecks_journal_at_native_call(pool):
+    base, roots, state, helper = pool
+    helper.poll(roots[0], Path('/suite'))
+    batch = adapter.pool_binding(roots[0])
+    original = helper.poll
+    def remove_journal_then_poll(root, suite):
+        (batch/'prime/prime.job.json').unlink()
+        return original(root, suite)
+    helper.poll = remove_journal_then_poll
+    with pytest.raises(RuntimeError, match='journal changed; no submission'):
+        adapter.poll_existing(helper, roots[0], Path('/suite'))
+    assert len(state['commands']) == 1
+
+
 def test_first_ready_molecule_launches_while_later_frames_wait_for_host(pool):
     base,roots,state,helper=pool
     request=roots[1]/'input.json'
@@ -191,7 +217,7 @@ def test_unjournaled_old_launch_cannot_be_admitted_as_new_pooled_work(pool):
     assert not state['commands']
 
 
-@pytest.mark.parametrize('pool', [(180, 20, 20), (192, 7, 3)], indirect=True)
+@pytest.mark.parametrize('pool', [(180, 20, 20), (192, 7, 3), (192, 5, 40)], indirect=True)
 def test_pool_uses_actual_maegz_frame_count_and_requested_budget(pool):
     base, roots, state, helper = pool
     helper.poll(roots[0], Path('/suite'))

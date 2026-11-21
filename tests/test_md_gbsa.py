@@ -623,7 +623,7 @@ def test_md_commits_complete_molecule_before_slow_or_failed_peer(db, monkeypatch
         if cid == 1:
             # Cached results are revalidated through the native/transport poll;
             # every replica must be checked again before the molecule commits.
-            if replica < replicas-1:
+            if not local_compute and replica < replicas-1:
                 assert database.md_gbsa_rows(db,1)[1][1] is None
             return complete(cid,replica)
         with database.connect(db) as conn:
@@ -642,7 +642,26 @@ def test_md_commits_complete_molecule_before_slow_or_failed_peer(db, monkeypatch
         return 'GRAFT_MD='+json.dumps(poll(cid,replica))
     monkeypatch.setattr(md_gbsa,'remote_call',remote)
     if local_compute:
-        monkeypatch.setattr(md_gbsa_local,'poll',lambda config,cid,replica,*a,**kw:poll(cid,replica))
+        import threading
+        committed = threading.Event()
+        store = database.store_md_gbsa_result
+        def store_then_signal(*a):
+            store(*a)
+            if a[2] == 1:
+                committed.set()
+        def prepare_frames(config,cid,replica,root):
+            if cid == 2:
+                assert committed.wait(3)
+                poll(cid,replica)
+                return dict(phase='md',status='running')
+            target = md_gbsa_local.task_root(config,cid,replica)
+            target.mkdir(parents=True,exist_ok=True)
+            native.save(target/'input.json',{})
+            native.save(target/'result.json',complete(cid,replica))
+            return dict(phase='prime',status='pending',frames_prepared=True)
+        monkeypatch.setattr(database,'store_md_gbsa_result',store_then_signal)
+        monkeypatch.setattr(md_gbsa_local,'prepare_frames',prepare_frames)
+        monkeypatch.setattr(md_gbsa_local,'collect_result',lambda config,cid,replica,*a:poll(cid,replica))
     args = SimpleNamespace(db_path=db,output=db.parent,schrodinger=Path('/suite'))
     with pytest.raises(RuntimeError,match='later molecule transfer failed'):
         md_gbsa.run(args,1)

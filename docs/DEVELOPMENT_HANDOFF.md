@@ -1,5 +1,94 @@
 # Graft Development Handoff
 
+## Fill the 192-core post-MD Prime queue across compounds (2026-11-21)
+
+**Confirmed user request:** post-MD Prime calculations must be able to use all
+192 configured CPU slots. Iter1 native evidence showed 250 one-compound batches,
+each with five snapshots, and a maximum of only five simultaneous CPU tasks.
+
+**Implementation:** the independent MD worker prepares frames in up to four I/O
+threads and collects/validates outputs in up to four separate I/O threads.
+Only the owning thread admits native Prime work and updates SQLite. A new native
+batch accumulates at least a full configured CPU wave across distinct compound
+IDs (39 compounds / 195 snapshots for five snapshots and 192 slots); the final
+smaller wave is flushed once no further MD/frame inputs are coming. The existing
+pool combines actual ready snapshots into one MAEGZ, sets NJOBS to the actual
+frame count, and retains HOST localhost:192 as the concurrency cap. Snapshot
+protocol, energies, REAL_MIN options, molecular/frame identities and replica
+separation do not change. No new native options or scientific helper versions
+are introduced.
+
+GPU admission continues independently while frames accumulate and CPU work
+runs. Existing pool bindings, individual native journals and uncertain intents
+recover exactly; cross-project Glide/Prime exclusion and native parent/child
+completion checks remain mandatory. Cached outputs only nominate collection;
+each complete ensemble is reverified and archived before immediate owner-thread
+persistence. Every replica must be verified in this invocation before a compound
+can commit. An I/O error stops new preparation/submission, drains already ready
+verified outputs for persistence, and preserves uncommitted work for restart.
+Native queues, results and frozen settings must never be reset to apply this.
+
+Identified native parents use an operational poll-existing action, avoiding
+unrelated global admission queries while recovering/publishing results. The
+remote adapter requires a nonempty saved JobId before entering the poll and
+again at the actual native call; missing/uncertain/changed journals refuse new
+submission. New batches and uncertain recovery retain the full submission
+guard and cross-project exclusion. Regression cases cover a journal disappearing
+between checks and the worker choosing this non-submitting path.
+
+**Verification:** full suite 3,189 passed, eight skipped; affected MD,
+recovery, cleanup, reference-cache and guard cases passed. Regressions cover
+40 compounds / 200 actual snapshots with HOST localhost:192, a small final
+wave, full-wave launch before an unrelated slow/failed preparation, owner-only
+SQLite persistence, cached-result rejection during preparation, and draining
+verified results after peer I/O failure. Existing multi-replica revalidation,
+legacy/uncertain pool recovery, checksum, native parent/children and cleanup
+gates pass. Compile/import and diff checks pass. Mock energy tests do not
+establish scientific accuracy or guarantee live CPU utilization.
+
+**Operational application:** replaced only the iter2 local controller, preserving
+its frozen 250-compound selection/settings, existing native jobs and committed
+scores. Recovered and committed the 25 earlier one-compound Prime results. The
+new native parent prime-0-6b00e3a1 was submitted at approximately 09:20 KST with
+43 compounds, 215 snapshots, HOST localhost:192 and NJOBS 215. Its JobControl
+record and batch request match; native child registration was observed in
+progress. This verifies live batching/admission, not sustained 100% CPU usage.
+Additional focused coverage totals 388 passing cases after the identified-parent
+poll integration test. Existing multiprocessing deprecation warnings remain.
+
+## Refill MD GPU slots as native status replies arrive (2026-11-20)
+
+**Confirmed user request:** avoid a trough in GPU utilization while completed
+MDs wait for a complete sequential status sweep before replacement submission.
+The observed 250-compound run had a 20-GPU cap; 18 of its initial 20 native
+Slurm jobs had completed while only three replacements had been submitted.
+
+**Implementation:** reconcile missing/queued progress with native journals before
+new admission. Query existing owners using at most four concurrent read-only
+MD status calls; serialize checkpoint updates, uncertain-intent recovery and
+new submissions in the admission owner. Refill immediately after each verified
+completion/failure reply rather than waiting for unrelated status queries.
+The background admission monitor continues independently of frame transfer and
+Prime work. Adapter upload is locked once per endpoint/run/hash to prevent
+concurrent queries racing on its upload file.
+
+Preserve the frozen GPU cap, native parent/children completion checks, intent
+before launch, unknown ownership reservations, shutdown/join/error propagation,
+SQLite ownership and score/ensemble validation. No scientific helper, protocol,
+existing JobId or result is rewritten; the driver still supervises stages
+sequentially. Scheduling changes load at the next MD worker invocation.
+
+**Verification:** 380 MD, recovery, cleanup, reference-cache and submission-guard
+tests passed. A blocked peer-status regression verifies that a replacement is
+launched before that peer replies, with durable launch intent and the GPU cap
+preserved. Concurrent adapter setup is uploaded exactly once. Existing lost
+reply, missing progress, parent/child completion, CPU overlap and shutdown tests
+pass; compile/import and diff checks pass. Mock tests do not establish production
+throughput or scientific accuracy. Applied to the existing iter1 run by sending
+SIGINT only to its local MD controller; the supervisor started a new controller.
+The frozen selection/settings were unchanged and existing Slurm jobs continued;
+no native job was cancelled or scientific result reset.
+
 ## Reuse annotated reference scores with unknown Amber context (2026-11-20)
 
 **Confirmed user request:** after clearing execution data, a fresh run must reuse

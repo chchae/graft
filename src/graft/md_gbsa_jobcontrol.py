@@ -384,6 +384,25 @@ def install_pool(helper):
     helper.poll=poll
 
 
+def poll_existing(helper, root, suite):
+    """Poll/publish an identified parent without ever admitting native work."""
+    batch = pool_binding(root)
+    journal = (batch/'prime' if batch else root/'prime')/'prime.job.json'
+    if not journal.exists() or not json.loads(journal.read_text()).get('job_id'):
+        raise RuntimeError('Existing Prime parent is missing or uncertain; no submission')
+    original = helper.native.poll_job
+    def identified_only(folder, phase, command, suite):
+        path = folder/f'{phase}.job.json'
+        if not path.exists() or not json.loads(path.read_text()).get('job_id'):
+            raise RuntimeError('Existing Prime journal changed; no submission')
+        return original(folder, phase, command, suite)
+    helper.native.poll_job = identified_only
+    try:
+        return helper.poll(root, suite)
+    finally:
+        helper.native.poll_job = original
+
+
 def main():
     # Adapter is stored below <owned shared run>/control/. Import the exact
     # original helper next to owner.json; never replace its pinned source.
@@ -392,6 +411,17 @@ def main():
     helper = importlib.import_module('md_gbsa_local_native')
     install(helper.native)
     install_pool(helper)
+    if len(sys.argv) == 3 and sys.argv[1] == 'poll-existing':
+        task = Path(sys.argv[2]).resolve()
+        relative = task.relative_to(root)
+        if (len(relative.parts) != 2 or not re.fullmatch(r'CMPID_[0-9]+', relative.parts[0])
+                or not re.fullmatch(r'replica[0-9]+', relative.parts[1])):
+            raise RuntimeError('Prime task is outside the owned run')
+        with (task/'controller.lock').open('a') as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = poll_existing(helper, task, Path(os.environ['SCHRODINGER']))
+        print('GRAFT_MD='+json.dumps(result))
+        return
     helper.main()
 
 

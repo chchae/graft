@@ -1,5 +1,6 @@
 """Independent MD ensemble worker: durable SQLite ownership and remote journals."""
 from contextlib import contextmanager, nullcontext
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 from pathlib import Path
@@ -15,6 +16,7 @@ from graft.states import CompoundState as State
 from graft.stages._logging import progress as log_progress
 
 _dispatch_uploaded = set()
+_dispatch_upload_lock = threading.Lock()
 _MD_ADMISSION_INTERVAL = 5.0
 
 
@@ -85,10 +87,11 @@ def remote_call(settings, action, root, *extra):
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         helper = settings['root']+'/control/md-dispatch-'+digest+'.py'
         key = (settings['ssh_host'], helper)
-        if key not in _dispatch_uploaded:
-            ssh(settings['ssh_host'], 'mkdir -p '+shlex.quote(settings['root']+'/control'))
-            upload(settings['ssh_host'], source, helper)
-            _dispatch_uploaded.add(key)
+        with _dispatch_upload_lock:
+            if key not in _dispatch_uploaded:
+                ssh(settings['ssh_host'], 'mkdir -p '+shlex.quote(settings['root']+'/control'))
+                upload(settings['ssh_host'], source, helper)
+                _dispatch_uploaded.add(key)
     elif Path(helper).name == 'md_gbsa_local_native.py':
         from graft.md_gbsa_local import control_helper
         helper = str(control_helper(settings))
@@ -146,7 +149,12 @@ def _continuous_md_admission(settings, tasks, progress, status_file):
 
 
 def admit_md(settings, tasks, progress, status_file, *, lock=None, reconcile_unstarted=True, stop=None):
-    """Reconcile native GPU ownership, then fill vacancies independently of CPU work."""
+    """Recover ownership, then refill each verified vacancy as status replies arrive."""
+    tasks = tuple(tasks)
+
+    def stopping():
+        return stop is not None and stop.is_set()
+
     def poll(action, root):
         result = response(remote_call(settings, action, root))
         valid = (result.get('phase') == 'frames' and result.get('status') == 'pending' or
@@ -157,48 +165,74 @@ def admit_md(settings, tasks, progress, status_file, *, lock=None, reconcile_uns
             raise RuntimeError('Invalid MD admission response; GPU ownership retained')
         return result
 
-    for cid, replica, root in tasks:
-        if stop is not None and stop.is_set():
+    def statuses(selected):
+        if not selected or stopping():
             return
+        # Only read-only native queries run concurrently. The admission owner
+        # alone records replies and submits jobs; slow peers cannot hold up a
+        # verified completion. Bound JobServer/SSH load independently of GPUs.
+        with ThreadPoolExecutor(max_workers=min(4, settings['gpus']),
+                                thread_name_prefix='graft-md-status') as pool:
+            futures = {pool.submit(poll, 'md-status', task[2]): task for task in selected}
+            try:
+                for future in as_completed(futures):
+                    if stopping():
+                        return
+                    yield futures[future], future.result()
+            finally:
+                for future in futures:
+                    future.cancel()
+
+    def record(task, result):
+        cid, replica, root = task
         key = str((cid, replica))
-        prior = _progress_snapshot(progress, lock).get(key, {})
-        if prior and (prior.get('phase') != 'md' or prior.get('status') == 'failed'):
-            continue
-        if not reconcile_unstarted and prior.get('status') == 'unstarted':
-            continue
-        result = poll('md-status', root)
         _record_progress(progress, key, result, status_file, lock)
-    # Unknown launch intents own capacity too. Reconcile them without admitting
-    # another job into their slot; native journals prevent duplicate submission.
-    for cid, replica, root in tasks:
-        if stop is not None and stop.is_set():
-            return
-        key = str((cid, replica))
-        prior = _progress_snapshot(progress, lock).get(key, {})
-        if prior.get('phase') == 'md' and prior.get('status') == 'pending':
+        # Unknown launch intents retain capacity. Reconcile their own native
+        # journal without authorizing a second task to use that reservation.
+        if result.get('phase') == 'md' and result.get('status') == 'pending' and not stopping():
             _record_progress(progress, key, poll('md-start', root), status_file, lock)
+
+    def refill():
+        snapshot = _progress_snapshot(progress, lock)
+        active = sum(snapshot[str((cid, replica))].get('phase') == 'md' and
+                     snapshot[str((cid, replica))].get('status') in ('running', 'pending')
+                     for cid, replica, root in tasks)
+        for cid, replica, root in tasks:
+            if stopping() or active >= settings['gpus']:
+                return
+            key = str((cid, replica))
+            if snapshot[key].get('status') != 'unstarted':
+                continue
+            # Persist intent before SSH. A lost reply retains this slot and
+            # stops admission; native journals recover it on the next pass.
+            _record_progress(progress, key,
+                             dict(phase='md', status='pending', reason='MD admission in progress'),
+                             status_file, lock)
+            result = poll('md-start', root)
+            _record_progress(progress, key, result, status_file, lock)
+            if result.get('phase') == 'md' and result.get('status') in ('running', 'pending'):
+                active += 1
+            (print if result['status']=='failed' else log_progress)(
+                f"CMPID_{cid} replica {replica+1}: {result.get('phase','md')} {result['status']}")
+
     snapshot = _progress_snapshot(progress, lock)
-    active = sum(snapshot[str((cid, replica))].get('phase') == 'md' and
-                 snapshot[str((cid, replica))].get('status') in ('running', 'pending')
-                 for cid, replica, root in tasks)
-    for cid, replica, root in tasks:
-        if stop is not None and stop.is_set():
-            return
-        key = str((cid, replica))
-        prior = _progress_snapshot(progress, lock).get(key, {})
-        if prior.get('status') != 'unstarted' or active >= settings['gpus']:
-            continue
-        # An unstarted reservation is written before SSH. On a lost reply the
-        # next poll consults the remote journal before freeing or reusing it.
-        _record_progress(progress, key,
-                         dict(phase='md', status='pending', reason='MD admission in progress'),
-                         status_file, lock)
-        result = poll('md-start', root)
-        _record_progress(progress, key, result, status_file, lock)
-        if result.get('phase') == 'md' and result.get('status') in ('running', 'pending'):
-            active += 1
-        (print if result['status']=='failed' else log_progress)(
-            f"CMPID_{cid} replica {replica+1}: {result.get('phase','md')} {result['status']}")
+    recovery, owners = [], []
+    for task in tasks:
+        prior = snapshot.get(str(task[:2]), {})
+        if not prior or (reconcile_unstarted and prior.get('status') == 'unstarted'):
+            recovery.append(task)
+        elif prior.get('phase') == 'md' and prior.get('status') in ('running', 'pending'):
+            owners.append(task)
+    # Missing/stale queued records may hide native jobs. Establish their
+    # reservations before any fresh launch, including recovery after lost progress.
+    for task, result in statuses(recovery):
+        record(task, result)
+    if stopping():
+        return
+    refill()
+    for task, result in statuses(owners):
+        record(task, result)
+        refill()
 
 
 def pose_source(args, iteration, ranking, run):
@@ -428,12 +462,15 @@ def run(args, iteration):
     # Revalidate cached completed ensembles/collected coordinates first. A saved
     # progress snapshot alone must never bypass native/transport verification.
     tasks.sort(key=lambda t: progress.get(str((t[0],t[1])),{}).get('status') != 'done')
-    # Prepare and submit each ready molecule in the same pass. Preparing ALL
-    # ready frames first delays the first Prime launch by every peer's extraction
-    # and transfer. The native pool still includes other already prepared inputs,
-    # and retains its host reservation while later molecules become ready.
+    # Local Prime overlaps bounded frame preparation and result collection with
+    # full native CPU waves. The remote-only backend retains its existing poll.
     remaining = list(tasks)
     with _continuous_md_admission(settings, tasks, progress, status_file) as (progress_lock, admission_errors):
+        if settings.get('local_compute'):
+            from graft.stages import md_gbsa_pipeline
+            md_gbsa_pipeline.run(args, iteration, settings, tasks, progress, status_file,
+                                 directory, resolved, progress_lock, admission_errors)
+            remaining.clear()
         while remaining:
             if admission_errors:
                 raise admission_errors[0]

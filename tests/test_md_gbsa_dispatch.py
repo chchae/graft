@@ -44,24 +44,22 @@ def test_twenty_gpu_owners_and_four_queued_start_before_any_gbsa(tmp_path, monke
         return 'GRAFT_MD='+json.dumps(result)
     monkeypatch.setattr(md_gbsa, 'remote_call', remote)
     if local_compute:
-        def local_poll(settings, cid, replica, root, archive, **kw):
+        def prepare_frame(settings, cid, replica, root):
             assert [cid for op, cid in events if op == 'md-start'] == [21, 22, 23, 24]
             events.append(('prepare-frame', cid))
-            if not kw.get('prepare_only'):
-                events.append(('poll', cid))
-            return dict(phase='prime', status='running')
-        monkeypatch.setattr(md_gbsa_local, 'poll', local_poll)
+            raise RuntimeError('admission checked before frame transfer')
+        monkeypatch.setattr(md_gbsa_local, 'prepare_frames', prepare_frame)
     monkeypatch.setattr(md_gbsa, 'prepare', lambda *a: None)
     monkeypatch.setattr(guard, 'register_md_remote', lambda *a: None)
     monkeypatch.setattr(guard, 'active_jobs', lambda *a: [])
     monkeypatch.setattr(guard, 'submission_guard', lambda *a, **kw: nullcontext())
-    md_gbsa.run(SimpleNamespace(db_path=db, output=tmp_path, schrodinger='/suite'), 1)
-    assert len([e for e in events if e[0] == 'poll']) == 20
     if local_compute:
-        # Submit the first ready molecule before extracting/transferring peers.
-        # A slow or failed later extraction must not delay the first launch.
-        cpu_events=[e for e in events if e[0] in ('prepare-frame','poll')]
-        assert cpu_events[:4]==[('prepare-frame',1),('poll',1),('prepare-frame',2),('poll',2)]
+        with pytest.raises(RuntimeError, match='admission checked before frame transfer'):
+            md_gbsa.run(SimpleNamespace(db_path=db, output=tmp_path, schrodinger='/suite'), 1)
+        assert any(e[0] == 'prepare-frame' for e in events)
+    else:
+        md_gbsa.run(SimpleNamespace(db_path=db, output=tmp_path, schrodinger='/suite'), 1)
+        assert len([e for e in events if e[0] == 'poll']) == 20
     assert database.completed_md_ids(db, 1) == set()  # Native MD is not an ensemble score.
 
 

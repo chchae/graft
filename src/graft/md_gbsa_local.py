@@ -117,15 +117,14 @@ def task_root(settings, cid, replica):
     return Path(settings['local_compute']['root'])/f'CMPID_{cid}'/f'replica{replica+1:02d}'
 
 
-def poll(settings, cid, replica, remote_root, archive, *, allow_submit=True, prepare_only=False):
+def prepare_frames(settings, cid, replica, remote_root):
+    """Verify native MD completion and publish a checksummed Prime input marker."""
     # Reverify upstream native completion on its own JobServer before using frames.
     result = md_gbsa.response(md_gbsa.remote_call(settings, 'frames', remote_root))
     if result['status'] != 'frames':
         return result
     local = settings['local_compute']
     root = task_root(settings, cid, replica)
-    if not allow_submit and not (root/'prime/prime.job.json').exists():
-        return dict(status='pending', phase='prime', reason='Cross-project Prime submission fence')
     protocol = dict(settings['protocol'], seed=1+(settings['protocol']['seed']+replica-1)%2147483647)
     config = dict(mode='adam_prime_v1', id=cid, slots=local['slots'], protocol=protocol,
                   files=result['files'], source_root=remote_root)
@@ -139,10 +138,17 @@ def poll(settings, cid, replica, remote_root, archive, *, allow_submit=True, pre
         download(settings['ssh_host'], remote_root+'/'+name, root/name, expected)
     if not marker.exists():
         save(marker, config)  # Publish only once every checksummed input exists.
-    if prepare_only:
-        return dict(status='pending', phase='prime', reason='Frames prepared for pooled Prime batch')
-    result = md_gbsa.response(md_gbsa.remote_call(local, 'poll', str(root)))
+    return dict(status='pending', phase='prime', frames_prepared=True,
+                reason='Frames prepared for pooled Prime batch')
+
+
+def collect_result(settings, cid, replica, archive, result=None):
+    """Reverify native Prime completion before collecting one complete ensemble."""
+    root = task_root(settings, cid, replica)
+    if result is None:
+        result = md_gbsa.response(md_gbsa.remote_call(settings['local_compute'], 'verify', str(root)))
     if result['status'] == 'done':
+        protocol = dict(settings['protocol'], seed=1+(settings['protocol']['seed']+replica-1)%2147483647)
         if result['id'] != cid or result['protocol'] != protocol:
             raise RuntimeError('Prime result identity/protocol mismatch')
         # Collect coordinates and launch evidence before the database can commit.
@@ -157,6 +163,23 @@ def poll(settings, cid, replica, remote_root, archive, *, allow_submit=True, pre
         save(destination/'collected.json', dict(output_sha256=digest(destination/'prime/prime_mmgbsa-out.maegz'),
                                                 result=result))
     return result
+
+
+def poll(settings, cid, replica, remote_root, archive, *, allow_submit=True,
+         prepare_only=False, prepared=False, collect=True, existing=False):
+    root = task_root(settings, cid, replica)
+    if not allow_submit and not prepare_only and not (root/'prime/prime.job.json').exists():
+        return dict(status='pending', phase='prime', reason='Cross-project Prime submission fence')
+    if not prepared:
+        result = prepare_frames(settings, cid, replica, remote_root)
+        if result.get('phase') != 'prime' or result.get('status') != 'pending':
+            return result
+    if prepare_only:
+        return dict(status='pending', phase='prime', reason='Frames prepared for pooled Prime batch')
+    local = settings['local_compute']
+    action = 'poll-existing' if existing else 'poll'
+    result = md_gbsa.response(md_gbsa.remote_call(local, action, str(root)))
+    return collect_result(settings, cid, replica, archive, result) if collect else result
 
 
 def cleanup_committed(args, iteration, settings, directory):
